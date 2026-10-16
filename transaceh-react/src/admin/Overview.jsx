@@ -1,8 +1,7 @@
-import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { schedById, routeById, agencyById, feeFor } from '@/lib/domain.js';
+import { schedById, routeById } from '@/lib/domain.js';
 import { fmtRp, todayStr } from '@/lib/utils.js';
-import { Icon, StatCard, useChart } from '@/components/ui.jsx';
+import { StatCard, useChart } from '@/components/ui.jsx';
 
 export function Overview() {
   const bk = DB.load('bookings', []).filter((b) => b.status === 'paid' || b.status === 'done');

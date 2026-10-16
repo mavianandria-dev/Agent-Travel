@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { schedById, schedReady, takenSeats, seatsLeft, routeById, vehicleById, driverById, vehLayout, schedSeatCap, feeFor, audit, notify, processWaiting, vehName } from '@/lib/domain.js';
+import { schedById, schedReady, takenSeats, seatsLeft, routeById, vehicleById, driverById, vehLayout, schedSeatCap, feeFor, audit, notify, vehName } from '@/lib/domain.js';
 import { fmtRp, todayStr, uid } from '@/lib/utils.js';
 import { Icon, CabinGrid, fmtDate } from '@/components/ui.jsx';
 
 const STEP_LABELS = ['Rute', 'Tanggal', 'Armada', 'Kursi', 'Bayar'];
-const STEP_ICONS = ['map-pin', 'calendar', 'bus', 'armchair', 'wallet'];
 
 function WizardSteps({ step }) {
   return (
@@ -126,7 +125,6 @@ export default function Search() {
   const routes = DB.load('routes', []).filter((r) => r.active);
   const stepSchedules = () => DB.load('schedules', []).filter((x) => x.routeId === bw.routeId && x.date === bw.date && x.status === 'open').sort((a, b) => a.time.localeCompare(b.time));
 
-  const setStep = (step) => setBw({ ...bw, step });
 
   const wizNext = () => {
     if (bw.step === 1 && !bw.routeId) return toast('Pilih rute dulu', 'warn');

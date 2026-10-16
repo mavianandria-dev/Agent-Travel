@@ -1,5 +1,5 @@
 import { DB } from './db.js';
-import { uid, todayStr } from './utils.js';
+import { uid, todayStr, SIM_TYPES } from './utils.js';
 export { uid, todayStr };
 
 /* Diekstrak dari index.html — pure domain logic, tanpa DOM. */

@@ -4,7 +4,7 @@ import { simParse, vehLayout, bookingsOf } from './domain.js';
 
 /* Diekstrak dari index.html (seed v11 + migrasi). Dijalankan sekali via initDB(). */
 export function initDB(){
-  if(localStorage.getItem('at_seeded_v11')) return;
+  if(!localStorage.getItem('at_seeded_v11')){
   const svgURI=s=>'data:image/svg+xml;utf8,'+encodeURIComponent(s);
   const seedAvatar=(ini,c1,c2)=>svgURI(`<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='${c1}'/><stop offset='1' stop-color='${c2}'/></linearGradient></defs><rect width='160' height='160' fill='url(#g)'/><text x='80' y='94' font-family='Arial,sans-serif' font-size='58' font-weight='bold' fill='#fff' text-anchor='middle'>${ini}</text></svg>`);
   const seedSim=(t,nm,num,exp)=>svgURI(`<svg xmlns='http://www.w3.org/2000/svg' width='320' height='200'><rect width='320' height='200' rx='16' fill='#0b2447'/><rect x='16' y='16' width='288' height='168' rx='12' fill='none' stroke='#38bdf8' stroke-width='2'/><text x='28' y='52' font-family='Arial,sans-serif' font-size='22' font-weight='bold' fill='#7dd3fc'>SIM ${t} • DEMO</text><text x='28' y='92' font-family='Arial,sans-serif' font-size='17' font-weight='bold' fill='#fff'>${nm}</text><text x='28' y='118' font-family='Arial,sans-serif' font-size='14' fill='#cbd5e1'>${num}</text><text x='28' y='144' font-family='Arial,sans-serif' font-size='14' fill='#cbd5e1'>Berlaku s.d. ${exp}</text><text x='28' y='168' font-family='Arial,sans-serif' font-size='11' fill='#64748b'>Contoh seed — ganti dengan foto asli</text></svg>`);
@@ -78,6 +78,7 @@ export function initDB(){
   DB.save('banners',[{id:'B1',title:'Diskon 20% Rute Aceh Jaya – Banda Aceh',sub:'Kode: HEMAT20 • s.d. akhir bulan',active:true}]);
   DB.save('waiting',[]);
   localStorage.setItem('at_seeded_v11','1');
+  }
 /* Migrasi DB lama (v1) ke format form terbaru: rute pakai nama kabupaten/kota + agencyIds/driverIds */
 (function migrateRoutesV2(){
   try{
@@ -95,6 +96,78 @@ export function initDB(){
     });
     if(ch) DB.save('routes',rs);
     localStorage.setItem('at_seeded_v2','1');
+  }catch(e){}
+})();
+/* Migrasi SIM string lama → simType + simExp terstruktur + field dokumen & status user */
+(function migrateSimV3(){
+  try{
+    const ds=DB.load('drivers',[]); let ch=false;
+    ds.forEach(d=>{
+      if(!d.simType||!d.simExp){ const s=simParse(d); d.simType=s.type; d.simExp=s.exp; delete d.sim; ch=true; }
+      if(!('simPhoto' in d)){ d.simPhoto=''; ch=true; }
+      if(!('ktpPhoto' in d)){ d.ktpPhoto=''; ch=true; }
+      if(!('selfie' in d)){ d.selfie=''; ch=true; }
+      ['birthPlace','birthDate','gender','address','nik','marital','education','emName','emPhone','emRelation','simNumber'].forEach(k=>{ if(!(k in d)){ d[k]=k==='gender'?'Laki-laki':k==='marital'?'Belum menikah':''; ch=true; } });
+    });
+    if(ch) DB.save('drivers',ds);
+    const us=DB.load('users',[]); let uh=false;
+    us.forEach(x=>{
+      if(!('status' in x)){ x.status='active'; uh=true; }
+      if(!('wa' in x)){ x.wa=x.phone||'-'; uh=true; }
+      if(x.role==='pengemudi'&&x.status==='pending'){
+        if(x.agencyId){ x.status='active'; x.profileStep='done'; uh=true; }
+      }
+    });
+    if(uh) DB.save('users',us);
+    const stranded=us.filter(x=>x.role==='pengemudi'&&x.status==='pending'&&!x.agencyId).map(x=>x.id);
+    if(stranded.length){
+      DB.save('users',DB.load('users',[]).filter(x=>!stranded.includes(x.id)));
+      DB.save('drivers',DB.load('drivers',[]).filter(d=>{ const em=(d.userEmail||'').toLowerCase();
+        const ou=DB.load('users',[]).find(x=>x.email===em&&x.role==='pengemudi');
+        return !(!d.agencyId&&(d.trips||0)===0&&!ou&&!DB.load('schedules',[]).some(s=>s.driverId===d.id)); }));
+      uh=true;
+    }
+    const ds2=DB.load('drivers',[]); let dh=false;
+    ds2.forEach(d=>{ if(d.userEmail){ const own=DB.load('users',[]).find(x=>x.email===d.userEmail.toLowerCase()&&x.role==='pengemudi'&&x.status==='active');
+      if(own&&d.status!=='aktif'){ d.status='aktif'; dh=true; } } });
+    if(dh) DB.save('drivers',ds2);
+  }catch(e){}
+})();
+/* Migrasi: pastikan semua armada punya inactiveSeats (untuk form edit bangku) */
+(function migrateVehicles(){
+  try{
+    const vs=DB.load('vehicles',[]); let ch=false;
+    vs.forEach(v=>{
+      if(!Array.isArray(v.inactiveSeats)){ v.inactiveSeats=[]; ch=true; }
+      if(!Array.isArray(v.layout)||v.layout.length!==28){ v.layout=vehLayout(v); ch=true; }
+      v.layout.forEach(c=>{ if(c.type==='door'||c.type==='aisle'){ c.type='empty'; c.sid=null; ch=true; } });
+      const di=v.layout.map((c,i)=>c.type==='driver'?i:-1).filter(i=>i>=0);
+      const okPair=di.length===2&&di[1]===di[0]+1&&(di[0]%4)===2;
+      if(!okPair&&di.length){
+        const r=Math.floor(di[0]/4), a=r*4+2, b=r*4+3;
+        const clashSids=[v.layout[a],v.layout[b]].filter(c=>c&&(c.type==='seat'||c.type==='off')&&c.sid).map(c=>c.sid);
+        const booked=clashSids.length&&DB.load('schedules',[]).filter(s=>s.vehicleId===v.id&&s.date>=todayStr(0)).some(s=>bookingsOf(s.id).some(x=>(x.seats||[]).some(st=>clashSids.includes(st))));
+        if(!booked){
+          di.forEach(i=>{ v.layout[i]={sid:null,type:'empty'}; });
+          v.layout[a]={sid:'DRV',type:'driver'}; v.layout[b]={sid:'DRV2',type:'driver'};
+          ch=true;
+        }
+      }
+      const n=v.layout.filter(c=>c.type==='seat').length;
+      if(v.capacity!==n){ v.capacity=n; ch=true; }
+      if(typeof v.seatSeq!=='number'){ v.seatSeq=v.layout.reduce((a,c)=>{const m=c.sid&&/^A(\d+)$/.exec(c.sid);return m?Math.max(a,+m[1]):a;},6); ch=true; }
+      const off=v.layout.filter(c=>c.type==='off').map(c=>c.sid).filter(Boolean);
+      if(JSON.stringify(off)!==JSON.stringify(v.inactiveSeats)){ v.inactiveSeats=off; ch=true; }
+      const defV={model:'',color:'',chassis:'',engine:'',vtype:'MPV',vtypeOther:'',baggage:'Sedang',tax:'Aktif',stnkExp:'',kir:'',condition:'Baik',ownerName:'',ownerBiz:'',ownerNik:'',ownerAddr:'',ownerPhone:'',ownerEmail:'',ownership:'Milik pribadi',coopDriverId:'',hasEmail:'',docs:[],docOther:'',stnkPhoto:'',ktpOwnerPhoto:'',mainRoute:'',origin:'',dest:'',freq:'Setiap hari',freqOther:'',services:[],opSchedule:'',coopTariff:0,coopSys:'Bagi hasil',coopOther:'',fleetCount:1,hasDriver:'Ya',drvName:'',drvPhone:'',drvSim:'',drvSimExp:'',drvExp:'',hasBackup:'Tidak',backName:'',backPhone:'',backSim:'',backSimExp:''};
+      Object.keys(defV).forEach(k=>{ if(v[k]===undefined||v[k]===null){ v[k]=defV[k]; ch=true; } });
+      if(!v.hasEmail){ v.hasEmail=v.ownerEmail?'Ya':'Tidak'; ch=true; }
+      if(v.ownership==='Kerja sama'){ v.ownership='Milik Pengemudi'; ch=true; }
+      if(!Array.isArray(v.docs)){ v.docs=[]; ch=true; }
+      if(!Array.isArray(v.services)){ v.services=[]; ch=true; }
+      if(v.services.includes('Pool ke pool')){ v.services=v.services.map(s=>s==='Pool ke pool'?'Antar jemput terminal':s); ch=true; }
+      if(!Array.isArray(v.facilities)){ v.facilities=['AC']; ch=true; }
+    });
+    if(ch) DB.save('vehicles',vs);
   }catch(e){}
 })();
 }

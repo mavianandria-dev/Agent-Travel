@@ -1,5 +1,4 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { DB } from '@/lib/db.js';
 import { T } from '@/lib/i18n.js';
 import { todayStr } from '@/lib/utils.js';
 import { initDB } from '@/lib/seed.js';

@@ -19,7 +19,7 @@ function useClock() {
 }
 
 export default function Header() {
-  const { user, go, t, lang, setLang, openModal, logout, setAgenTab, tick } = useApp();
+  const { user, go, t, lang, setLang, openModal, logout, setAgenTab } = useApp();
   const clock = useClock();
   const unread = user ? DB.load('notifications', []).filter((n) => n.to === user.email && !n.read).length : 0;
 
