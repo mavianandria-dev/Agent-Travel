@@ -12,9 +12,22 @@ export const useApp = () => useContext(AppCtx);
 export const freshBW = () => ({ step: 1, routeId: 'R1', date: todayStr(1), scheduleId: null, seats: [], passengers: [], pickup: '', voucher: '', discount: 0 });
 
 const CUSTOMER_VIEWS = ['home', 'search', 'tickets', 'history', 'profile'];
+export { CUSTOMER_VIEWS };
+
+const roleHome = (role) => (role === 'agen' ? 'agen' : role === 'pengemudi' ? 'driver' : 'admin');
+
+const initialView = () => {
+  try {
+    const u = currentUser();
+    if (u && u.role !== 'pelanggan' && CUSTOMER_VIEWS.includes('home')) return roleHome(u.role);
+  } catch (e) { /* abaikan, pakai home */ }
+  return 'home';
+};
+
+export { roleHome, initialView };
 
 export function AppProvider({ children }) {
-  const [view, setView] = useState('home');
+  const [view, setView] = useState(initialView);
   const [lang, setLangState] = useState(() => localStorage.getItem('at_lang') || 'id');
   const [tick, setTick] = useState(0);
   const [toasts, setToasts] = useState([]);
@@ -41,9 +54,7 @@ export function AppProvider({ children }) {
 
   const go = useCallback((v) => {
     const u = currentUser();
-    const target = (u && u.role !== 'pelanggan' && CUSTOMER_VIEWS.includes(v))
-      ? (u.role === 'agen' ? 'agen' : u.role === 'pengemudi' ? 'driver' : 'admin')
-      : v;
+    const target = (u && u.role !== 'pelanggan' && CUSTOMER_VIEWS.includes(v)) ? roleHome(u.role) : v;
     const my = ++navToken.current;
     setModal(null);
     setNavLoading(true);

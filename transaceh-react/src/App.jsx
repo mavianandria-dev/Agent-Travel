@@ -33,11 +33,16 @@ function Skeleton() {
 }
 
 function Router() {
-  const { view, user, modal, closeModal, setAgenTab, navLoading } = useApp();
+  const { view, user, modal, closeModal, setAgenTab, navLoading, go } = useApp();
 
   useEffect(() => {
     if (AGEN_VIEW_TAB[view]) setAgenTab(AGEN_VIEW_TAB[view]);
   }, [view, setAgenTab]);
+
+  // Pengaman: user non-pelanggan tak boleh berada di view pelanggan (mis. sisa state)
+  useEffect(() => {
+    if (user && user.role !== 'pelanggan' && ['home', 'search', 'tickets', 'history', 'profile'].includes(view)) go(view);
+  }, [view, user, go]);
 
   // H-1 reminder simulation (sekali per mount)
   useEffect(() => {
