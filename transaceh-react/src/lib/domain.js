@@ -95,7 +95,7 @@ export const hm=t=>{const[a,b]=t.split(':').map(Number);return a*60+b;};
 /* Split settlement: tiket (pengemudi) + jasa (agen) + fee (platform).
    schedule.price = TOTAL all-in per kursi yg dilihat pelanggan. */
 export const DEFAULT_SERVICE=10000;
-export function servicePerSeat(s){ const r=s?routeById(s.routeId):null; return Number(s?.serviceFee??r?.serviceFee??DEFAULT_SERVICE)||0; }
+export function servicePerSeat(s){ const r=s?routeById(s.routeId):null; return Number(r?.serviceFee??DEFAULT_SERVICE)||0; }
 export function splitFare(s,nSeats=1,discount=0){
   if(!s) return {ticket:0,service:0,fee:0,total:0};
   const n=Math.max(1,Number(nSeats)||1);
@@ -148,9 +148,9 @@ export function ledgerEligible(e){
 }
 
 /* Usulan rute agen → admin (model hibrida: agen usul, admin eksekusi) */
-export function saveRouteRequest({ agencyId, type, from, to, pickup, note }){
+export function saveRouteRequest({ agencyId, type, from, to, pickup, note, price }){
   const arr=DB.load('routeRequests',[]);
-  const r={id:uid('RQ'),agencyId,type,from,to,pickup:(pickup||'').trim(),note:(note||'').trim(),status:'pending',adminNote:'',createdAt:new Date().toISOString(),decidedAt:null};
+  const r={id:uid('RQ'),agencyId,type,from,to,pickup:(pickup||'').trim(),note:(note||'').trim(),price:Number(price)||0,status:'pending',adminNote:'',createdAt:new Date().toISOString(),decidedAt:null};
   arr.unshift(r); DB.save('routeRequests',arr);
   audit('route_request',type+' '+from+' → '+to+' • '+agencyId);
   DB.load('users',[]).filter(u=>u.role==='superadmin').forEach(u=>notify(u.email,'Usulan rute baru',(agencyById(agencyId)?.name||agencyId)+' mengusulkan '+(type==='rute-baru'?'rute baru':'titik jemput')+': '+from+' → '+to,'app'));
@@ -167,7 +167,7 @@ export function decideRouteRequest(id,approve,adminNote){
   if(approve){
     if(r.type==='rute-baru'){
       const routes=DB.load('routes',[]);
-      const nr={id:uid('R'),from:r.from,to:r.to,distance:'-',duration:'-',basePrice:100000,pickups:r.pickup?['Terminal '+r.from,r.pickup]:['Terminal '+r.from,'Terminal '+r.to],active:true,agencyId:r.agencyId,agencyIds:[r.agencyId],driverId:null,driverIds:[]};
+      const nr={id:uid('R'),from:r.from,to:r.to,distance:'-',duration:'-',basePrice:Number(r.price)>0?Number(r.price):0,serviceFee:DEFAULT_SERVICE,pickups:r.pickup?['Terminal '+r.from,r.pickup]:['Terminal '+r.from,'Terminal '+r.to],active:true,agencyId:r.agencyId,agencyIds:[r.agencyId],driverId:null,driverIds:[]};
       routes.push(nr); DB.save('routes',routes);
       createdRouteId=nr.id;
     }else{

@@ -10,7 +10,6 @@ export function RouteFormModal() {
   const ags = DB.load('agencies', []).filter((a) => a.status === 'active');
   const [from, setFrom] = useState('Aceh Jaya');
   const [to, setTo] = useState('Banda Aceh');
-  const [price, setPrice] = useState('');
   const [serviceFee, setServiceFee] = useState(10000);
   const [agOpen, setAgOpen] = useState(false);
   const [agIds, setAgIds] = useState([]);
@@ -25,7 +24,7 @@ export function RouteFormModal() {
     for (const id of agIds) { const a = agencyById(id); if (!a || a.status !== 'active') { toast('Ada agen tidak aktif tercentang', 'err'); return; } }
     for (const id of drvIds) { const d = driverById(id); if (!d || d.status !== 'aktif' || !agIds.includes(d.agencyId)) { toast('Pengemudi ' + (d?.name || id) + ' tidak valid untuk agen tercentang', 'err'); return; } }
     const arr = DB.load('routes', []);
-    arr.push({ id: uid('R'), from: f, to: t, distance: '-', duration: '-', basePrice: Number(price) || 100000, serviceFee: serviceFee === '' ? 10000 : Number(serviceFee) || 10000, pickups: ['Terminal ' + f, 'Terminal ' + t], active: true, agencyId: agIds[0], agencyIds: agIds, driverId: drvIds[0] || null, driverIds: drvIds });
+    arr.push({ id: uid('R'), from: f, to: t, distance: '-', duration: '-', basePrice: 0, serviceFee: serviceFee === '' ? 10000 : Number(serviceFee) || 10000, pickups: ['Terminal ' + f, 'Terminal ' + t], active: true, agencyId: agIds[0], agencyIds: agIds, driverId: drvIds[0] || null, driverIds: drvIds });
     DB.save('routes', arr);
     refresh();
     audit('route_create', f + ' → ' + t + ' • ' + agIds.length + ' agen • ' + drvIds.length + ' pengemudi');
@@ -41,7 +40,7 @@ export function RouteFormModal() {
           <select value={from} onChange={(e) => setFrom(e.target.value)} className="w-full mt-1 font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">{REGIONS.map((g) => (<optgroup key={g.p} label={g.p}>{g.c.map((n) => (<option key={n}>{n}</option>))}</optgroup>))}</select></div>
         <div><label className="text-[12px] font-extrabold">KE</label>
           <select value={to} onChange={(e) => setTo(e.target.value)} className="w-full mt-1 font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">{REGIONS.map((g) => (<optgroup key={g.p} label={g.p}>{g.c.map((n) => (<option key={n}>{n}</option>))}</optgroup>))}</select></div>
-        <input value={price} onChange={(e) => setPrice(e.target.value)} type="number" placeholder="Harga dasar / kursi" className="col-span-2 border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" />
+        <div className="col-span-2 text-[11.5px] text-slate-500 font-medium bg-slate-50 rounded-xl px-3 py-2">Harga tiket ditentukan agen travel (via usulan harga / form jadwal). Admin hanya menetapkan jasa agen.</div>
         <div className="col-span-2"><label className="text-[12px] font-extrabold">JASA AGEN / KURSI (Rp)</label><input value={serviceFee} onChange={(e) => setServiceFee(e.target.value)} type="number" min="0" placeholder="10000" className="w-full mt-1 font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" /></div>
         <div className="col-span-2"><label className="text-[12px] font-extrabold">TRAVEL AGEN (centang, bisa banyak)</label>
           <div className="relative mt-1">
@@ -101,6 +100,7 @@ function RequestSection() {
         <div className="flex items-center gap-2 text-[13px] font-bold flex-wrap">
           <span className="badge bg-sky-100 text-sky-700">{q.type === 'rute-baru' ? 'Rute Baru' : 'Titik Jemput'}</span>
           <span>{q.from} → {q.to}</span>
+          {q.price ? <span className="text-slate-400 font-medium">{fmtRp(q.price)}</span> : null}
           <span className="text-slate-400 font-medium">• {ag ? ag.name : q.agencyId}</span>
           <div className="flex-1"></div>
           <span className={`badge ${REQ_STATUS[q.status]}`}>{REQ_LABEL[q.status]}</span>

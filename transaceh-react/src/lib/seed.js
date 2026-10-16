@@ -4,7 +4,7 @@ import { simParse, vehLayout, bookingsOf } from './domain.js';
 
 /* Diekstrak dari index.html (seed v11 + migrasi). Dijalankan sekali via initDB(). */
 export function initDB(){
-  if(!localStorage.getItem('at_seeded_v12')){
+  if(!localStorage.getItem('at_seeded_v13')){
   const svgURI=s=>'data:image/svg+xml;utf8,'+encodeURIComponent(s);
   const seedAvatar=(ini,c1,c2)=>svgURI(`<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='${c1}'/><stop offset='1' stop-color='${c2}'/></linearGradient></defs><rect width='160' height='160' fill='url(#g)'/><text x='80' y='94' font-family='Arial,sans-serif' font-size='58' font-weight='bold' fill='#fff' text-anchor='middle'>${ini}</text></svg>`);
   const seedSim=(t,nm,num,exp)=>svgURI(`<svg xmlns='http://www.w3.org/2000/svg' width='320' height='200'><rect width='320' height='200' rx='16' fill='#0b2447'/><rect x='16' y='16' width='288' height='168' rx='12' fill='none' stroke='#38bdf8' stroke-width='2'/><text x='28' y='52' font-family='Arial,sans-serif' font-size='22' font-weight='bold' fill='#7dd3fc'>SIM ${t} • DEMO</text><text x='28' y='92' font-family='Arial,sans-serif' font-size='17' font-weight='bold' fill='#fff'>${nm}</text><text x='28' y='118' font-family='Arial,sans-serif' font-size='14' fill='#cbd5e1'>${num}</text><text x='28' y='144' font-family='Arial,sans-serif' font-size='14' fill='#cbd5e1'>Berlaku s.d. ${exp}</text><text x='28' y='168' font-family='Arial,sans-serif' font-size='11' fill='#64748b'>Contoh seed — ganti dengan foto asli</text></svg>`);
@@ -77,7 +77,8 @@ export function initDB(){
   DB.save('audit',[{id:uid('LOG'),time:new Date().toISOString(),actor:'system',action:'seed',detail:'Database awal dibuat'}]);
   DB.save('banners',[{id:'B1',title:'Diskon 20% Rute Aceh Jaya – Banda Aceh',sub:'Kode: HEMAT20 • s.d. akhir bulan',active:true}]);
   DB.save('waiting',[]);
-  localStorage.setItem('at_seeded_v12','1');
+  DB.save('routeRequests',[{id:'RQ-DEMO1',agencyId:'AG2',type:'rute-baru',from:'Medan',to:'Banda Aceh',pickup:'',note:'Permintaan rutin penumpang carter',price:300000,status:'pending',adminNote:'',createdAt:new Date().toISOString(),decidedAt:null}]);
+  localStorage.setItem('at_seeded_v13','1');
   }
   DB.save('ledger',DB.load('ledger',[]));
 /* Migrasi DB lama (v1) ke format form terbaru: rute pakai nama kabupaten/kota + agencyIds/driverIds */

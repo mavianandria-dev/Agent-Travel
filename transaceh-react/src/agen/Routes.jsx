@@ -15,6 +15,7 @@ function RequestRouteModal({ ag }) {
   const [routeId, setRouteId] = useState(myRoutes[0]?.id || '');
   const [from, setFrom] = useState('Aceh Jaya');
   const [to, setTo] = useState('Banda Aceh');
+  const [price, setPrice] = useState('');
   const [pickup, setPickup] = useState('');
   const [note, setNote] = useState('');
   const submit = () => {
@@ -25,7 +26,8 @@ function RequestRouteModal({ ag }) {
       saveRouteRequest({ agencyId: ag.id, type, from: r.from, to: r.to, pickup, note });
     } else {
       if (from === to) { toast('Kota asal dan tujuan tidak boleh sama', 'err'); return; }
-      saveRouteRequest({ agencyId: ag.id, type, from, to, pickup, note });
+      if (!(Number(price) > 0)) { toast('Isi usulan harga tiket', 'err'); return; }
+      saveRouteRequest({ agencyId: ag.id, type, from, to, price: Number(price), pickup, note });
     }
     refresh(); closeModal(); toast('Usulan terkirim — menunggu persetujuan admin');
   };
@@ -50,6 +52,10 @@ function RequestRouteModal({ ag }) {
             <select value={to} onChange={(e) => setTo(e.target.value)} className="w-full mt-1 font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">{REGIONS.map((g) => (<optgroup key={g.p} label={g.p}>{g.c.map((n) => (<option key={n}>{n}</option>))}</optgroup>))}</select></div>
         </div>
       )}
+      {type === 'rute-baru' ? (
+      <div className="mt-3"><label className="text-[12px] font-extrabold">USULAN HARGA TIKET / KURSI (Rp) <span className="text-red-500">*</span></label>
+        <input value={price} onChange={(e) => setPrice(e.target.value)} type="number" min="0" placeholder="cth: 300000" className="w-full mt-1 text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" /></div>
+      ) : null}
       <div className="mt-3"><label className="text-[12px] font-extrabold">TITIK JEMPUT USULAN {type === 'titik-jemput' ? <span className="text-red-500">*</span> : '(opsional)'}</label>
         <input value={pickup} onChange={(e) => setPickup(e.target.value)} placeholder="cth: Simpang Lima" className="w-full mt-1 text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" /></div>
       <div className="mt-3"><label className="text-[12px] font-extrabold">CATATAN (opsional)</label>
@@ -86,7 +92,8 @@ export default function Routes({ ag }) {
             <div key={q.id} className="bg-slate-50 rounded-2xl px-3.5 py-2.5">
               <div className="flex items-center gap-2 text-[13px] font-bold">
                 <span className="badge bg-sky-100 text-sky-700">{q.type === 'rute-baru' ? 'Rute Baru' : 'Titik Jemput'}</span>
-                <span>{q.from} → {q.to}</span><div className="flex-1"></div>
+                <span>{q.from} → {q.to}</span>
+                {q.price ? <span className="text-slate-400 font-medium">{fmtRp(q.price)}</span> : null}<div className="flex-1"></div>
                 <span className={`badge ${STATUS[q.status]}`}>{STATUS_LABEL[q.status]}</span>
               </div>
               {q.pickup ? <div className="text-[12px] text-slate-500 font-medium mt-1">Titik: {q.pickup}</div> : null}
