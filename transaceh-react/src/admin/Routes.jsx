@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { agencyById, driverById, audit, decideRouteRequest } from '@/lib/domain.js';
+import { agencyById, driverById, audit, decideRouteRequest, priceForAgency } from '@/lib/domain.js';
 import { fmtRp, uid, REGIONS } from '@/lib/utils.js';
 import { Icon, Empty } from '@/components/ui.jsx';
 
@@ -95,12 +95,15 @@ function RequestSection() {
   };
   const card = (q) => {
     const ag = agencyById(q.agencyId);
+    const oldPrice = q.type === 'ubah-harga' ? priceForAgency(DB.load('routes', []).find((x) => x.id === q.routeId), q.agencyId) : 0;
+    const typeLabel = q.type === 'rute-baru' ? 'Rute Baru' : q.type === 'ubah-harga' ? 'Ubah Harga' : 'Titik Jemput';
     return (
       <div key={q.id} className="mt-2 bg-slate-50 rounded-2xl px-3.5 py-2.5">
         <div className="flex items-center gap-2 text-[13px] font-bold flex-wrap">
-          <span className="badge bg-sky-100 text-sky-700">{q.type === 'rute-baru' ? 'Rute Baru' : 'Titik Jemput'}</span>
+          <span className="badge bg-sky-100 text-sky-700">{typeLabel}</span>
           <span>{q.from} → {q.to}</span>
-          {q.price ? <span className="text-slate-400 font-medium">{fmtRp(q.price)}</span> : null}
+          {q.type === 'ubah-harga' ? <span className="text-slate-400 font-medium">{fmtRp(oldPrice)} → <b className="text-slate-700">{fmtRp(q.price)}</b></span>
+          : q.price ? <span className="text-slate-400 font-medium">{fmtRp(q.price)}</span> : null}
           <span className="text-slate-400 font-medium">• {ag ? ag.name : q.agencyId}</span>
           <div className="flex-1"></div>
           <span className={`badge ${REQ_STATUS[q.status]}`}>{REQ_LABEL[q.status]}</span>

@@ -1,14 +1,14 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { agencyOf, routeById, vehicleById, vehName, driverById, schedById, takenSeats, vehLayout, schedSeatCap, schedReady, audit, hm } from '@/lib/domain.js';
+import { agencyOf, routeById, vehicleById, vehName, driverById, schedById, takenSeats, vehLayout, schedSeatCap, schedReady, audit, hm, priceForAgency } from '@/lib/domain.js';
 import { fmtRp, todayStr } from '@/lib/utils.js';
 import { Icon, BadgeStatus, fmtDate } from '@/components/ui.jsx';
 import { ManifestModal } from './Bookings.jsx';
 
 function SchedFormModal({ agId, onDone }) {
   const { closeModal, toast, refresh } = useApp();
-  const routes = DB.load('routes', []);
+  const routes = DB.load('routes', []).filter((r) => r.active && (r.agencyIds || []).includes(agId));
   const vs = DB.load('vehicles', []).filter((v) => v.agencyId === agId && v.status === 'aktif');
   const ds = DB.load('drivers', []).filter((d) => d.agencyId === agId && d.status === 'aktif');
   const [routeId, setRouteId] = useState(routes[0]?.id || '');
@@ -16,13 +16,13 @@ function SchedFormModal({ agId, onDone }) {
   const [time, setTime] = useState('07:00');
   const [vehicleId, setVehicleId] = useState(vs[0]?.id || '');
   const [driverId, setDriverId] = useState(ds[0]?.id || '');
-  const [price, setPrice] = useState(routes[0]?.basePrice || 150000);
+  const selRoute = routeById(routeId);
+  const finalPrice = priceForAgency(selRoute, agId);
 
   const schedRouteDriver = (rid) => {
     setRouteId(rid);
     const r = routeById(rid);
     if (!r) return;
-    if (r.basePrice) setPrice(r.basePrice);
     const pref = r.driverIds || (r.driverId ? [r.driverId] : []);
     const hit = pref.find((id) => ds.some((d) => d.id === id));
     if (hit) { setDriverId(hit); const d = driverById(hit); if (d) toast('Pengemudi default rute: ' + d.name, 'info'); }
@@ -33,7 +33,8 @@ function SchedFormModal({ agId, onDone }) {
     if (clash) { toast('BENTROK: armada/pengemudi sudah terjadwal ' + clash.time + ' di rute lain. Minimal jeda 4 jam.', 'err'); return; }
     const arr = DB.load('schedules', []);
     const r = routeById(routeId);
-    arr.push({ id: 'S-' + Math.random().toString(36).slice(2, 7).toUpperCase(), agencyId: agId, routeId: r.id, date, time, vehicleId, driverId, price: Number(price) || r.basePrice, status: 'open', tripStatus: 'scheduled', blockedSeats: [], createdAt: new Date().toISOString() });
+    if (!(finalPrice > 0)) { toast('Rute belum punya harga — usulkan harga via halaman Rute', 'err'); return; }
+    arr.push({ id: 'S-' + Math.random().toString(36).slice(2, 7).toUpperCase(), agencyId: agId, routeId: r.id, date, time, vehicleId, driverId, price: finalPrice, status: 'open', tripStatus: 'scheduled', blockedSeats: [], createdAt: new Date().toISOString() });
     DB.save('schedules', arr); refresh();
     audit('schedule_create', r.from + '→' + r.to + ' ' + date + ' ' + time);
     closeModal();
@@ -50,8 +51,9 @@ function SchedFormModal({ agId, onDone }) {
         <div><label className="text-[12px] font-extrabold">JAM</label><input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="w-full mt-1 text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" /></div>
         <div><label className="text-[12px] font-extrabold">ARMADA</label><select value={vehicleId} onChange={(e) => setVehicleId(e.target.value)} className="w-full mt-1 text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">{vs.map((v) => <option key={v.id} value={v.id}>{vehName(v)} • {v.plate}</option>)}</select></div>
         <div><label className="text-[12px] font-extrabold">PENGEMUDI</label><select value={driverId} onChange={(e) => setDriverId(e.target.value)} className="w-full mt-1 text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">{ds.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
-        <div className="col-span-2"><label className="text-[12px] font-extrabold">HARGA / KURSI (otomatis +25rb weekend)</label><input type="number" value={price} onChange={(e) => setPrice(e.target.value)} className="w-full mt-1 text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" />
-          <div className="text-[11.5px] text-slate-500 font-medium mt-1">Jasa agen {fmtRp(routeById(routeId)?.serviceFee ?? 10000)}/kursi (ditentukan admin).</div></div>
+        <div className="col-span-2"><label className="text-[12px] font-extrabold">HARGA JUAL / KURSI</label>
+          <div className="w-full mt-1 text-[15px] font-extrabold bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2.5">{finalPrice > 0 ? fmtRp(finalPrice) : '— belum ada harga —'}</div>
+          <div className="text-[11.5px] text-slate-500 font-medium mt-1">Dari rute Anda (atur via halaman Rute) • Jasa agen {fmtRp(routeById(routeId)?.serviceFee ?? 10000)}/kursi (ditentukan admin).</div></div>
       </div>
       <button onClick={saveSched} className="mt-4 w-full bg-sky-600 text-white font-extrabold text-[14px] py-3 rounded-2xl">Simpan Jadwal</button></div>
   );

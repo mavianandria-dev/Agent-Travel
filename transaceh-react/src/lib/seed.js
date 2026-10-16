@@ -4,7 +4,7 @@ import { simParse, vehLayout, bookingsOf } from './domain.js';
 
 /* Diekstrak dari index.html (seed v11 + migrasi). Dijalankan sekali via initDB(). */
 export function initDB(){
-  if(!localStorage.getItem('at_seeded_v13')){
+  if(!localStorage.getItem('at_seeded_v14')){
   const svgURI=s=>'data:image/svg+xml;utf8,'+encodeURIComponent(s);
   const seedAvatar=(ini,c1,c2)=>svgURI(`<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='${c1}'/><stop offset='1' stop-color='${c2}'/></linearGradient></defs><rect width='160' height='160' fill='url(#g)'/><text x='80' y='94' font-family='Arial,sans-serif' font-size='58' font-weight='bold' fill='#fff' text-anchor='middle'>${ini}</text></svg>`);
   const seedSim=(t,nm,num,exp)=>svgURI(`<svg xmlns='http://www.w3.org/2000/svg' width='320' height='200'><rect width='320' height='200' rx='16' fill='#0b2447'/><rect x='16' y='16' width='288' height='168' rx='12' fill='none' stroke='#38bdf8' stroke-width='2'/><text x='28' y='52' font-family='Arial,sans-serif' font-size='22' font-weight='bold' fill='#7dd3fc'>SIM ${t} • DEMO</text><text x='28' y='92' font-family='Arial,sans-serif' font-size='17' font-weight='bold' fill='#fff'>${nm}</text><text x='28' y='118' font-family='Arial,sans-serif' font-size='14' fill='#cbd5e1'>${num}</text><text x='28' y='144' font-family='Arial,sans-serif' font-size='14' fill='#cbd5e1'>Berlaku s.d. ${exp}</text><text x='28' y='168' font-family='Arial,sans-serif' font-size='11' fill='#64748b'>Contoh seed — ganti dengan foto asli</text></svg>`);
@@ -30,10 +30,10 @@ export function initDB(){
     {id:'AG4',name:'Cahaya Perkasa',logo:'',address:'Jl. Diponegoro No.7, Aceh Barat',phone:'0655-31212',bank:'-',status:'pending',feeType:'percent',feeValue:8,refundPolicy:[{minH:72,pct:100},{minH:24,pct:50},{minH:0,pct:0}],rating:5.0,trips:0},
   ];
   const routes=[
-    {id:'R1',from:'Aceh Jaya',to:'Banda Aceh',distance:'±185 km',duration:'±5 jam',basePrice:150000,serviceFee:10000,pickups:['Terminal Aceh Jaya','Simpang Calang','Lamno','Lhok Kruet','Lhoknga','Terminal Batoh B. Aceh'],active:true,agencyId:'AG1',agencyIds:['AG1','AG2'],driverId:'D1',driverIds:['D1','D2','D4']},
-    {id:'R2',from:'Banda Aceh',to:'Aceh Jaya',distance:'±185 km',duration:'±5 jam',basePrice:150000,serviceFee:10000,pickups:['Terminal Batoh','Lhoknga','Lhok Kruet','Lamno','Simpang Calang','Terminal Aceh Jaya'],active:true,agencyId:'AG1',agencyIds:['AG1','AG2'],driverId:'D2',driverIds:['D1','D2','D5']},
-    {id:'R3',from:'Aceh Jaya',to:'Aceh Barat',distance:'±75 km',duration:'±2 jam',basePrice:80000,serviceFee:5000,pickups:['Terminal Aceh Jaya','Krueng Sabee','Teunom','Terminal Aceh Barat'],active:true,agencyId:'AG1',agencyIds:['AG1'],driverId:'D1',driverIds:['D1','D2']},
-    {id:'R4',from:'Banda Aceh',to:'Medan',distance:'±600 km',duration:'±12 jam',basePrice:320000,serviceFee:15000,pickups:['Terminal Batoh','Sigli','Bireuen','Lhokseumawe','Terminal Amplas Medan'],active:true,agencyId:'AG1',agencyIds:['AG1','AG2','AG3'],driverId:'D1',driverIds:['D1','D4','D6']},
+    {id:'R1',from:'Aceh Jaya',to:'Banda Aceh',distance:'±185 km',duration:'±5 jam',basePrice:150000,prices:{AG1:150000,AG2:170000},serviceFee:10000,pickups:['Terminal Aceh Jaya','Simpang Calang','Lamno','Lhok Kruet','Lhoknga','Terminal Batoh B. Aceh'],active:true,agencyId:'AG1',agencyIds:['AG1','AG2'],driverId:'D1',driverIds:['D1','D2','D4']},
+    {id:'R2',from:'Banda Aceh',to:'Aceh Jaya',distance:'±185 km',duration:'±5 jam',basePrice:150000,prices:{AG1:150000,AG2:165000},serviceFee:10000,pickups:['Terminal Batoh','Lhoknga','Lhok Kruet','Lamno','Simpang Calang','Terminal Aceh Jaya'],active:true,agencyId:'AG1',agencyIds:['AG1','AG2'],driverId:'D2',driverIds:['D1','D2','D5']},
+    {id:'R3',from:'Aceh Jaya',to:'Aceh Barat',distance:'±75 km',duration:'±2 jam',basePrice:80000,prices:{AG1:80000},serviceFee:5000,pickups:['Terminal Aceh Jaya','Krueng Sabee','Teunom','Terminal Aceh Barat'],active:true,agencyId:'AG1',agencyIds:['AG1'],driverId:'D1',driverIds:['D1','D2']},
+    {id:'R4',from:'Banda Aceh',to:'Medan',distance:'±600 km',duration:'±12 jam',basePrice:320000,prices:{AG1:320000,AG2:335000,AG3:310000},serviceFee:15000,pickups:['Terminal Batoh','Sigli','Bireuen','Lhokseumawe','Terminal Amplas Medan'],active:true,agencyId:'AG1',agencyIds:['AG1','AG2','AG3'],driverId:'D1',driverIds:['D1','D4','D6']},
   ];
   const vehicles=[
     {id:'V1',agencyId:'AG1',brand:'Toyota',model:'Innova Reborn',year:2022,color:'Hitam',plate:'BL 1234 AA',chassis:'MHFXW41G2N2001001',engine:'2GD2001001',vtype:'MPV',vtypeOther:'',baggage:'Besar',tax:'Aktif',stnkExp:'2027-03-10',kir:'Berlaku s.d. 2027',condition:'Sangat baik',capacity:6,photo:'https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?w=600&q=80',facilities:['AC','USB Charger','Air Mineral','Bantal'],status:'aktif',ownerName:'H. Muhammad Nur',ownerBiz:'Barakah Travel',ownerNik:'1173010101800001',ownerAddr:'Jl. Merdeka No.12, Calang',ownerPhone:'0812000001',ownerEmail:'agen@barakah.com',ownership:'Milik perusahaan',coopDriverId:'',hasEmail:'Ya',docs:['STNK','KTP pemilik'],docOther:'',stnkPhoto:'',ktpOwnerPhoto:'',mainRoute:'Calang — Banda Aceh',origin:'Aceh Jaya',dest:'Banda Aceh',freq:'Setiap hari',freqOther:'',services:['Antar jemput alamat','Paket barang'],opSchedule:'07:00 & 14:00 setiap hari',coopTariff:150000,coopSys:'Bagi hasil',coopOther:'',fleetCount:3,hasDriver:'Ya',drvName:'Bang Jamil',drvPhone:'0812000002',drvSim:'A - 1173011203850001',drvSimExp:'2030-05-01',drvExp:'12 tahun lintas Aceh',hasBackup:'Ya',backName:'Ilham Saputra',backPhone:'0812000099',backSim:'B1 - 1171031201970007',backSimExp:'2029-01-01'},
@@ -78,7 +78,7 @@ export function initDB(){
   DB.save('banners',[{id:'B1',title:'Diskon 20% Rute Aceh Jaya – Banda Aceh',sub:'Kode: HEMAT20 • s.d. akhir bulan',active:true}]);
   DB.save('waiting',[]);
   DB.save('routeRequests',[{id:'RQ-DEMO1',agencyId:'AG2',type:'rute-baru',from:'Medan',to:'Banda Aceh',pickup:'',note:'Permintaan rutin penumpang carter',price:300000,status:'pending',adminNote:'',createdAt:new Date().toISOString(),decidedAt:null}]);
-  localStorage.setItem('at_seeded_v13','1');
+  localStorage.setItem('at_seeded_v14','1');
   }
   DB.save('ledger',DB.load('ledger',[]));
 /* Migrasi DB lama (v1) ke format form terbaru: rute pakai nama kabupaten/kota + agencyIds/driverIds */
