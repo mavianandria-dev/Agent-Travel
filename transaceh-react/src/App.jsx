@@ -22,8 +22,18 @@ import { todayStr } from '@/lib/utils.js';
 
 const AGEN_VIEW_TAB = { 'agen-book': 'book', 'agen-sched': 'sched', 'agen-fleet': 'fleet', 'agen-fin': 'fin' };
 
+function Skeleton() {
+  return (
+    <div className="space-y-3">
+      <div className="skel h-14"></div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3"><div className="skel h-40"></div><div className="skel h-40"></div><div className="skel h-40"></div></div>
+      <div className="skel h-56"></div>
+    </div>
+  );
+}
+
 function Router() {
-  const { view, user, modal, closeModal, setAgenTab } = useApp();
+  const { view, user, modal, closeModal, setAgenTab, navLoading } = useApp();
 
   useEffect(() => {
     if (AGEN_VIEW_TAB[view]) setAgenTab(AGEN_VIEW_TAB[view]);
@@ -65,7 +75,7 @@ function Router() {
     <>
       <Header />
       {view === 'home' ? <Hero /> : null}
-      <main className="max-w-7xl mx-auto px-3 sm:px-4 pb-32 md:pb-16 pt-3 sm:pt-5 min-h-[70vh]">{page}</main>
+      <main className="max-w-7xl mx-auto px-3 sm:px-4 pb-32 md:pb-16 pt-3 sm:pt-5 min-h-[70vh]">{navLoading ? <Skeleton /> : page}</main>
       <BottomNav />
       {modal ? (
         <div className="fixed inset-0 z-50 modal-bg flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) closeModal(); }}>

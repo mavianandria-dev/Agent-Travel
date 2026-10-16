@@ -26,6 +26,8 @@ export function AppProvider({ children }) {
   const [filter, setFilter] = useState({ q: '', date: '', status: '' });
   const [vehEdit, setVehEdit] = useState(null);
   const [drvEdit, setDrvEdit] = useState(null);
+  const [navLoading, setNavLoading] = useState(true);
+  const navToken = useRef(0);
   const toastId = useRef(0);
 
   const refresh = useCallback(() => setTick((x) => x + 1), []);
@@ -40,13 +42,27 @@ export function AppProvider({ children }) {
 
   const go = useCallback((v) => {
     const u = currentUser();
-    if (u && u.role !== 'pelanggan' && CUSTOMER_VIEWS.includes(v)) {
-      setView(u.role === 'agen' ? 'agen' : u.role === 'pengemudi' ? 'driver' : 'admin');
-    } else {
-      setView(v);
-    }
+    const target = (u && u.role !== 'pelanggan' && CUSTOMER_VIEWS.includes(v))
+      ? (u.role === 'agen' ? 'agen' : u.role === 'pengemudi' ? 'driver' : 'admin')
+      : v;
+    const my = ++navToken.current;
     setModal(null);
-    window.scrollTo({ top: 0 });
+    setNavLoading(true);
+    setTimeout(() => {
+      if (navToken.current !== my) return;
+      setView(target);
+      setNavLoading(false);
+      window.scrollTo({ top: 0 });
+    }, 420);
+  }, []);
+
+  useEffect(() => {
+    const my = ++navToken.current;
+    const t = setTimeout(() => {
+      if (navToken.current !== my) return;
+      setNavLoading(false);
+    }, 420);
+    return () => clearTimeout(t);
   }, []);
 
   const openModal = useCallback((node) => setModal(node), []);
@@ -94,8 +110,8 @@ export function AppProvider({ children }) {
     toasts, toast, modal, openModal, closeModal,
     bw, setBw, payMethod, setPayMethod,
     agenTab, setAgenTab, filter, setFilter,
-    vehEdit, setVehEdit, drvEdit, setDrvEdit, logout,
-  }), [view, go, user, lang, setLang, t, tick, refresh, toasts, toast, modal, openModal, closeModal, bw, payMethod, agenTab, filter, vehEdit, drvEdit, logout]);
+    vehEdit, setVehEdit, drvEdit, setDrvEdit, logout, navLoading,
+  }), [view, go, user, lang, setLang, t, tick, refresh, toasts, toast, modal, openModal, closeModal, bw, payMethod, agenTab, filter, vehEdit, drvEdit, logout, navLoading]);
 
   return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;
 }
