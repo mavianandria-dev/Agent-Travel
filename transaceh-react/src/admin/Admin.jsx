@@ -3,9 +3,10 @@ import { Icon } from '@/components/ui.jsx';
 import { Overview } from './Overview.jsx';
 import { Transactions } from './Transactions.jsx';
 import { Agencies } from './Agencies.jsx';
+import { Routes } from './Routes.jsx';
 import { Master } from './Master.jsx';
 
-const TABS = [['admin', 'shield-check', 'Overview'], ['admin-tx', 'receipt-text', 'Transaksi'], ['admin-ag', 'building-2', 'Agen'], ['admin-master', 'database', 'Master']];
+const TABS = [['admin', 'shield-check', 'Overview'], ['admin-tx', 'receipt-text', 'Transaksi'], ['admin-ag', 'building-2', 'Agen'], ['admin-rute', 'route', 'Rute'], ['admin-master', 'database', 'Master']];
 
 export default function Admin() {
   const { view, go } = useApp();
@@ -13,6 +14,7 @@ export default function Admin() {
   if (view === 'admin') body = <Overview />;
   else if (view === 'admin-tx') body = <Transactions />;
   else if (view === 'admin-ag') body = <Agencies />;
+  else if (view === 'admin-rute') body = <Routes />;
   else if (view === 'admin-master') body = <Master />;
   else body = <Overview />;
   return (

@@ -6,10 +6,11 @@ import Bookings from './Bookings.jsx';
 import Schedules from './Schedules.jsx';
 import Fleet from './Fleet.jsx';
 import Drivers from './Drivers.jsx';
+import Routes from './Routes.jsx';
 import Finance from './Finance.jsx';
 import Setting from './Setting.jsx';
 
-const TABS = [['dashboard','layout-dashboard','Dashboard'],['book','clipboard-list','Pesanan'],['sched','calendar-days','Jadwal'],['fleet','bus','Armada'],['driver','id-card','Pengemudi'],['fin','wallet','Keuangan'],['setting','settings','Setting']];
+const TABS = [['dashboard','layout-dashboard','Dashboard'],['book','clipboard-list','Pesanan'],['sched','calendar-days','Jadwal'],['route','route','Rute'],['fleet','bus','Armada'],['driver','id-card','Pengemudi'],['fin','wallet','Keuangan'],['setting','settings','Setting']];
 
 export default function Agen() {
   const { user, agenTab, setAgenTab, go } = useApp();
@@ -19,6 +20,7 @@ export default function Agen() {
   if (agenTab === 'dashboard') body = <Dashboard ag={ag} />;
   else if (agenTab === 'book') body = <Bookings ag={ag} />;
   else if (agenTab === 'sched') body = <Schedules ag={ag} />;
+  else if (agenTab === 'route') body = <Routes ag={ag} />;
   else if (agenTab === 'fleet') body = <Fleet ag={ag} />;
   else if (agenTab === 'driver') body = <Drivers ag={ag} />;
   else if (agenTab === 'fin') body = <Finance ag={ag} />;
