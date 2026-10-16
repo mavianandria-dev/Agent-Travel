@@ -92,6 +92,61 @@ export function notify(userEmail, title, msg, ch){
 
 export const hm=t=>{const[a,b]=t.split(':').map(Number);return a*60+b;};
 
+/* Split settlement: tiket (pengemudi) + jasa (agen) + fee (platform).
+   schedule.price = TOTAL all-in per kursi yg dilihat pelanggan. */
+export const DEFAULT_SERVICE=10000;
+export function servicePerSeat(s){ const r=s?routeById(s.routeId):null; return Number(s?.serviceFee??r?.serviceFee??DEFAULT_SERVICE)||0; }
+export function splitFare(s,nSeats=1,discount=0){
+  if(!s) return {ticket:0,service:0,fee:0,total:0};
+  const n=Math.max(1,Number(nSeats)||1);
+  const S=servicePerSeat(s);
+  const paid=Math.max(0,(Number(s.price)||0)*n-(Number(discount)||0));
+  const a=agencyById(s.agencyId);
+  const base=a&&a.feeType==='flat'?Math.max(0,paid-(Number(a.feeValue)||0)):paid/(1+((a?Number(a.feeValue):8)||0)/100);
+  const service=Math.min(S*n,Math.round(base));
+  const ticket=Math.max(0,Math.round(base)-service);
+  const fee=Math.max(0,paid-ticket-service);
+  return {ticket,service,fee,total:paid};
+}
+/* Ledger: ditahan (bayar) → layak (trip tiba) → dicairkan (admin) ; void bila refund */
+export function createLedger(booking){
+  if(!booking||booking.status!=='paid') return null;
+  if(DB.load('ledger',[]).some(x=>x.bookingId===booking.id)) return null;
+  const s=schedById(booking.scheduleId); if(!s) return null;
+  const f=splitFare(s,(booking.seats||[]).length,booking.discount||0);
+  const e={id:uid('LG'),bookingId:booking.id,scheduleId:s.id,agencyId:s.agencyId,driverId:s.driverId||null,userEmail:booking.userEmail,seats:[...(booking.seats||[])],ticket:f.ticket,service:f.service,fee:f.fee,total:f.total,status:'ditahan',createdAt:new Date().toISOString(),releasedAt:null,paidOutAt:null};
+  const arr=DB.load('ledger',[]); arr.unshift(e); DB.save('ledger',arr);
+  audit('ledger_hold',booking.code+' • T'+f.ticket+' J'+f.service+' F'+f.fee);
+  return e;
+}
+export function releaseLedger(scheduleId){
+  const arr=DB.load('ledger',[]); let ch=false;
+  arr.forEach(e=>{ if(e.scheduleId===scheduleId&&e.status==='ditahan'){ e.status='layak'; e.releasedAt=new Date().toISOString(); ch=true; } });
+  if(ch){ DB.save('ledger',arr); audit('ledger_release',scheduleId); }
+  return ch;
+}
+export function voidLedger(bookingId){
+  const arr=DB.load('ledger',[]); let ch=false;
+  arr.forEach(e=>{ if(e.bookingId===bookingId&&e.status!=='dicairkan'){ e.status='void'; ch=true; } });
+  if(ch){ DB.save('ledger',arr); audit('ledger_void',bookingId); }
+  return ch;
+}
+export function settleLedger(ids){
+  const arr=DB.load('ledger',[]); let n=0;
+  (ids||[]).forEach(id=>{ const e=arr.find(x=>x.id===id); if(e&&e.status==='layak'){ e.status='dicairkan'; e.paidOutAt=new Date().toISOString(); n++; } });
+  if(n){ DB.save('ledger',arr); audit('ledger_settle',n+' pos'); }
+  return n;
+}
+export function ledgerByDriver(driverId){ return DB.load('ledger',[]).filter(e=>e.driverId===driverId); }
+/* Layak cair = trip tiba + kliring 24 jam */
+export function ledgerEligible(e){
+  if(!e||e.status!=='layak') return false;
+  const s=schedById(e.scheduleId);
+  const at=s?.arrivedAt||e.releasedAt;
+  if(!at) return true;
+  return Date.now()-new Date(at).getTime()>=24*3600*1000;
+}
+
 /* Usulan rute agen → admin (model hibrida: agen usul, admin eksekusi) */
 export function saveRouteRequest({ agencyId, type, from, to, pickup, note }){
   const arr=DB.load('routeRequests',[]);

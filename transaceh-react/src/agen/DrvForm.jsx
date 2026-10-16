@@ -51,6 +51,7 @@ function DrvFormInner({ agId, raw, did }) {
   const [mail, setMail] = useState(d0.userEmail || '');
   const [pass, setPass] = useState('');
   const [status, setStatus] = useState(d0.status || 'aktif');
+  const [bank, setBank] = useState(d0.bank || '');
 
   const drvBack = () => { setDrvEdit(null); setAgenTab('driver'); go('agen'); };
 
@@ -95,7 +96,7 @@ function DrvFormInner({ agId, raw, did }) {
     if (clashUser) { toast('Email dipakai akun lain', 'err'); return; }
     const clashDrv = arr.find((x) => x.userEmail && x.userEmail.toLowerCase() === m && x.agencyId === agId && x.id !== did);
     if (clashDrv) { toast('Email dipakai pengemudi lain (' + clashDrv.name + ')', 'err'); return; }
-    const extra = { birthPlace: bPlace.trim(), birthDate: bDate || '', gender: gender || '', address: addr.trim(), nik: nk, marital: marital || '', education: (edu || '').trim(), emName: emN.trim(), emPhone: emP.trim(), emRelation: emR.trim(), simNumber };
+    const extra = { birthPlace: bPlace.trim(), birthDate: bDate || '', gender: gender || '', address: addr.trim(), nik: nk, marital: marital || '', education: (edu || '').trim(), emName: emN.trim(), emPhone: emP.trim(), emRelation: emR.trim(), simNumber, bank: (bank || '').trim() };
     if (!extra.birthPlace) { toast('Tempat lahir wajib diisi', 'err'); return; }
     if (!extra.birthDate) { toast('Tanggal lahir wajib diisi', 'err'); return; }
     if (!extra.gender) { toast('Pilih jenis kelamin', 'err'); return; }
@@ -164,6 +165,7 @@ function DrvFormInner({ agId, raw, did }) {
         <input value={mail} onChange={(e) => setMail(e.target.value)} placeholder="Email akun login (wajib)" className="w-full text-[13px] border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" />
         <input value={pass} onChange={(e) => setPass(e.target.value)} type="password" autoComplete="new-password" placeholder={did ? 'Password baru (kosongkan bila tak diubah)' : 'Password login (wajib)'} className="w-full text-[13px] border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" />
         <div><label className="text-[12px] font-extrabold">STATUS</label><select value={status} onChange={(e) => setStatus(e.target.value)} className={'w-full mt-1 ' + inC}><option value="aktif">aktif</option><option value="nonaktif">nonaktif</option></select></div>
+        <div><label className="text-[12px] font-extrabold">REKENING BANK (untuk pencairan dana tiket)</label><input value={bank} onChange={(e) => setBank(e.target.value)} placeholder="cth: BCA 1234567890 a.n. Nama" className={'w-full mt-1 ' + inC} /></div>
         <p className="text-[11.5px] text-slate-400 font-medium">Nonaktif = suspend: pengemudi tidak bisa masuk & tak bisa dijadwalkan.</p></div>
       <div className="grid grid-cols-2 gap-2.5 mt-5"><button onClick={drvBack} className="bg-slate-100 font-extrabold text-[14px] py-3 rounded-2xl">Batal</button><button onClick={saveDrvPage} className="bg-sky-600 text-white font-extrabold text-[14px] py-3 rounded-2xl">Simpan</button></div></div>
   );

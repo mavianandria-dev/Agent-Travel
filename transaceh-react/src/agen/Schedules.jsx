@@ -17,6 +17,7 @@ function SchedFormModal({ agId, onDone }) {
   const [vehicleId, setVehicleId] = useState(vs[0]?.id || '');
   const [driverId, setDriverId] = useState(ds[0]?.id || '');
   const [price, setPrice] = useState(150000);
+  const [serviceFee, setServiceFee] = useState(10000);
 
   const schedRouteDriver = (rid) => {
     setRouteId(rid);
@@ -32,7 +33,7 @@ function SchedFormModal({ agId, onDone }) {
     if (clash) { toast('BENTROK: armada/pengemudi sudah terjadwal ' + clash.time + ' di rute lain. Minimal jeda 4 jam.', 'err'); return; }
     const arr = DB.load('schedules', []);
     const r = routeById(routeId);
-    arr.push({ id: 'S-' + Math.random().toString(36).slice(2, 7).toUpperCase(), agencyId: agId, routeId: r.id, date, time, vehicleId, driverId, price: Number(price) || r.basePrice, status: 'open', tripStatus: 'scheduled', blockedSeats: [], createdAt: new Date().toISOString() });
+    arr.push({ id: 'S-' + Math.random().toString(36).slice(2, 7).toUpperCase(), agencyId: agId, routeId: r.id, date, time, vehicleId, driverId, price: Number(price) || r.basePrice, serviceFee: serviceFee === '' ? undefined : Number(serviceFee), status: 'open', tripStatus: 'scheduled', blockedSeats: [], createdAt: new Date().toISOString() });
     DB.save('schedules', arr); refresh();
     audit('schedule_create', r.from + '→' + r.to + ' ' + date + ' ' + time);
     closeModal();
@@ -50,6 +51,7 @@ function SchedFormModal({ agId, onDone }) {
         <div><label className="text-[12px] font-extrabold">ARMADA</label><select value={vehicleId} onChange={(e) => setVehicleId(e.target.value)} className="w-full mt-1 text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">{vs.map((v) => <option key={v.id} value={v.id}>{vehName(v)} • {v.plate}</option>)}</select></div>
         <div><label className="text-[12px] font-extrabold">PENGEMUDI</label><select value={driverId} onChange={(e) => setDriverId(e.target.value)} className="w-full mt-1 text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">{ds.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
         <div className="col-span-2"><label className="text-[12px] font-extrabold">HARGA / KURSI (otomatis +25rb weekend)</label><input type="number" value={price} onChange={(e) => setPrice(e.target.value)} className="w-full mt-1 text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" /></div>
+        <div className="col-span-2"><label className="text-[12px] font-extrabold">JASA AGEN / KURSI (Rp)</label><input type="number" min="0" value={serviceFee} onChange={(e) => setServiceFee(e.target.value)} placeholder="10000" className="w-full mt-1 text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" /></div>
       </div>
       <button onClick={saveSched} className="mt-4 w-full bg-sky-600 text-white font-extrabold text-[14px] py-3 rounded-2xl">Simpan Jadwal</button></div>
   );

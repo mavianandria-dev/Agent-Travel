@@ -11,6 +11,7 @@ export function RouteFormModal() {
   const [from, setFrom] = useState('Aceh Jaya');
   const [to, setTo] = useState('Banda Aceh');
   const [price, setPrice] = useState('');
+  const [serviceFee, setServiceFee] = useState(10000);
   const [agOpen, setAgOpen] = useState(false);
   const [agIds, setAgIds] = useState([]);
   const [drvIds, setDrvIds] = useState([]);
@@ -24,7 +25,7 @@ export function RouteFormModal() {
     for (const id of agIds) { const a = agencyById(id); if (!a || a.status !== 'active') { toast('Ada agen tidak aktif tercentang', 'err'); return; } }
     for (const id of drvIds) { const d = driverById(id); if (!d || d.status !== 'aktif' || !agIds.includes(d.agencyId)) { toast('Pengemudi ' + (d?.name || id) + ' tidak valid untuk agen tercentang', 'err'); return; } }
     const arr = DB.load('routes', []);
-    arr.push({ id: uid('R'), from: f, to: t, distance: '-', duration: '-', basePrice: Number(price) || 100000, pickups: ['Terminal ' + f, 'Terminal ' + t], active: true, agencyId: agIds[0], agencyIds: agIds, driverId: drvIds[0] || null, driverIds: drvIds });
+    arr.push({ id: uid('R'), from: f, to: t, distance: '-', duration: '-', basePrice: Number(price) || 100000, serviceFee: serviceFee === '' ? 10000 : Number(serviceFee) || 10000, pickups: ['Terminal ' + f, 'Terminal ' + t], active: true, agencyId: agIds[0], agencyIds: agIds, driverId: drvIds[0] || null, driverIds: drvIds });
     DB.save('routes', arr);
     refresh();
     audit('route_create', f + ' → ' + t + ' • ' + agIds.length + ' agen • ' + drvIds.length + ' pengemudi');
@@ -41,6 +42,7 @@ export function RouteFormModal() {
         <div><label className="text-[12px] font-extrabold">KE</label>
           <select value={to} onChange={(e) => setTo(e.target.value)} className="w-full mt-1 font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">{REGIONS.map((g) => (<optgroup key={g.p} label={g.p}>{g.c.map((n) => (<option key={n}>{n}</option>))}</optgroup>))}</select></div>
         <input value={price} onChange={(e) => setPrice(e.target.value)} type="number" placeholder="Harga dasar / kursi" className="col-span-2 border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" />
+        <div className="col-span-2"><label className="text-[12px] font-extrabold">JASA AGEN / KURSI (Rp)</label><input value={serviceFee} onChange={(e) => setServiceFee(e.target.value)} type="number" min="0" placeholder="10000" className="w-full mt-1 font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" /></div>
         <div className="col-span-2"><label className="text-[12px] font-extrabold">TRAVEL AGEN (centang, bisa banyak)</label>
           <div className="relative mt-1">
             <button type="button" onClick={() => setAgOpen((o) => !o)} className="w-full font-semibold text-left border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring bg-white flex items-center gap-2"><span className={`flex-1 ${agIds.length ? '' : 'text-slate-500'}`}>{agLabel}</span><Icon name="chevron-down" className="w-4 h-4 text-slate-400" /></button>

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { routeById, vehicleById, bookingsOf, vehName, vehLayout, schedSeatCap, takenSeats, audit, notify } from '@/lib/domain.js';
+import { routeById, vehicleById, bookingsOf, vehName, vehLayout, schedSeatCap, takenSeats, audit, notify, releaseLedger } from '@/lib/domain.js';
 import { todayStr } from '@/lib/utils.js';
 import { Icon, Empty, BadgeStatus, fmtDate } from '@/components/ui.jsx';
 
@@ -17,8 +17,10 @@ export function tripUpdate(sid, st, toast, refresh) {
   const s = arr.find((x) => x.id === sid);
   if (!s) return;
   s.tripStatus = st;
+  if (st === 'arrived') { s.arrivedAt = new Date().toISOString(); }
   DB.save('schedules', arr);
   refresh();
+  if (st === 'arrived') { releaseLedger(sid); refresh(); }
   const bk = DB.load('bookings', []);
   bk.forEach((b) => { if (b.scheduleId === sid && b.status === 'paid') { b.tripStatus = st; if (st === 'arrived') b.status = 'done'; } });
   DB.save('bookings', bk);
@@ -116,12 +118,12 @@ export default function Tasks() {
   const me = drvOfUser(user);
   const mySched = DB.load('schedules', []).filter((s) => !me || s.driverId === me.id).sort((a, b) => (a.date + b.time).localeCompare(b.date + b.time));
   const upcoming = mySched.filter((s) => s.date >= todayStr(0));
-  const pills = [['driver', 'car-front', 'Tugas Saya'], ['driver-trips', 'route', 'Trip']];
+  const pills = [['driver', 'car-front', 'Tugas Saya'], ['driver-trips', 'route', 'Trip'], ['driver-wallet', 'wallet', 'Dompet']];
   return (
     <>
       <div className="anim bg-white rounded-3xl shadow-card p-4 flex gap-2 overflow-x-auto no-print">
         {pills.map((x) => (
-          <button key={x[0]} onClick={() => go(x[0])} className={`flex items-center gap-1.5 text-[12.5px] font-extrabold px-4 py-2.5 rounded-xl whitespace-nowrap ${((view === 'driver-trips') === (x[0] === 'driver-trips')) ? 'bg-[#0b2447] text-white shadow' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>
+          <button key={x[0]} onClick={() => go(x[0])} className={`flex items-center gap-1.5 text-[12.5px] font-extrabold px-4 py-2.5 rounded-xl whitespace-nowrap ${view === x[0] ? 'bg-[#0b2447] text-white shadow' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>
             <Icon name={x[1]} className="w-4 h-4" />{x[2]}
           </button>
         ))}

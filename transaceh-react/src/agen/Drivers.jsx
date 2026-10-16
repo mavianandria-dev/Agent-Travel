@@ -20,7 +20,7 @@ export function DrvDetail({ id }) {
       <h4 className="font-extrabold text-[13px] mt-3 mb-1">B. SIM</h4><div className="bg-slate-50 rounded-2xl px-3.5 py-1">
         {row('Jenis', 'SIM ' + (d.simType || '-'))}{row('Nomor', d.simNumber)}{row('Masa berlaku', d.simExp || '-')}</div>
       <h4 className="font-extrabold text-[13px] mt-3 mb-1">C. Akun</h4><div className="bg-slate-50 rounded-2xl px-3.5 py-1">
-        {row('Email login', d.userEmail)}</div>
+        {row('Email login', d.userEmail)}{row('Bank', d.bank || '-')}</div>
       <div className="space-y-2 mt-3"><DocRow title="FOTO PROFIL" src={d.photo} onView={() => viewDoc('FOTO PROFIL', d.photo)} /><DocRow title="DOKUMEN SIM" src={d.simPhoto} onView={() => viewDoc('DOKUMEN SIM', d.simPhoto)} /></div>
       <div className="grid grid-cols-2 gap-2.5 mt-4"><button onClick={() => closeModal()} className="bg-slate-100 font-extrabold text-[13px] py-3 rounded-2xl">Tutup</button><button onClick={() => { closeModal(); setDrvEdit({ agId: d.agencyId, did: d.id }); go('agen-drvform'); }} className="bg-sky-600 text-white font-extrabold text-[13px] py-3 rounded-2xl">Edit</button></div></div>
   );

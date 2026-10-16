@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { schedById, routeById, vehicleById, driverById, agencyById, audit, notify, processWaiting, vehName } from '@/lib/domain.js';
+import { schedById, routeById, vehicleById, driverById, agencyById, audit, notify, processWaiting, vehName, splitFare, voidLedger } from '@/lib/domain.js';
 import { fmtRp, todayStr, uid } from '@/lib/utils.js';
 import { Icon, Empty, BadgeStatus, fmtDate } from '@/components/ui.jsx';
 import { PaymentModal } from './Search.jsx';
@@ -35,6 +35,7 @@ export default function TicketDetail({ bid }) {
   const v = vehicleById(s.vehicleId);
   const dr = driverById(s.driverId);
   const ag = agencyById(s.agencyId);
+  const _fare = b.fare || splitFare(s, (b.seats || []).length, b.discount || 0);
 
   const submitReview = () => {
     const arr = DB.load('bookings', []);
@@ -63,11 +64,11 @@ export default function TicketDetail({ bid }) {
     const h = (new Date(s.date + 'T' + s.time) - Date.now()) / 36e5;
     const pol = ((ag && ag.refundPolicy) || []).slice().sort((a, b2) => b2.minH - a.minH);
     const rule = pol.find((p) => h >= p.minH) || { pct: 0 };
-    const est = Math.round(b.total * rule.pct / 100);
+    const est = Math.round((_fare.ticket || 0) * rule.pct / 100);
     openModal(
       <div className="p-6"><h3 className="font-extrabold text-[17px]">Batalkan Booking?</h3>
-        <p className="text-[13px] text-slate-500 font-medium mt-1">Refund mengikuti kebijakan agen: H-3 = 100%, H-1 = 50%, hari-H = 0%.</p>
-        <div className="mt-3"><div className="bg-sky-50 rounded-2xl p-3 text-[13px] font-bold text-sky-900">Estimasi refund: <b>{rule.pct}% × {fmtRp(b.total)} = {fmtRp(est)}</b><br /><span className="font-medium text-[12px]">Keberangkatan {Math.max(0, Math.round(h))} jam lagi</span></div></div>
+        <p className="text-[13px] text-slate-500 font-medium mt-1">Refund mengikuti kebijakan agen: H-3 = 100%, H-1 = 50%, hari-H = 0%. Hanya komponen tiket yang kembali — jasa agen & fee platform hangus.</p>
+        <div className="mt-3"><div className="bg-sky-50 rounded-2xl p-3 text-[13px] font-bold text-sky-900">Estimasi refund: <b>{rule.pct}% × {fmtRp(_fare.ticket)} (tiket) = {fmtRp(est)}</b><br /><span className="font-medium text-[12px]">Jasa agen {fmtRp(_fare.service)} & fee {fmtRp(_fare.fee)} hangus • Keberangkatan {Math.max(0, Math.round(h))} jam lagi</span></div></div>
         <div className="flex gap-2 mt-4"><button onClick={() => closeModal()} className="flex-1 bg-slate-100 font-bold text-[13px] py-2.5 rounded-xl">Batal</button>
           <button onClick={() => doCancel(rule.pct)} className="flex-1 bg-red-500 text-white font-extrabold text-[13px] py-2.5 rounded-xl">Ya, Batalkan</button></div></div>
     );
@@ -79,8 +80,11 @@ export default function TicketDetail({ bid }) {
     if (!target) return;
     target.status = 'cancelled';
     target.refundPct = pct || 0;
-    target.refundAmount = Math.round(target.total * ((pct || 0) / 100));
+    const _f = target.fare || splitFare(schedById(target.scheduleId), (target.seats || []).length, target.discount || 0);
+    target.refundAmount = Math.round((_f.ticket || 0) * ((pct || 0) / 100));
     DB.save('bookings', arr);
+    refresh();
+    voidLedger(target.id);
     refresh();
     audit('booking_cancel', target.code + ' • refund ' + (pct || 0) + '%');
     notify(target.userEmail, 'Booking dibatalkan — ' + target.code, 'Refund ' + fmtRp(target.refundAmount || 0) + ' (' + (pct || 0) + '%) diproses 1–3 hari kerja.', 'WA');
@@ -111,6 +115,9 @@ export default function TicketDetail({ bid }) {
             {b.passengers.map((p) => (<div key={p.seat} className="flex justify-between border-t border-slate-200 pt-1.5"><span>{p.name} <span className="text-slate-400">({p.phone})</span></span><span className="badge bg-sky-600 text-white">{p.seat}</span></div>))}
             <div className="flex justify-between border-t pt-1.5"><span>Jemput</span><b>{(b.passengers[0] && b.passengers[0].pickup) || '-'}</b></div>
             <div className="flex justify-between"><span>Travel</span><b>{ag.name} • {ag.phone}</b></div>
+            <div className="flex justify-between"><span>Tiket (sopir)</span><span>{fmtRp(_fare.ticket)}</span></div>
+            <div className="flex justify-between"><span>Jasa agen</span><span>{fmtRp(_fare.service)}</span></div>
+            <div className="flex justify-between"><span>Fee platform</span><span>{fmtRp(_fare.fee)}</span></div>
             <div className="flex justify-between font-extrabold text-[15px]"><span>Total</span><span>{fmtRp(b.total)}</span></div>
           </div>
           <div className="flex gap-2 mt-4 no-print">

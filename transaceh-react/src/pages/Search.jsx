@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { schedById, schedReady, takenSeats, seatsLeft, routeById, vehicleById, driverById, vehLayout, schedSeatCap, feeFor, audit, notify, vehName } from '@/lib/domain.js';
+import { schedById, schedReady, takenSeats, seatsLeft, routeById, vehicleById, driverById, vehLayout, schedSeatCap, feeFor, audit, notify, vehName, splitFare, createLedger } from '@/lib/domain.js';
 import { fmtRp, todayStr, uid } from '@/lib/utils.js';
 import { Icon, CabinGrid, fmtDate } from '@/components/ui.jsx';
 
@@ -64,6 +64,8 @@ export function PaymentModal({ booking, onDone }) {
   const mm = String(Math.max(0, Math.floor(ms / 60000))).padStart(2, '0');
   const ss = String(Math.max(0, Math.floor((ms % 60000) / 1000))).padStart(2, '0');
   const va = booking._va || ('8821 ' + String(Math.floor(100000000000 + Math.random() * 899999999999)).slice(0, 12).replace(/(\d{4})(?=\d)/g, '$1 '));
+  const _ps = schedById(booking.scheduleId);
+  const _fare = splitFare(_ps, (booking.seats || []).length, booking.discount || 0);
 
   const simulatePay = () => {
     const arr = DB.load('bookings', []);
@@ -71,7 +73,10 @@ export function PaymentModal({ booking, onDone }) {
     if (!b) return;
     b.status = 'paid';
     b.paidAt = new Date().toISOString();
+    b.fare = splitFare(schedById(b.scheduleId), (b.seats || []).length, b.discount || 0);
     DB.save('bookings', arr);
+    refresh();
+    createLedger(b);
     refresh();
     const pays = DB.load('payments', []);
     const p = pays.find((x) => x.bookingId === booking.id);
@@ -101,7 +106,8 @@ export function PaymentModal({ booking, onDone }) {
       ) : (
         <div className="mt-4 bg-gradient-to-r from-sky-500 to-blue-600 text-white rounded-2xl p-4 text-center font-extrabold">Bayar via E-Wallet<br /><span className="text-[26px] font-mono">{fmtRp(booking.total)}</span><div className="text-[12px] opacity-80 font-semibold">Dana • OVO • GoPay • ShopeePay</div></div>
       )}
-      <div className="flex justify-between font-extrabold text-[15px] mt-4"><span>Total</span><span className="text-sky-700">{fmtRp(booking.total)}</span></div>
+      <div className="mt-4 space-y-1 text-[13px] font-semibold"><div className="flex justify-between"><span>Tiket (sopir)</span><span>{fmtRp(_fare.ticket)}</span></div><div className="flex justify-between"><span>Jasa agen</span><span>{fmtRp(_fare.service)}</span></div><div className="flex justify-between"><span>Fee platform</span><span>{fmtRp(_fare.fee)}</span></div></div>
+      <div className="flex justify-between font-extrabold text-[15px] mt-2"><span>Total</span><span className="text-sky-700">{fmtRp(booking.total)}</span></div>
       <div className="text-[11px] text-slate-400 font-semibold">Kode booking: <b className="font-mono">{booking.code}</b></div>
       <button onClick={simulatePay} className="w-full mt-4 bg-green-500 hover:bg-green-600 text-white font-extrabold py-3.5 rounded-2xl transition flex items-center justify-center gap-2"><Icon name="circle-check-big" className="w-5 h-5" />Simulasi: Saya Sudah Bayar</button>
       <button onClick={() => { closeModal(); go('tickets'); }} className="w-full mt-2 bg-slate-100 font-bold text-[13px] py-2.5 rounded-2xl">Bayar Nanti (lihat tiket)</button>
@@ -372,6 +378,7 @@ export default function Search() {
     const sub = s.price * bw.seats.length;
     const discount = calcDiscount(bw.voucher, bw.scheduleId, bw.seats.length);
     const total = sub - discount;
+    const _fare = splitFare(s, bw.seats.length, discount);
     const vouchers = DB.load('vouchers', []).filter((x) => x.active);
     return (
       <>
@@ -383,6 +390,9 @@ export default function Search() {
             <div className="text-[12.5px] font-semibold text-slate-600">Kursi: <b>{bw.seats.join(', ')}</b> • Jemput: <b>{bw.pickup || r.pickups[0]}</b></div>
             <div className="mt-2 space-y-1 text-[13px] font-semibold"><div className="flex justify-between"><span>Subtotal ({bw.seats.length} kursi)</span><span>{fmtRp(sub)}</span></div>
               <div className="flex justify-between text-green-700"><span>Diskon voucher</span><span>− {fmtRp(discount)}</span></div>
+              <div className="flex justify-between"><span>Tiket (sopir)</span><span>{fmtRp(_fare.ticket)}</span></div>
+              <div className="flex justify-between"><span>Jasa agen</span><span>{fmtRp(_fare.service)}</span></div>
+              <div className="flex justify-between"><span>Fee platform</span><span>{fmtRp(_fare.fee)}</span></div>
               <div className="flex justify-between font-extrabold text-[16px] pt-2 border-t"><span>Total Bayar</span><span className="text-sky-700">{fmtRp(total)}</span></div></div>
             <div className="mt-3"><label className="text-[12px] font-extrabold">KODE VOUCHER</label>
               <div className="flex gap-2 mt-1"><input value={bw.voucher} onChange={(e) => setBw({ ...bw, voucher: e.target.value.toUpperCase() })} placeholder="cth: HEMAT20" className="flex-1 text-[13px] font-bold uppercase bg-white border-2 border-slate-200 rounded-xl px-3 py-2 focus-ring" /><button onClick={applyVoucher} className="bg-[#0b2447] text-white text-[12px] font-extrabold px-4 rounded-xl">Pakai</button></div>

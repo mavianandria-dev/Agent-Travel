@@ -1,6 +1,6 @@
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { agencyOf, routeById, vehicleById, vehName, driverById, schedById, bookingsOf, agencyById, audit, notify, processWaiting } from '@/lib/domain.js';
+import { agencyOf, routeById, vehicleById, vehName, driverById, schedById, bookingsOf, agencyById, audit, notify, processWaiting, splitFare, createLedger } from '@/lib/domain.js';
 import { fmtRp, todayStr } from '@/lib/utils.js';
 import { Icon, BadgeStatus, fmtDate } from '@/components/ui.jsx';
 
@@ -90,7 +90,9 @@ export default function Bookings({ ag }) {
     if (!b) return;
     b.status = 'paid';
     b.paidAt = new Date().toISOString();
+    b.fare = splitFare(schedById(b.scheduleId), (b.seats || []).length, b.discount || 0);
     DB.save('bookings', arr); refresh();
+    createLedger(b); refresh();
     audit('verify_manual', b.code);
     toast('Pembayaran ' + b.code + ' diverifikasi manual (transfer)');
     refresh();
