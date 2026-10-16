@@ -59,7 +59,7 @@ function ManifestModal({ sid }) {
           return (
             <tr key={st}><td>{st}</td><td className="font-extrabold">{st}</td>
               <td className="font-semibold">{p ? p.name : vehOff ? <span className="text-slate-400">- nonaktif (armada) -</span> : blocked ? <span className="text-slate-400">- diblokir -</span> : <span className="text-slate-300">- kosong -</span>}</td>
-              <td>{p ? p.phone : '-'}</td><td className="text-[12px]">{p ? (p.pickup || '-') : '-'}</td>
+              <td>{p ? p.phone : '-'}</td><td className="text-[12px]">{p ? (p.pickup || '-') + (p.pickupCoords ? ' • ' + p.pickupCoords : '') : '-'}</td>
               <td>{b ? <BadgeStatus st={b.status} /> : (vehOff || blocked) ? <span className="badge b-cancel">Tutup</span> : <span className="badge b-wait">Kosong</span>}</td></tr>
           );
         })}

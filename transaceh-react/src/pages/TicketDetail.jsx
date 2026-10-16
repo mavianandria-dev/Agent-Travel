@@ -113,7 +113,7 @@ export default function TicketDetail({ bid }) {
           <div className="mt-4 bg-slate-50 rounded-2xl p-3.5 text-[13px] font-semibold space-y-1">
             <div className="font-extrabold text-[12px] text-slate-400 tracking-wider">PENUMPANG</div>
             {b.passengers.map((p) => (<div key={p.seat} className="flex justify-between border-t border-slate-200 pt-1.5"><span>{p.name} <span className="text-slate-400">({p.phone})</span></span><span className="badge bg-sky-600 text-white">{p.seat}</span></div>))}
-            <div className="flex justify-between border-t pt-1.5"><span>Jemput</span><b>{(b.passengers[0] && b.passengers[0].pickup) || '-'}</b></div>
+            <div className="flex justify-between border-t pt-1.5"><span>Jemput</span><b>{((b.passengers[0] && b.passengers[0].pickup) || '-') + ((b.passengers[0] && b.passengers[0].pickupCoords) ? ' • ' + b.passengers[0].pickupCoords : '')}</b></div>
             <div className="flex justify-between"><span>Travel</span><b>{ag.name} • {ag.phone}</b></div>
             <div className="flex justify-between"><span>Tiket (sopir)</span><span>{fmtRp(_fare.ticket)}</span></div>
             <div className="flex justify-between"><span>Jasa agen</span><span>{fmtRp(_fare.service)}</span></div>
@@ -133,7 +133,7 @@ export default function TicketDetail({ bid }) {
         <div className="bg-white rounded-3xl shadow-card p-5">
           <h3 className="font-extrabold text-[15px] flex items-center gap-2"><Icon name="navigation" className="w-5 h-5 text-sky-600" />Status Perjalanan</h3>
           <TripTimeline st={b.tripStatus || 'scheduled'} />
-          <div className="mt-3 bg-sky-50 rounded-2xl p-3 text-[12.5px] font-semibold text-sky-900">Titik jemput: <b>{(b.passengers[0] && b.passengers[0].pickup) || '-'}</b> — harap standby 15 menit sebelum berangkat.</div>
+          <div className="mt-3 bg-sky-50 rounded-2xl p-3 text-[12.5px] font-semibold text-sky-900">Titik jemput: <b>{((b.passengers[0] && b.passengers[0].pickup) || '-') + ((b.passengers[0] && b.passengers[0].pickupCoords) ? ' • ' + b.passengers[0].pickupCoords : '')}</b> — harap standby 15 menit sebelum berangkat.</div>
         </div>
         {b.status === 'done' && !b.rating ? (
           <div className="bg-white rounded-3xl shadow-card p-5">

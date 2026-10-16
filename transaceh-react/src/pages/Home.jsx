@@ -14,7 +14,7 @@ export default function Home() {
   const scheds = DB.load('schedules', []).filter((s) => s.date >= todayStr(0));
 
   const quickBook = (routeId) => {
-    setBw({ ...bw, step: 1, routeId, date: todayStr(1), scheduleId: null, seats: [], passengers: [], pickup: '', voucher: '', discount: 0 });
+    setBw({ ...bw, step: 1, routeId, date: todayStr(1), scheduleId: null, seats: [], passengers: [], pickup: '', pickupAddr: '', pickupCoords: '', voucher: '', discount: 0 });
     go('search');
   };
 

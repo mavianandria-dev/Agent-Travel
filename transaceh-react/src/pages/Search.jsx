@@ -4,6 +4,14 @@ import { DB } from '@/lib/db.js';
 import { schedById, schedReady, takenSeats, seatsLeft, routeById, vehicleById, driverById, vehLayout, schedSeatCap, feeFor, audit, notify, vehName, splitFare, createLedger } from '@/lib/domain.js';
 import { fmtRp, todayStr, uid } from '@/lib/utils.js';
 import { Icon, CabinGrid, fmtDate } from '@/components/ui.jsx';
+import { PICKUP_ORIGIN, HOME_PICKUP } from '@/lib/pickups.js';
+
+const validCoords = (s) => {
+  const m = /^(-?\d+(\.\d+)?)\s*,\s*(-?\d+(\.\d+)?)$/.exec((s || '').trim());
+  if (!m) return false;
+  const lat = Number(m[1]), lng = Number(m[3]);
+  return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+};
 
 const STEP_LABELS = ['Rute', 'Tanggal', 'Armada', 'Kursi', 'Bayar'];
 
@@ -86,7 +94,7 @@ export function PaymentModal({ booking, onDone }) {
     refresh();
     closeModal();
     toast('Pembayaran sukses! E-tiket terbit.', 'ok');
-    setBw({ step: 1, routeId: 'R1', date: todayStr(1), scheduleId: null, seats: [], passengers: [], pickup: '', voucher: '', discount: 0 });
+    setBw({ step: 1, routeId: 'R1', date: todayStr(1), scheduleId: null, seats: [], passengers: [], pickup: '', pickupAddr: '', pickupCoords: '', voucher: '', discount: 0 });
     if (onDone) onDone(b.id);
     else go('ticket-detail:' + b.id);
   };
@@ -144,6 +152,10 @@ export default function Search() {
       if (!bw.seats.length) return toast('Pilih minimal 1 kursi', 'warn');
       const bad = bw.seats.some((st) => { const p = bw.passengers.find((x) => x.seat === st); return !p || !p.name || !p.phone; });
       if (bad) return toast('Lengkapi nama & HP semua penumpang', 'warn');
+      if (bw.pickup === HOME_PICKUP) {
+        if (!bw.pickupAddr.trim()) return toast('Isi alamat jemput rumah', 'warn');
+        if (!validCoords(bw.pickupCoords)) return toast('Koordinat format lat,lng — cth: 5.55, 95.32', 'warn');
+      }
       const tk = takenSeats(bw.scheduleId);
       const clash = bw.seats.find((s) => tk.paid.includes(s) || tk.hold.includes(s));
       if (clash) return toast('Kursi ' + clash + ' baru saja terbooking orang lain. Pilih kursi lain.', 'err');
@@ -216,9 +228,12 @@ export default function Search() {
     const sub = s.price * bw.seats.length;
     const total = sub - discount;
     const code = 'TA-' + Math.random().toString(36).slice(2, 7).toUpperCase();
+    const isHome = bw.pickup === HOME_PICKUP;
+    const pickupLabel = isHome ? 'Rumah: ' + bw.pickupAddr.trim() : bw.pickup || (PICKUP_ORIGIN[routeById(s.routeId)?.from] || [])[0] || routeById(s.routeId).pickups[0];
     const booking = {
       id: uid('BK'), code, scheduleId: s.id, userEmail: user.email,
-      passengers: bw.passengers.map((p) => ({ ...p, pickup: bw.pickup || routeById(s.routeId).pickups[0] })),
+      passengers: bw.passengers.map((p) => ({ ...p, pickup: pickupLabel, pickupCoords: isHome ? bw.pickupCoords.trim() : '' })),
+      pickupCoords: isHome ? bw.pickupCoords.trim() : '',
       seats: [...bw.seats], subtotal: sub, discount, total, status: 'pending', payMethod,
       createdAt: new Date().toISOString(), paidAt: null, holdExpiry: new Date(Date.now() + 15 * 60 * 1000).toISOString(), tripStatus: 'scheduled',
     };
@@ -335,7 +350,7 @@ export default function Search() {
     const v = vehicleById(s.vehicleId);
     const r = routeById(s.routeId);
     const layout = vehLayout(v);
-    const pickup = bw.pickup || (r.pickups[0] || '');
+    const pickup = bw.pickup || ((PICKUP_ORIGIN[r.from] || [])[0] || HOME_PICKUP);
     return (
       <div className="grid md:grid-cols-2 gap-5">
         <div><h3 className="font-extrabold text-[16px]">Pilih Kursi <span className="text-[12px] font-semibold text-slate-400">— {layout.filter((c) => c.type === 'seat').length} penumpang</span></h3>
@@ -361,8 +376,14 @@ export default function Search() {
                   </div>
                 </div>
               ))}</div>
-              <label className="block text-[12px] font-extrabold mt-3 mb-1">TITIK JEMPUT (door-to-door)</label>
-              <select value={pickup} onChange={(e) => setBw({ ...bw, pickup: e.target.value })} className="w-full text-[13px] font-semibold bg-white border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">{r.pickups.map((p) => (<option key={p} value={p}>{p}</option>))}</select>
+              <label className="block text-[12px] font-extrabold mt-3 mb-1">TITIK JEMPUT (wilayah {r.from})</label>
+              <select value={pickup} onChange={(e) => setBw({ ...bw, pickup: e.target.value })} className="w-full text-[13px] font-semibold bg-white border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">{(PICKUP_ORIGIN[r.from] || []).map((p) => (<option key={p} value={p}>{p}</option>))}<option value={HOME_PICKUP}>Jemput di rumah (isi alamat + koordinat)</option></select>
+              {pickup === HOME_PICKUP ? (
+                <div className="grid grid-cols-1 gap-2 mt-2">
+                  <input value={bw.pickupAddr} onChange={(e) => setBw({ ...bw, pickupAddr: e.target.value })} placeholder="Alamat rumah lengkap" className="text-[13px] font-semibold bg-white border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" />
+                  <input value={bw.pickupCoords} onChange={(e) => setBw({ ...bw, pickupCoords: e.target.value })} placeholder="Koordinat lat,lng — cth: 5.55, 95.32" inputMode="decimal" className="text-[13px] font-semibold bg-white border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" />
+                </div>
+              ) : null}
             </>
           )}
         </div>
@@ -387,7 +408,7 @@ export default function Search() {
           <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200">
             <div className="font-extrabold text-[14px]">{r.from} → {r.to}</div>
             <div className="text-[12.5px] font-semibold text-slate-600 mt-1">{fmtDate(s.date)} • {s.time} WIB • {vehName(v)} ({v.plate})</div>
-            <div className="text-[12.5px] font-semibold text-slate-600">Kursi: <b>{bw.seats.join(', ')}</b> • Jemput: <b>{bw.pickup || r.pickups[0]}</b></div>
+            <div className="text-[12.5px] font-semibold text-slate-600">Kursi: <b>{bw.seats.join(', ')}</b> • Jemput: <b>{bw.pickup === HOME_PICKUP ? 'Rumah: ' + bw.pickupAddr : bw.pickup || ((PICKUP_ORIGIN[r.from] || [])[0] || '')}</b>{bw.pickup === HOME_PICKUP && bw.pickupCoords ? <b> ({bw.pickupCoords})</b> : null}</div>
             <div className="mt-2 space-y-1 text-[13px] font-semibold"><div className="flex justify-between"><span>Subtotal ({bw.seats.length} kursi)</span><span>{fmtRp(sub)}</span></div>
               <div className="flex justify-between text-green-700"><span>Diskon voucher</span><span>− {fmtRp(discount)}</span></div>
               <div className="flex justify-between"><span>Tiket (sopir)</span><span>{fmtRp(_fare.ticket)}</span></div>

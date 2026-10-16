@@ -9,7 +9,7 @@ initDB();
 const AppCtx = createContext(null);
 export const useApp = () => useContext(AppCtx);
 
-export const freshBW = () => ({ step: 1, routeId: 'R1', date: todayStr(1), scheduleId: null, seats: [], passengers: [], pickup: '', voucher: '', discount: 0 });
+export const freshBW = () => ({ step: 1, routeId: 'R1', date: todayStr(1), scheduleId: null, seats: [], passengers: [], pickup: '', pickupAddr: '', pickupCoords: '', voucher: '', discount: 0 });
 
 const CUSTOMER_VIEWS = ['home', 'search', 'tickets', 'history', 'profile'];
 export { CUSTOMER_VIEWS };

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
 import { saveRouteRequest, priceForAgency } from '@/lib/domain.js';
+import { PICKUP_ORIGIN } from '@/lib/pickups.js';
 import { fmtRp, REGIONS } from '@/lib/utils.js';
 import { Icon, Empty } from '@/components/ui.jsx';
 
@@ -12,54 +13,58 @@ const STATUS_LABEL = { pending: 'Menunggu', approved: 'Disetujui', rejected: 'Di
 
 function RequestRouteModal({ ag }) {
   const { toast, closeModal, refresh } = useApp();
-  const myRoutes = DB.load('routes', []).filter((r) => (r.agencyIds || []).includes(ag.id));
-  const [type, setType] = useState('rute-baru');
-  const [routeId, setRouteId] = useState(myRoutes[0]?.id || '');
   const [from, setFrom] = useState('Aceh Jaya');
   const [to, setTo] = useState('Banda Aceh');
   const [price, setPrice] = useState('');
   const [pickup, setPickup] = useState('');
+  const [custom, setCustom] = useState('');
   const [note, setNote] = useState('');
+  const allRoutes = DB.load('routes', []);
+  const corridorRoutes = allRoutes.filter((r) => r.from === from && r.to === to);
+  const myCorridor = corridorRoutes.filter((r) => (r.agencyIds || []).includes(ag.id));
+  const isNew = corridorRoutes.length === 0;
+  const chips = [...new Set(PICKUP_ORIGIN[from] || [])];
+  const pickChip = (p) => { setPickup(p); setCustom(''); };
+  const pickFrom = (v) => { setFrom(v); setPickup(''); setCustom(''); };
+  const pickTo = (v) => { setTo(v); setPickup(''); setCustom(''); };
   const submit = () => {
-    if (type === 'titik-jemput') {
-      const r = myRoutes.find((x) => x.id === routeId);
-      if (!r) { toast('Pilih rute dulu', 'err'); return; }
-      if (!pickup.trim()) { toast('Isi titik jemput usulan', 'err'); return; }
-      saveRouteRequest({ agencyId: ag.id, type, from: r.from, to: r.to, pickup, note });
-    } else {
-      if (from === to) { toast('Kota asal dan tujuan tidak boleh sama', 'err'); return; }
+    if (from === to) { toast('Kota asal dan tujuan tidak boleh sama', 'err'); return; }
+    if (isNew) {
       if (!(Number(price) > 0)) { toast('Isi usulan harga tiket', 'err'); return; }
-      saveRouteRequest({ agencyId: ag.id, type, from, to, price: Number(price), pickup, note });
+      saveRouteRequest({ agencyId: ag.id, type: 'rute-baru', from, to, price: Number(price), pickup, note });
+    } else {
+      if (!myCorridor.length) { toast('Koridor ini belum tersedia untuk travel Anda — hubungi admin', 'warn'); return; }
+      if (!pickup.trim()) { toast('Isi titik jemput usulan', 'err'); return; }
+      const r = myCorridor[0];
+      saveRouteRequest({ agencyId: ag.id, type: 'titik-jemput', routeId: r.id, from, to, pickup, note });
     }
     refresh(); closeModal(); toast('Usulan terkirim — menunggu persetujuan admin');
   };
   return (
     <div className="p-6">
       <h3 className="font-extrabold text-[16px]">Usulkan Rute</h3>
-      <div className="flex gap-1.5 mt-3">
-        {[['rute-baru', 'Rute Baru'], ['titik-jemput', 'Titik Jemput']].map(([v, l]) => (
-          <button key={v} onClick={() => setType(v)} className={`flex-1 text-[12.5px] font-extrabold px-3 py-2.5 rounded-xl ${type === v ? 'bg-[#0b2447] text-white' : 'bg-slate-100 text-slate-500'}`}>{l}</button>
-        ))}
+      <div className={`mt-2 text-[12px] font-bold rounded-xl px-3 py-2 ${isNew ? 'bg-sky-50 text-sky-700' : 'bg-amber-50 text-amber-700'}`}>
+        {isNew ? 'Terdeteksi: koridor baru → tersimpan sebagai usulan RUTE' : 'Terdeteksi: koridor tersedia → tersimpan sebagai usulan TITIK'}
       </div>
-      {type === 'titik-jemput' ? (
-        <div className="mt-3"><label className="text-[12px] font-extrabold">RUTE <span className="text-red-500">*</span></label>
-          <select value={routeId} onChange={(e) => setRouteId(e.target.value)} className="w-full mt-1 font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">
-            {myRoutes.map((r) => (<option key={r.id} value={r.id}>{r.from} → {r.to}</option>))}
-          </select></div>
-      ) : (
-        <div className="grid grid-cols-2 gap-2.5 mt-3">
-          <div><label className="text-[12px] font-extrabold">DARI <span className="text-red-500">*</span></label>
-            <select value={from} onChange={(e) => setFrom(e.target.value)} className="w-full mt-1 font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">{REGIONS.map((g) => (<optgroup key={g.p} label={g.p}>{g.c.map((n) => (<option key={n}>{n}</option>))}</optgroup>))}</select></div>
-          <div><label className="text-[12px] font-extrabold">KE <span className="text-red-500">*</span></label>
-            <select value={to} onChange={(e) => setTo(e.target.value)} className="w-full mt-1 font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">{REGIONS.map((g) => (<optgroup key={g.p} label={g.p}>{g.c.map((n) => (<option key={n}>{n}</option>))}</optgroup>))}</select></div>
-        </div>
-      )}
-      {type === 'rute-baru' ? (
+      <div className="grid grid-cols-2 gap-2.5 mt-3">
+        <div><label className="text-[12px] font-extrabold">DARI <span className="text-red-500">*</span></label>
+          <select value={from} onChange={(e) => pickFrom(e.target.value)} className="w-full mt-1 font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">{REGIONS.map((g) => (<optgroup key={g.p} label={g.p}>{g.c.map((n) => (<option key={n}>{n}</option>))}</optgroup>))}</select></div>
+        <div><label className="text-[12px] font-extrabold">KE <span className="text-red-500">*</span></label>
+          <select value={to} onChange={(e) => pickTo(e.target.value)} className="w-full mt-1 font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">{REGIONS.map((g) => (<optgroup key={g.p} label={g.p}>{g.c.map((n) => (<option key={n}>{n}</option>))}</optgroup>))}</select></div>
+      </div>
+      {isNew ? (
       <div className="mt-3"><label className="text-[12px] font-extrabold">USULAN HARGA TIKET / KURSI (Rp) <span className="text-red-500">*</span></label>
         <input value={price} onChange={(e) => setPrice(e.target.value)} type="number" min="0" placeholder="cth: 300000" className="w-full mt-1 text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" /></div>
       ) : null}
-      <div className="mt-3"><label className="text-[12px] font-extrabold">TITIK JEMPUT USULAN {type === 'titik-jemput' ? <span className="text-red-500">*</span> : '(opsional)'}</label>
-        <input value={pickup} onChange={(e) => setPickup(e.target.value)} placeholder="cth: Simpang Lima" className="w-full mt-1 text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" /></div>
+      <div className="mt-3"><label className="text-[12px] font-extrabold">TITIK JEMPUT USULAN {!isNew ? <span className="text-red-500">*</span> : '(opsional)'}</label>
+        {chips.length ? (
+          <div className="flex flex-wrap gap-1.5 mt-1.5">
+            {chips.map((p) => (
+              <button key={p} type="button" onClick={() => pickChip(p)} className={`px-3 py-2 rounded-xl border-2 text-[12px] font-extrabold transition ${pickup === p && !custom ? 'bg-sky-600 border-sky-600 text-white' : 'bg-white border-slate-200 text-slate-500'}`}>{p}</button>
+            ))}
+          </div>
+        ) : null}
+        <input value={custom} onChange={(e) => { setCustom(e.target.value); setPickup(e.target.value); }} placeholder={chips.length ? 'atau ketik titik baru…' : 'cth: Simpang Lima'} className="w-full mt-1.5 text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" /></div>
       <div className="mt-3"><label className="text-[12px] font-extrabold">CATATAN (opsional)</label>
         <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Alasan usulan…" rows={2} className="w-full mt-1 text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" /></div>
       <button onClick={submit} className="btn-touch mt-4 w-full bg-sky-600 text-white font-extrabold py-3 rounded-2xl">Kirim Usulan</button>
