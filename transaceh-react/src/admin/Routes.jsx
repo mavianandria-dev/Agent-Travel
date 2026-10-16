@@ -108,7 +108,7 @@ function RequestSection() {
           <div className="flex-1"></div>
           <span className={`badge ${REQ_STATUS[q.status]}`}>{REQ_LABEL[q.status]}</span>
         </div>
-        {q.pickup ? <div className="text-[12px] text-slate-500 font-medium mt-1">Titik: {q.pickup}</div> : null}
+        {(q.pickups && q.pickups.length ? q.pickups : q.pickup ? [q.pickup] : []).length ? <div className="text-[12px] text-slate-500 font-medium mt-1">Titik: {(q.pickups && q.pickups.length ? q.pickups : [q.pickup]).join(', ')}</div> : null}
         {q.note ? <div className="text-[12px] text-slate-500 font-medium">Alasan: {q.note}</div> : null}
         {q.adminNote ? <div className="text-[12px] font-bold text-sky-700 mt-1">Admin: {q.adminNote}</div> : null}
         {q.status === 'pending' ? (

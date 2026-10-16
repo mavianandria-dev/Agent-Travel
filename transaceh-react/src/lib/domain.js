@@ -149,9 +149,11 @@ export function ledgerEligible(e){
 }
 
 /* Usulan rute agen → admin (model hibrida: agen usul, admin eksekusi) */
-export function saveRouteRequest({ agencyId, type, routeId, from, to, pickup, note, price }){
+export function saveRouteRequest({ agencyId, type, routeId, from, to, pickup, pickups, note, price, homePickup }){
   const arr=DB.load('routeRequests',[]);
-  const r={id:uid('RQ'),agencyId,type,routeId:routeId||null,from,to,pickup:(pickup||'').trim(),note:(note||'').trim(),price:Number(price)||0,status:'pending',adminNote:'',createdAt:new Date().toISOString(),decidedAt:null};
+  const list=Array.isArray(pickups)?pickups.map(x=>String(x).trim()).filter(Boolean):[];
+  if(!list.length&&(pickup||'').trim()) list.push((pickup||'').trim());
+  const r={id:uid('RQ'),agencyId,type,routeId:routeId||null,from,to,pickup:list[0]||'',pickups:list,note:(note||'').trim(),price:Number(price)||0,homePickup:homePickup!==false,status:'pending',adminNote:'',createdAt:new Date().toISOString(),decidedAt:null};
   arr.unshift(r); DB.save('routeRequests',arr);
   audit('route_request',type+' '+from+' → '+to+' • '+agencyId);
   DB.load('users',[]).filter(u=>u.role==='superadmin').forEach(u=>notify(u.email,'Usulan rute baru',(agencyById(agencyId)?.name||agencyId)+' mengusulkan '+(type==='rute-baru'?'rute baru':'titik jemput')+': '+from+' → '+to,'app'));
@@ -168,7 +170,8 @@ export function decideRouteRequest(id,approve,adminNote){
   if(approve){
     if(r.type==='rute-baru'){
       const routes=DB.load('routes',[]);
-      const nr={id:uid('R'),from:r.from,to:r.to,distance:'-',duration:'-',basePrice:Number(r.price)>0?Number(r.price):0,prices:Number(r.price)>0?{[r.agencyId]:Number(r.price)}:{},serviceFee:DEFAULT_SERVICE,pickups:r.pickup?['Terminal '+r.from,r.pickup]:['Terminal '+r.from,'Terminal '+r.to],active:true,agencyId:r.agencyId,agencyIds:[r.agencyId],driverId:null,driverIds:[]};
+      const pts=Array.isArray(r.pickups)&&r.pickups.length?r.pickups:(r.pickup?[r.pickup]:[]);
+      const nr={id:uid('R'),from:r.from,to:r.to,distance:'-',duration:'-',basePrice:Number(r.price)>0?Number(r.price):0,prices:Number(r.price)>0?{[r.agencyId]:Number(r.price)}:{},serviceFee:DEFAULT_SERVICE,homePickup:r.homePickup!==false,pickups:pts.length?['Terminal '+r.from,...pts]:['Terminal '+r.from,'Terminal '+r.to],active:true,agencyId:r.agencyId,agencyIds:[r.agencyId],driverId:null,driverIds:[]};
       routes.push(nr); DB.save('routes',routes);
       createdRouteId=nr.id;
     }else if(r.type==='ubah-harga'){
@@ -177,8 +180,9 @@ export function decideRouteRequest(id,approve,adminNote){
       if(tgt&&Number(r.price)>0){ tgt.prices={...(tgt.prices||{}),[r.agencyId]:Number(r.price)}; DB.save('routes',routes); }
     }else{
       const routes=DB.load('routes',[]);
-      const tgt=routes.find(x=>x.from===r.from&&x.to===r.to&&(x.agencyIds||[]).includes(r.agencyId));
-      if(tgt&&r.pickup&&!(tgt.pickups||[]).includes(r.pickup)){ tgt.pickups=[...(tgt.pickups||[]),r.pickup]; DB.save('routes',routes); }
+      const tgt=routes.find(x=>x.id===r.routeId)||routes.find(x=>x.from===r.from&&x.to===r.to&&(x.agencyIds||[]).includes(r.agencyId));
+      const pts=Array.isArray(r.pickups)&&r.pickups.length?r.pickups:(r.pickup?[r.pickup]:[]);
+      if(tgt&&pts.length){ let ch=false; pts.forEach(p=>{ if(!(tgt.pickups||[]).includes(p)){ tgt.pickups=[...(tgt.pickups||[]),p]; ch=true; } }); if(ch) DB.save('routes',routes); }
     }
   }
   DB.save('routeRequests',arr);

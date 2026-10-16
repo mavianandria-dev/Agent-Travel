@@ -270,7 +270,7 @@ export default function Search() {
       <div className="grid sm:grid-cols-2 gap-3 mt-3">{routes.map((r) => (
         <button key={r.id} onClick={() => setBw({ ...bw, routeId: r.id, scheduleId: null })} className={'text-left rounded-2xl border-2 p-4 transition ' + (bw.routeId === r.id ? 'border-sky-500 bg-sky-50 shadow-lg' : 'border-slate-100 hover:border-sky-200')}>
           <div className="font-extrabold text-[15px]">{r.from} → {r.to}</div><div className="text-[12px] text-slate-500 font-medium">{r.duration} • {r.distance} • mulai {fmtRp(r.basePrice)}</div>
-          <div className="text-[11px] font-bold text-slate-400 mt-1.5 flex items-center gap-1"><Icon name="map-pin" className="w-3 h-3" />{r.pickups.length} titik jemput door-to-door</div>
+          <div className="text-[11px] font-bold text-slate-400 mt-1.5 flex items-center gap-1 flex-wrap"><Icon name="map-pin" className="w-3 h-3" />{r.pickups.length} titik jemput door-to-door{r.homePickup !== false ? <span className="badge bg-green-100 text-green-700 ml-1">Jemput rumah tersedia</span> : null}</div>
         </button>
       ))}</div>
       {wizNav(false, true)}
@@ -329,7 +329,7 @@ export default function Search() {
           return (
             <div key={s.id} onClick={() => { if (ready) setBw({ ...bw, scheduleId: s.id }); }} className={(ready ? 'cursor-pointer card-hover active:scale-[.99]' : 'opacity-70') + ' rounded-2xl border-2 p-3 sm:p-3.5 flex flex-col xs:flex-row sm:flex-row gap-3 transition ' + (sel && ready ? 'border-sky-500 shadow-lg bg-sky-50/50' : 'border-slate-100 hover:border-sky-200 bg-white')}>
               <img src={v.photo} onError={(e) => { e.currentTarget.src = 'https://picsum.photos/seed/' + v.id + '/400/250'; }} className="w-full h-36 xs:w-28 xs:h-24 sm:w-40 sm:h-28 object-cover rounded-2xl shrink-0" loading="lazy" alt={vehName(v)} />
-              <div className="flex-1 min-w-0"><div className="flex items-center gap-2 flex-wrap"><span className="font-extrabold text-[15px]">{vehName(v)}</span><span className="badge bg-slate-100 text-slate-600">{v.plate}</span>{!ready ? <span className="badge bg-amber-100 text-amber-700">{why}</span> : left <= 2 && left > 0 ? <span className="badge bg-red-100 text-red-700">Sisa {left}</span> : null}{ready && left === 0 ? <span className="badge bg-red-500 text-white">PENUH</span> : null}</div>
+              <div className="flex-1 min-w-0"><div className="flex items-center gap-2 flex-wrap"><span className="font-extrabold text-[15px]">{vehName(v)}</span><span className="badge bg-slate-100 text-slate-600">{v.plate}</span>{routeById(s.routeId)?.homePickup !== false ? <span className="badge bg-green-100 text-green-700">Jemput rumah</span> : null}{!ready ? <span className="badge bg-amber-100 text-amber-700">{why}</span> : left <= 2 && left > 0 ? <span className="badge bg-red-100 text-red-700">Sisa {left}</span> : null}{ready && left === 0 ? <span className="badge bg-red-500 text-white">PENUH</span> : null}</div>
                 <div className="text-[12.5px] font-bold text-sky-700 mt-1 flex items-center gap-2"><Icon name="clock" className="w-3.5 h-3.5" />Berangkat {s.time} WIB • <Icon name="user" className="w-3.5 h-3.5" />{dr.name} ★{dr.rating}</div>
                 <div className="flex flex-wrap gap-1.5 mt-2">{(v.facilities || []).map((f) => (<span key={f} className="badge bg-slate-100 text-slate-600 !font-semibold"><Icon name="check" className="w-3 h-3" />{f}</span>))}</div>
                 <div className="flex items-center justify-between mt-2.5"><div className="font-extrabold text-[17px] text-[#0b2447]">{fmtRp(s.price)}<span className="text-[11px] font-semibold text-slate-400">/kursi</span></div>
@@ -377,7 +377,7 @@ export default function Search() {
                 </div>
               ))}</div>
               <label className="block text-[12px] font-extrabold mt-3 mb-1">TITIK JEMPUT (wilayah {r.from})</label>
-              <select value={pickup} onChange={(e) => setBw({ ...bw, pickup: e.target.value })} className="w-full text-[13px] font-semibold bg-white border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">{(PICKUP_ORIGIN[r.from] || []).map((p) => (<option key={p} value={p}>{p}</option>))}<option value={HOME_PICKUP}>Jemput di rumah (isi alamat + koordinat)</option></select>
+              <select value={pickup} onChange={(e) => setBw({ ...bw, pickup: e.target.value })} className="w-full text-[13px] font-semibold bg-white border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">{(PICKUP_ORIGIN[r.from] || []).map((p) => (<option key={p} value={p}>{p}</option>))}{r.homePickup !== false ? <option value={HOME_PICKUP}>Jemput di rumah (isi alamat + koordinat)</option> : null}</select>
               {pickup === HOME_PICKUP ? (
                 <div className="grid grid-cols-1 gap-2 mt-2">
                   <input value={bw.pickupAddr} onChange={(e) => setBw({ ...bw, pickupAddr: e.target.value })} placeholder="Alamat rumah lengkap" className="text-[13px] font-semibold bg-white border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" />
