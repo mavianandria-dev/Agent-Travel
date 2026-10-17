@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { saveRouteRequest, priceForAgency } from '@/lib/domain.js';
+import { saveRouteRequest, priceForAgency, isRouteSuspended } from '@/lib/domain.js';
 import { PICKUP_ORIGIN } from '@/lib/pickups.js';
 import { estimateRoute, routeMeta } from '@/lib/geo.js';
 import { fmtRp, REGIONS } from '@/lib/utils.js';
@@ -133,8 +133,9 @@ export default function Routes({ ag }) {
         <div className="grid sm:grid-cols-2 gap-3 mt-3">
           {routes.map((r) => (
             <div key={r.id} className="border-2 border-slate-100 rounded-3xl p-4">
-              <div className="flex items-center gap-2 text-[14px] font-extrabold">{r.from} <Icon name="arrow-right" className="w-4 h-4 text-sky-600" /> {r.to}<div className="flex-1"></div><span className={`badge ${r.active ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-500'}`}>{r.active ? 'aktif' : 'nonaktif'}</span></div>
+              <div className="flex items-center gap-2 text-[14px] font-extrabold">{r.from} <Icon name="arrow-right" className="w-4 h-4 text-sky-600" /> {r.to}<div className="flex-1"></div>{isRouteSuspended(r, ag.id) ? <span className="badge bg-red-100 text-red-600">disuspend</span> : <span className={`badge ${r.active ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-500'}`}>{r.active ? 'aktif' : 'nonaktif'}</span>}</div>
               <div className="text-[12px] text-slate-500 font-medium mt-1">{routeMeta(r)}</div>
+              {isRouteSuspended(r, ag.id) ? <div className="text-[12px] font-bold text-red-500 mt-1">Disuspend admin: {r.suspensions[ag.id].reason}</div> : null}
               <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">{r.homePickup !== false ? <span className="badge bg-green-100 text-green-700"><Icon name="map-pin" className="w-3 h-3" />Jemput rumah tersedia</span> : null}</div>
               <div className="flex items-center gap-2 mt-1.5"><span className="text-[13px] font-extrabold">Harga Anda: {fmtRp(priceForAgency(r, ag.id))}<span className="text-slate-400 font-medium">/kursi</span></span><div className="flex-1"></div>
                 <button onClick={() => openModal(<EditPriceModal ag={ag} route={r} />)} className="text-sky-600 text-[12px] font-extrabold px-3 py-1.5 rounded-xl bg-sky-50 hover:bg-sky-100">Ubah Harga</button></div>

@@ -1,6 +1,6 @@
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { setSession, seatsLeft, audit } from '@/lib/domain.js';
+import { setSession, seatsLeft, audit, routeBookable } from '@/lib/domain.js';
 import { fmtRp, todayStr } from '@/lib/utils.js';
 import { routeMeta } from '@/lib/geo.js';
 import { Icon } from '@/components/ui.jsx';
@@ -9,7 +9,7 @@ export default function Home() {
   const { go, toast, refresh, setBw, bw, tick } = useApp();
   void tick;
 
-  const routes = DB.load('routes', []).filter((r) => r.active);
+  const routes = DB.load('routes', []).filter(routeBookable);
   const reviews = DB.load('reviews', []);
   const ags = DB.load('agencies', []).filter((a) => a.status === 'active');
   const scheds = DB.load('schedules', []).filter((s) => s.date >= todayStr(0));

@@ -25,10 +25,10 @@ export function initDB(){
     {id:'U-CS1',name:'Pelanggan Demo',email:'user@demo.com',phone:'0813000001',pass:'user123',role:'pelanggan',agencyId:null,status:'active',photo:'',favorites:[{name:'Ayah',phone:'0813000002'}]},
   ];
   const agencies=[
-    {id:'AG1',name:'Barakah Travel',logo:'',address:'Jl. Merdeka No.12, Calang, Aceh Jaya',phone:'0654-20112',bank:'BCA 8210-9921-11 a.n. Barakah Travel',status:'active',feeType:'percent',feeValue:8,refundPolicy:[{minH:72,pct:100},{minH:24,pct:50},{minH:0,pct:0}],rating:4.8,trips:1240},
-    {id:'AG2',name:'Putra Jaya Trans',logo:'',address:'Jl. T. Umar No.88, Banda Aceh',phone:'0651-77821',bank:'Mandiri 8900-1122-33 a.n. Putra Jaya',status:'active',feeType:'flat',feeValue:5000,refundPolicy:[{minH:48,pct:100},{minH:0,pct:0}],rating:4.6,trips:860},
-    {id:'AG3',name:'Lintas Utara',logo:'',address:'Jl. Gatot Subroto No.45, Medan',phone:'061-778899',bank:'BRI 0022-3344-55 a.n. Lintas Utara',status:'active',feeType:'percent',feeValue:10,refundPolicy:[{minH:72,pct:100},{minH:24,pct:50},{minH:0,pct:0}],rating:4.7,trips:310},
-    {id:'AG4',name:'Cahaya Perkasa',logo:'',address:'Jl. Diponegoro No.7, Aceh Barat',phone:'0655-31212',bank:'-',status:'pending',feeType:'percent',feeValue:8,refundPolicy:[{minH:72,pct:100},{minH:24,pct:50},{minH:0,pct:0}],rating:5.0,trips:0},
+    {id:'AG1',name:'Barakah Travel',logo:'',address:'Jl. Merdeka No.12, Calang, Aceh Jaya',phone:'0654-20112',bank:'BCA 8210-9921-11 a.n. Barakah Travel',status:'active',serviceFee:10000,feeType:'percent',feeValue:8,refundPolicy:[{minH:72,pct:100},{minH:24,pct:50},{minH:0,pct:0}],rating:4.8,trips:1240},
+    {id:'AG2',name:'Putra Jaya Trans',logo:'',address:'Jl. T. Umar No.88, Banda Aceh',phone:'0651-77821',bank:'Mandiri 8900-1122-33 a.n. Putra Jaya',status:'active',serviceFee:10000,feeType:'flat',feeValue:5000,refundPolicy:[{minH:48,pct:100},{minH:0,pct:0}],rating:4.6,trips:860},
+    {id:'AG3',name:'Lintas Utara',logo:'',address:'Jl. Gatot Subroto No.45, Medan',phone:'061-778899',bank:'BRI 0022-3344-55 a.n. Lintas Utara',status:'active',serviceFee:10000,feeType:'percent',feeValue:10,refundPolicy:[{minH:72,pct:100},{minH:24,pct:50},{minH:0,pct:0}],rating:4.7,trips:310},
+    {id:'AG4',name:'Cahaya Perkasa',logo:'',address:'Jl. Diponegoro No.7, Aceh Barat',phone:'0655-31212',bank:'-',status:'pending',serviceFee:10000,feeType:'percent',feeValue:8,refundPolicy:[{minH:72,pct:100},{minH:24,pct:50},{minH:0,pct:0}],rating:5.0,trips:0},
   ];
   const routes=[
     {id:'R1',from:'Aceh Jaya',to:'Banda Aceh',distance:'±149 km',duration:'±3 jam',basePrice:150000,prices:{AG1:150000,AG2:170000},serviceFee:10000,homePickup:true,pickups:['Terminal Aceh Jaya','Simpang Calang','Lamno','Lhok Kruet','Lhoknga','Terminal Batoh B. Aceh'],active:true,agencyId:'AG1',agencyIds:['AG1','AG2'],driverId:'D1',driverIds:['D1','D2','D4']},

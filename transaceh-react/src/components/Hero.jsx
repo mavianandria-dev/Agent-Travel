@@ -1,5 +1,6 @@
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
+import { routeBookable } from '@/lib/domain.js';
 import { todayStr } from '@/lib/utils.js';
 import { Icon } from '@/components/ui.jsx';
 
@@ -9,7 +10,7 @@ export default function Hero() {
   if (user && ['agen', 'pengemudi', 'superadmin'].includes(user.role)) return null;
 
   const banners = DB.load('banners', []).filter((b) => b.active);
-  const routes = DB.load('routes', []).filter((r) => r.active);
+  const routes = DB.load('routes', []).filter(routeBookable);
   const schedCount = DB.load('schedules', []).length;
 
   const heroSearch = () => {

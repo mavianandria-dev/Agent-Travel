@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { schedById, schedReady, takenSeats, seatsLeft, routeById, vehicleById, driverById, vehLayout, schedSeatCap, feeFor, audit, notify, vehName, splitFare, createLedger } from '@/lib/domain.js';
+import { schedById, schedReady, takenSeats, seatsLeft, routeById, vehicleById, driverById, vehLayout, schedSeatCap, feeFor, audit, notify, vehName, splitFare, createLedger, routeBookable, isRouteSuspended } from '@/lib/domain.js';
 import { fmtRp, todayStr, uid } from '@/lib/utils.js';
 import { Icon, CabinGrid, fmtDate } from '@/components/ui.jsx';
 import { PICKUP_ORIGIN, HOME_PICKUP } from '@/lib/pickups.js';
@@ -137,8 +137,8 @@ export default function Search() {
   const { bw, setBw, user, go, toast, refresh, tick, payMethod, setPayMethod, openModal } = useApp();
   void tick;
 
-  const routes = DB.load('routes', []).filter((r) => r.active);
-  const stepSchedules = () => DB.load('schedules', []).filter((x) => x.routeId === bw.routeId && x.date === bw.date && x.status === 'open').sort((a, b) => a.time.localeCompare(b.time));
+  const routes = DB.load('routes', []).filter(routeBookable);
+  const stepSchedules = () => DB.load('schedules', []).filter((x) => x.routeId === bw.routeId && x.date === bw.date && x.status === 'open' && !isRouteSuspended(routeById(x.routeId), x.agencyId)).sort((a, b) => a.time.localeCompare(b.time));
 
 
   const wizNext = () => {
@@ -282,7 +282,7 @@ export default function Search() {
     const days = [];
     for (let i = 0; i < 14; i++) {
       const d = todayStr(i);
-      const list = DB.load('schedules', []).filter((x) => x.routeId === bw.routeId && x.date === d);
+      const list = DB.load('schedules', []).filter((x) => x.routeId === bw.routeId && x.date === d && !isRouteSuspended(routeById(x.routeId), x.agencyId));
       const avail = list.filter((s) => schedReady(s) && seatsLeft(s.id) > 0).length;
       const dt = new Date(d);
       days.push({

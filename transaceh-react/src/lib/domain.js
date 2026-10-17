@@ -97,7 +97,7 @@ export const hm=t=>{const[a,b]=t.split(':').map(Number);return a*60+b;};
    schedule.price = TOTAL all-in per kursi yg dilihat pelanggan. */
 export const DEFAULT_SERVICE=10000;
 export function priceForAgency(route,agencyId){ return Number(route?.prices?.[agencyId]??route?.basePrice??0)||0; }
-export function servicePerSeat(s){ const r=s?routeById(s.routeId):null; return Number(r?.serviceFee??DEFAULT_SERVICE)||0; }
+export function servicePerSeat(s){ const a=s?agencyById(s.agencyId):null; return Number(a?.serviceFee??DEFAULT_SERVICE)||0; }
 export function splitFare(s,nSeats=1,discount=0){
   if(!s) return {ticket:0,service:0,fee:0,total:0};
   const n=Math.max(1,Number(nSeats)||1);
@@ -156,6 +156,30 @@ export function normalizePoints(list){
   return out;
 }
 
+/* Suspend rute per Agen-Rute (admin): r.suspensions={[agencyId]:{reason,at}} */
+export function isRouteSuspended(route,agencyId){ return !!(route&&agencyId&&route.suspensions&&route.suspensions[agencyId]); }
+export function routeOfferedTo(route,agencyId){ return !!(route&&route.active&&(route.agencyIds||[]).includes(agencyId)&&!isRouteSuspended(route,agencyId)); }
+export function routeBookable(route){ if(!route||!route.active) return false; const ids=route.agencyIds||[]; return !ids.length||ids.some(a=>!isRouteSuspended(route,a)); }
+export function suspendAgencyRoute(routeId,agencyId,reason){
+  const rs=DB.load('routes',[]); const r=rs.find(x=>x.id===routeId);
+  const why=(reason||'').trim();
+  if(!r||!why||!(r.agencyIds||[]).includes(agencyId)) return false;
+  r.suspensions={...(r.suspensions||{}),[agencyId]:{reason:why,at:new Date().toISOString()}};
+  DB.save('routes',rs);
+  audit('route_suspend',r.from+' → '+r.to+' • '+agencyId+' • '+why);
+  DB.load('users',[]).filter(u=>u.role==='agen'&&u.agencyId===agencyId).forEach(u=>notify(u.email,'Rute disuspend admin',r.from+' → '+r.to+' • '+why,'app'));
+  return true;
+}
+export function activateAgencyRoute(routeId,agencyId){
+  const rs=DB.load('routes',[]); const r=rs.find(x=>x.id===routeId);
+  if(!r||!isRouteSuspended(r,agencyId)) return false;
+  const n={...(r.suspensions||{})}; delete n[agencyId]; r.suspensions=n;
+  DB.save('routes',rs);
+  audit('route_activate',r.from+' → '+r.to+' • '+agencyId);
+  DB.load('users',[]).filter(u=>u.role==='agen'&&u.agencyId===agencyId).forEach(u=>notify(u.email,'Rute diaktifkan kembali',r.from+' → '+r.to,'app'));
+  return true;
+}
+
 /* Usulan rute agen → admin (model hibrida: agen usul, admin eksekusi) */
 export function saveRouteRequest({ agencyId, type, routeId, from, to, pickup, pickups, note, price, homePickup, distance, duration }){
   const arr=DB.load('routeRequests',[]);
@@ -181,7 +205,7 @@ export function decideRouteRequest(id,approve,adminNote){
       const pts=normalizePoints(Array.isArray(r.pickups)&&r.pickups.length?r.pickups:(r.pickup?[r.pickup]:[]));
       const allPts=normalizePoints(pts.length?['Terminal '+r.from,...pts]:['Terminal '+r.from,'Terminal '+r.to]);
       const est=estimateRoute(r.from,r.to)||{};
-      const nr={id:uid('R'),from:r.from,to:r.to,distance:(r.distance||'').trim()||est.distance||'-',duration:(r.duration||'').trim()||est.duration||'-',basePrice:Number(r.price)>0?Number(r.price):0,prices:Number(r.price)>0?{[r.agencyId]:Number(r.price)}:{},serviceFee:DEFAULT_SERVICE,homePickup:r.homePickup!==false,pickups:allPts,active:true,agencyId:r.agencyId,agencyIds:[r.agencyId],driverId:null,driverIds:[]};
+      const nr={id:uid('R'),from:r.from,to:r.to,distance:(r.distance||'').trim()||est.distance||'-',duration:(r.duration||'').trim()||est.duration||'-',basePrice:Number(r.price)>0?Number(r.price):0,prices:Number(r.price)>0?{[r.agencyId]:Number(r.price)}:{},homePickup:r.homePickup!==false,pickups:allPts,active:true,agencyId:r.agencyId,agencyIds:[r.agencyId],driverId:null,driverIds:[]};
       routes.push(nr); DB.save('routes',routes);
       createdRouteId=nr.id;
     }else if(r.type==='ubah-harga'){

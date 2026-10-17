@@ -1,14 +1,14 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { agencyOf, routeById, vehicleById, vehName, driverById, schedById, takenSeats, vehLayout, schedSeatCap, schedReady, audit, hm, priceForAgency } from '@/lib/domain.js';
+import { agencyOf, agencyById, routeById, vehicleById, vehName, driverById, schedById, takenSeats, vehLayout, schedSeatCap, schedReady, audit, hm, priceForAgency, routeOfferedTo, DEFAULT_SERVICE } from '@/lib/domain.js';
 import { fmtRp, todayStr } from '@/lib/utils.js';
 import { Icon, BadgeStatus, fmtDate } from '@/components/ui.jsx';
 import { ManifestModal } from './Bookings.jsx';
 
 function SchedFormModal({ agId, onDone }) {
   const { closeModal, toast, refresh } = useApp();
-  const routes = DB.load('routes', []).filter((r) => r.active && (r.agencyIds || []).includes(agId));
+  const routes = DB.load('routes', []).filter((r) => routeOfferedTo(r, agId));
   const vs = DB.load('vehicles', []).filter((v) => v.agencyId === agId && v.status === 'aktif');
   const ds = DB.load('drivers', []).filter((d) => d.agencyId === agId && d.status === 'aktif');
   const [routeId, setRouteId] = useState(routes[0]?.id || '');
@@ -53,7 +53,7 @@ function SchedFormModal({ agId, onDone }) {
         <div><label className="text-[12px] font-extrabold">PENGEMUDI</label><select value={driverId} onChange={(e) => setDriverId(e.target.value)} className="w-full mt-1 text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">{ds.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
         <div className="col-span-2"><label className="text-[12px] font-extrabold">HARGA JUAL / KURSI</label>
           <div className="w-full mt-1 text-[15px] font-extrabold bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2.5">{finalPrice > 0 ? fmtRp(finalPrice) : '— belum ada harga —'}</div>
-          <div className="text-[11.5px] text-slate-500 font-medium mt-1">Dari rute Anda (atur via halaman Rute) • Jasa agen {fmtRp(routeById(routeId)?.serviceFee ?? 10000)}/kursi (ditentukan admin).</div></div>
+          <div className="text-[11.5px] text-slate-500 font-medium mt-1">Dari rute Anda (atur via halaman Rute) • Jasa agen {fmtRp(agencyById(agId)?.serviceFee ?? DEFAULT_SERVICE)}/kursi (ditentukan admin per agen).</div></div>
       </div>
       <button onClick={saveSched} className="mt-4 w-full bg-sky-600 text-white font-extrabold text-[14px] py-3 rounded-2xl">Simpan Jadwal</button></div>
   );
