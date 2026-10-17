@@ -1,63 +1,10 @@
-import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { agencyOf, agencyById, routeById, vehicleById, vehName, driverById, schedById, takenSeats, vehLayout, schedSeatCap, schedReady, audit, hm, priceForAgency, routeOfferedTo, DEFAULT_SERVICE } from '@/lib/domain.js';
-import { fmtRp, todayStr } from '@/lib/utils.js';
+import { agencyOf, routeById, vehicleById, vehName, driverById, schedById, takenSeats, vehLayout, schedSeatCap, schedReady, audit } from '@/lib/domain.js';
+import { fmtRp } from '@/lib/utils.js';
 import { Icon, BadgeStatus, fmtDate } from '@/components/ui.jsx';
 import { ManifestModal } from './Bookings.jsx';
-
-function SchedFormModal({ agId, onDone }) {
-  const { closeModal, toast, refresh } = useApp();
-  const routes = DB.load('routes', []).filter((r) => routeOfferedTo(r, agId));
-  const vs = DB.load('vehicles', []).filter((v) => v.agencyId === agId && v.status === 'aktif');
-  const ds = DB.load('drivers', []).filter((d) => d.agencyId === agId && d.status === 'aktif');
-  const [routeId, setRouteId] = useState(routes[0]?.id || '');
-  const [date, setDate] = useState(todayStr(1));
-  const [time, setTime] = useState('07:00');
-  const [vehicleId, setVehicleId] = useState(vs[0]?.id || '');
-  const [driverId, setDriverId] = useState(ds[0]?.id || '');
-  const selRoute = routeById(routeId);
-  const finalPrice = priceForAgency(selRoute, agId);
-
-  const schedRouteDriver = (rid) => {
-    setRouteId(rid);
-    const r = routeById(rid);
-    if (!r) return;
-    const pref = r.driverIds || (r.driverId ? [r.driverId] : []);
-    const hit = pref.find((id) => ds.some((d) => d.id === id));
-    if (hit) { setDriverId(hit); const d = driverById(hit); if (d) toast('Pengemudi default rute: ' + d.name, 'info'); }
-  };
-
-  const saveSched = () => {
-    const clash = DB.load('schedules', []).find((s) => s.date === date && (s.vehicleId === vehicleId || s.driverId === driverId) && Math.abs(hm(s.time) - hm(time)) < 240);
-    if (clash) { toast('BENTROK: armada/pengemudi sudah terjadwal ' + clash.time + ' di rute lain. Minimal jeda 4 jam.', 'err'); return; }
-    const arr = DB.load('schedules', []);
-    const r = routeById(routeId);
-    if (!(finalPrice > 0)) { toast('Rute belum punya harga — usulkan harga via halaman Rute', 'err'); return; }
-    arr.push({ id: 'S-' + Math.random().toString(36).slice(2, 7).toUpperCase(), agencyId: agId, routeId: r.id, date, time, vehicleId, driverId, price: finalPrice, status: 'open', tripStatus: 'scheduled', blockedSeats: [], createdAt: new Date().toISOString() });
-    DB.save('schedules', arr); refresh();
-    audit('schedule_create', r.from + '→' + r.to + ' ' + date + ' ' + time);
-    closeModal();
-    toast('Jadwal disimpan');
-    refresh();
-    if (onDone) onDone();
-  };
-
-  return (
-    <div className="p-6"><h3 className="font-extrabold text-[17px]">Tambah Jadwal</h3>
-      <div className="grid grid-cols-2 gap-2.5 mt-3">
-        <div className="col-span-2"><label className="text-[12px] font-extrabold">RUTE</label><select value={routeId} onChange={(e) => schedRouteDriver(e.target.value)} className="w-full mt-1 text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">{routes.map((r) => <option key={r.id} value={r.id}>{r.from} → {r.to}</option>)}</select></div>
-        <div><label className="text-[12px] font-extrabold">TANGGAL</label><input type="date" value={date} min={todayStr(0)} onChange={(e) => setDate(e.target.value)} className="w-full mt-1 text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" /></div>
-        <div><label className="text-[12px] font-extrabold">JAM</label><input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="w-full mt-1 text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" /></div>
-        <div><label className="text-[12px] font-extrabold">ARMADA</label><select value={vehicleId} onChange={(e) => setVehicleId(e.target.value)} className="w-full mt-1 text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">{vs.map((v) => <option key={v.id} value={v.id}>{vehName(v)} • {v.plate}</option>)}</select></div>
-        <div><label className="text-[12px] font-extrabold">PENGEMUDI</label><select value={driverId} onChange={(e) => setDriverId(e.target.value)} className="w-full mt-1 text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">{ds.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
-        <div className="col-span-2"><label className="text-[12px] font-extrabold">HARGA JUAL / KURSI</label>
-          <div className="w-full mt-1 text-[15px] font-extrabold bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2.5">{finalPrice > 0 ? fmtRp(finalPrice) : '— belum ada harga —'}</div>
-          <div className="text-[11.5px] text-slate-500 font-medium mt-1">Dari rute Anda (atur via halaman Rute) • Jasa agen {fmtRp(agencyById(agId)?.serviceFee ?? DEFAULT_SERVICE)}/kursi (ditentukan admin per agen).</div></div>
-      </div>
-      <button onClick={saveSched} className="mt-4 w-full bg-sky-600 text-white font-extrabold text-[14px] py-3 rounded-2xl">Simpan Jadwal</button></div>
-  );
-}
+import { SchedFormModal } from './SchedForm.jsx';
 
 function BlockSeatModal({ sid }) {
   const { closeModal, toast, refresh, tick } = useApp();
@@ -105,15 +52,18 @@ export default function Schedules({ ag }) {
     <div className="bg-white rounded-3xl shadow-card p-5">
       <div className="flex items-center gap-2"><h3 className="font-extrabold text-[16px]">Penjadwalan Keberangkatan</h3><div className="flex-1"></div>
         <button onClick={schedForm} className="bg-sky-600 text-white text-[12.5px] font-extrabold px-4 py-2.5 rounded-xl flex items-center gap-1.5"><Icon name="plus" className="w-4 h-4" />Tambah Jadwal</button></div>
-      <div className="table-wrap mt-3"><table className="data w-full min-w-[720px]"><thead><tr><th>Tanggal / Jam</th><th>Rute</th><th>Armada / Pengemudi</th><th>Harga</th><th>Terisi</th><th>Aksi</th></tr></thead><tbody>
+      <div className="table-wrap mt-3"><table className="data w-full min-w-[720px]"><thead><tr><th>Tanggal / Jam</th><th>Rute</th><th>Armada / Pengemudi &amp; Pengganti</th><th>Harga</th><th>Terisi</th><th>Aksi</th></tr></thead><tbody>
         {list.map((s) => {
           const r = routeById(s.routeId);
           const v = vehicleById(s.vehicleId);
           const dr = driverById(s.driverId);
+          const drvNama = s.driverName || dr?.name || v?.drvName || '—';
+          const back = s.backupName || v?.backName || '';
           const tk = takenSeats(s.id);
           return (
             <tr key={s.id}><td className="font-bold">{fmtDate(s.date)}<br /><span className="text-sky-600">{s.time}</span> {s.tripStatus !== 'scheduled' ? <BadgeStatus st={s.tripStatus} /> : null}</td>
-              <td className="font-semibold">{r?.from} → {r?.to}</td><td className="text-[12.5px] font-medium">{vehName(v)}<br /><span className="text-slate-400">{dr?.name}</span></td>
+              <td className="font-semibold">{r?.from} → {r?.to}</td>
+              <td className="text-[12.5px] font-medium">{vehName(v)}{v?.plate ? <span className="text-slate-400"> • {v.plate}</span> : null}<br /><span className="text-slate-500">{drvNama}</span><br /><span className="text-[11.5px] text-slate-400">Pengganti: {back || '—'}</span></td>
               <td className="font-extrabold">{fmtRp(s.price)}</td>
               <td><div className="flex items-center gap-1.5"><div className="w-16 h-2 bg-slate-100 rounded-full"><div className="h-full bg-sky-500 rounded-full" style={{ width: (tk.paid.length / schedSeatCap(s.id)) * 100 + '%' }}></div></div><b className="text-[12px]">{tk.paid.length}/{schedSeatCap(s.id)}</b></div></td>
               <td><div className="flex gap-1.5"><button onClick={() => manifest(s.id)} className="bg-sky-100 text-sky-700 p-2 rounded-lg"><Icon name="users" className="w-4 h-4" /></button>

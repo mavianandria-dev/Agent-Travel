@@ -63,6 +63,27 @@ export function schedSeatCap(schedId){ const s=schedById(schedId); if(!s) return
 
 export function schedReady(s){ if(!s||s.status!=='open') return false; const v=s.vehicleId?vehicleById(s.vehicleId):null, d=s.driverId?driverById(s.driverId):null; return (!v||v.status==='aktif')&&(!d||d.status==='aktif'); }
 
+/* Pemetaan nama pengemudi dari data armada → data pengemudi agen (penjadwalan otomatis). */
+export function driverByName(agencyId, name){
+  const n=String(name||'').trim().toLowerCase();
+  if(!n||!agencyId) return null;
+  const ds=DB.load('drivers',[]).filter(d=>d.agencyId===agencyId&&String(d.name||'').trim().toLowerCase()===n);
+  return ds.find(d=>d.status==='aktif')||ds[0]||null;
+}
+/* Bentrok jadwal: tanggal sama + (armada/pengemudi sama, ID atau nama) + jeda keberangkatan < 4 jam. */
+export function schedConflict(date,time,vehicleId,driverId,driverName){
+  const nm=String(driverName||'').trim().toLowerCase();
+  return DB.load('schedules',[]).find(s=>{
+    if(s.date!==date) return false;
+    if(Math.abs(hm(s.time)-hm(time))>=240) return false;
+    if(vehicleId&&s.vehicleId===vehicleId) return true;
+    if(driverId&&s.driverId===driverId) return true;
+    const dd=s.driverId?driverById(s.driverId):null;
+    const sn=String(s.driverName||(dd?dd.name:'')||'').trim().toLowerCase();
+    return !!(nm&&sn&&nm===sn);
+  })||null;
+}
+
 export function drvBlocks(L){ let n=0; for(let r=0;r<7;r++){ const a=L[r*4+2],b=L[r*4+3]; if(a&&b&&a.type==='driver'&&b.type==='driver') n++; } return n; }
 
 export function seatBookedFuture(vid,sid){
