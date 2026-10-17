@@ -5,7 +5,8 @@ import { schedById, schedReady, takenSeats, seatsLeft, routeById, vehicleById, d
 import { fmtRp, todayStr, uid } from '@/lib/utils.js';
 import { Icon, CabinGrid, fmtDate } from '@/components/ui.jsx';
 import { PICKUP_ORIGIN, HOME_PICKUP } from '@/lib/pickups.js';
-import { routeMeta } from '@/lib/geo.js';
+import { CITY_COORDS, routeMeta } from '@/lib/geo.js';
+import { MapPicker } from '@/components/MapPicker.jsx';
 
 const validCoords = (s) => {
   const m = /^(-?\d+(\.\d+)?)\s*,\s*(-?\d+(\.\d+)?)$/.exec((s || '').trim());
@@ -155,7 +156,7 @@ export default function Search() {
       if (bad) return toast('Lengkapi nama & HP semua penumpang', 'warn');
       if (bw.pickup === HOME_PICKUP) {
         if (!bw.pickupAddr.trim()) return toast('Isi alamat jemput rumah', 'warn');
-        if (!validCoords(bw.pickupCoords)) return toast('Koordinat format lat,lng — cth: 5.55, 95.32', 'warn');
+        if (!validCoords(bw.pickupCoords)) return toast('Tentukan titik jemput di peta dulu', 'warn');
       }
       const tk = takenSeats(bw.scheduleId);
       const clash = bw.seats.find((s) => tk.paid.includes(s) || tk.hold.includes(s));
@@ -378,11 +379,17 @@ export default function Search() {
                 </div>
               ))}</div>
               <label className="block text-[12px] font-extrabold mt-3 mb-1">TITIK JEMPUT (wilayah {r.from})</label>
-              <select value={pickup} onChange={(e) => setBw({ ...bw, pickup: e.target.value })} className="w-full text-[13px] font-semibold bg-white border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">{(PICKUP_ORIGIN[r.from] || []).map((p) => (<option key={p} value={p}>{p}</option>))}{r.homePickup !== false ? <option value={HOME_PICKUP}>Jemput di rumah (isi alamat + koordinat)</option> : null}</select>
+              <select value={pickup} onChange={(e) => setBw({ ...bw, pickup: e.target.value })} className="w-full text-[13px] font-semibold bg-white border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">{(PICKUP_ORIGIN[r.from] || []).map((p) => (<option key={p} value={p}>{p}</option>))}{r.homePickup !== false ? <option value={HOME_PICKUP}>Jemput di rumah (isi alamat + pin peta)</option> : null}</select>
               {pickup === HOME_PICKUP ? (
                 <div className="grid grid-cols-1 gap-2 mt-2">
-                  <input value={bw.pickupAddr} onChange={(e) => setBw({ ...bw, pickupAddr: e.target.value })} placeholder="Alamat rumah lengkap" className="text-[13px] font-semibold bg-white border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" />
-                  <input value={bw.pickupCoords} onChange={(e) => setBw({ ...bw, pickupCoords: e.target.value })} placeholder="Koordinat lat,lng — cth: 5.55, 95.32" inputMode="decimal" className="text-[13px] font-semibold bg-white border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" />
+                  <input value={bw.pickupAddr} onChange={(e) => setBw({ ...bw, pickupAddr: e.target.value })} placeholder="Alamat rumah lengkap (bisa diedit)" className="text-[13px] font-semibold bg-white border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" />
+                  <MapPicker
+                    value={bw.pickupCoords}
+                    center={CITY_COORDS[r.from]}
+                    onChange={(v) => setBw((cur) => ({ ...cur, pickupCoords: v }))}
+                    onAddress={(txt, force) => setBw((cur) => (force || !cur.pickupAddr.trim() ? { ...cur, pickupAddr: txt } : cur))}
+                  />
+                  <div className="text-[11px] font-bold text-slate-400 flex items-center gap-1.5"><Icon name="map-pin" className="w-3.5 h-3.5 shrink-0" />Geser pin / ketuk peta untuk menaruh titik jemput — koordinat &amp; alamat terisi otomatis.</div>
                 </div>
               ) : null}
             </>

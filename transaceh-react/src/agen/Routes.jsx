@@ -88,7 +88,7 @@ function RequestRouteModal({ ag }) {
         {picks.length ? <div className="flex flex-wrap gap-1.5 mt-1.5">{picks.map((p) => (<span key={p} className="badge bg-sky-600 text-white">{p} <button type="button" onClick={() => setPicks((ps) => ps.filter((x) => x !== p))} className="ml-0.5 font-extrabold">×</button></span>))}</div> : null}
       </div>
       {isNew ? (
-      <div className="mt-3"><label className="flex items-center gap-2.5 bg-sky-50 border-2 border-sky-200 rounded-2xl px-3.5 py-2.5 cursor-pointer text-[12.5px] font-bold text-sky-800"><input type="checkbox" checked={homePickup} onChange={(e) => setHomePickup(e.target.checked)} className="w-5 h-5 accent-sky-600 shrink-0" />Sediakan jemput ke rumah (pelanggan isi koordinat)</label></div>
+      <div className="mt-3"><label className="flex items-center gap-2.5 bg-sky-50 border-2 border-sky-200 rounded-2xl px-3.5 py-2.5 cursor-pointer text-[12.5px] font-bold text-sky-800"><input type="checkbox" checked={homePickup} onChange={(e) => setHomePickup(e.target.checked)} className="w-5 h-5 accent-sky-600 shrink-0" />Sediakan jemput ke rumah (pelanggan pin lokasi via peta)</label></div>
       ) : null}
       <div className="mt-3"><label className="text-[12px] font-extrabold">CATATAN (opsional)</label>
         <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Alasan usulan…" rows={2} className="w-full mt-1 text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" /></div>
