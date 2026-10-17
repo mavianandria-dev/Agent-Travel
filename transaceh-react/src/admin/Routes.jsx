@@ -3,6 +3,7 @@ import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
 import { agencyById, driverById, audit, decideRouteRequest, priceForAgency } from '@/lib/domain.js';
 import { fmtRp, uid, REGIONS } from '@/lib/utils.js';
+import { estimateRoute } from '@/lib/geo.js';
 import { Icon, Empty } from '@/components/ui.jsx';
 
 export function RouteFormModal() {
@@ -11,6 +12,8 @@ export function RouteFormModal() {
   const [from, setFrom] = useState('Aceh Jaya');
   const [to, setTo] = useState('Banda Aceh');
   const [serviceFee, setServiceFee] = useState(10000);
+  const [dist, setDist] = useState('');
+  const [dur, setDur] = useState('');
   const [agOpen, setAgOpen] = useState(false);
   const [agIds, setAgIds] = useState([]);
   const [drvIds, setDrvIds] = useState([]);
@@ -24,7 +27,8 @@ export function RouteFormModal() {
     for (const id of agIds) { const a = agencyById(id); if (!a || a.status !== 'active') { toast('Ada agen tidak aktif tercentang', 'err'); return; } }
     for (const id of drvIds) { const d = driverById(id); if (!d || d.status !== 'aktif' || !agIds.includes(d.agencyId)) { toast('Pengemudi ' + (d?.name || id) + ' tidak valid untuk agen tercentang', 'err'); return; } }
     const arr = DB.load('routes', []);
-    arr.push({ id: uid('R'), from: f, to: t, distance: '-', duration: '-', basePrice: 0, serviceFee: serviceFee === '' ? 10000 : Number(serviceFee) || 10000, pickups: ['Terminal ' + f, 'Terminal ' + t], active: true, agencyId: agIds[0], agencyIds: agIds, driverId: drvIds[0] || null, driverIds: drvIds });
+    const est = estimateRoute(f, t) || {};
+    arr.push({ id: uid('R'), from: f, to: t, distance: (dist || '').trim() || est.distance || '-', duration: (dur || '').trim() || est.duration || '-', basePrice: 0, serviceFee: serviceFee === '' ? 10000 : Number(serviceFee) || 10000, pickups: ['Terminal ' + f, 'Terminal ' + t], active: true, agencyId: agIds[0], agencyIds: agIds, driverId: drvIds[0] || null, driverIds: drvIds });
     DB.save('routes', arr);
     refresh();
     audit('route_create', f + ' → ' + t + ' • ' + agIds.length + ' agen • ' + drvIds.length + ' pengemudi');
@@ -42,6 +46,8 @@ export function RouteFormModal() {
           <select value={to} onChange={(e) => setTo(e.target.value)} className="w-full mt-1 font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">{REGIONS.map((g) => (<optgroup key={g.p} label={g.p}>{g.c.map((n) => (<option key={n}>{n}</option>))}</optgroup>))}</select></div>
         <div className="col-span-2 text-[11.5px] text-slate-500 font-medium bg-slate-50 rounded-xl px-3 py-2">Harga tiket ditentukan agen travel (via usulan harga / form jadwal). Admin hanya menetapkan jasa agen.</div>
         <div className="col-span-2"><label className="text-[12px] font-extrabold">JASA AGEN / KURSI (Rp)</label><input value={serviceFee} onChange={(e) => setServiceFee(e.target.value)} type="number" min="0" placeholder="10000" className="w-full mt-1 font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" /></div>
+        <div><label className="text-[12px] font-extrabold">PERKIRAAN JARAK (opsional)</label><input value={dist} onChange={(e) => setDist(e.target.value)} placeholder={(estimateRoute(from, to) || {}).distance || 'otomatis'} className="w-full mt-1 font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" /></div>
+        <div><label className="text-[12px] font-extrabold">PERKIRAAN DURASI (opsional)</label><input value={dur} onChange={(e) => setDur(e.target.value)} placeholder={(estimateRoute(from, to) || {}).duration || 'otomatis'} className="w-full mt-1 font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" /></div>
         <div className="col-span-2"><label className="text-[12px] font-extrabold">TRAVEL AGEN (centang, bisa banyak)</label>
           <div className="relative mt-1">
             <button type="button" onClick={() => setAgOpen((o) => !o)} className="w-full font-semibold text-left border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring bg-white flex items-center gap-2"><span className={`flex-1 ${agIds.length ? '' : 'text-slate-500'}`}>{agLabel}</span><Icon name="chevron-down" className="w-4 h-4 text-slate-400" /></button>

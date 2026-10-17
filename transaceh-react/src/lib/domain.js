@@ -1,5 +1,6 @@
 import { DB } from './db.js';
 import { uid, todayStr, SIM_TYPES } from './utils.js';
+import { estimateRoute } from './geo.js';
 export { uid, todayStr };
 
 /* Diekstrak dari index.html — pure domain logic, tanpa DOM. */
@@ -148,12 +149,19 @@ export function ledgerEligible(e){
   return Date.now()-new Date(at).getTime()>=24*3600*1000;
 }
 
+/* Normalisasi titik jemput: trim, buang kosong & duplikat (abaikan besar/kecil huruf) */
+export function normalizePoints(list){
+  const seen=new Set(); const out=[];
+  (Array.isArray(list)?list:[]).forEach(p=>{ const v=String(p==null?'':p).trim(); if(!v) return; const k=v.toLowerCase(); if(seen.has(k)) return; seen.add(k); out.push(v); });
+  return out;
+}
+
 /* Usulan rute agen → admin (model hibrida: agen usul, admin eksekusi) */
-export function saveRouteRequest({ agencyId, type, routeId, from, to, pickup, pickups, note, price, homePickup }){
+export function saveRouteRequest({ agencyId, type, routeId, from, to, pickup, pickups, note, price, homePickup, distance, duration }){
   const arr=DB.load('routeRequests',[]);
-  const list=Array.isArray(pickups)?pickups.map(x=>String(x).trim()).filter(Boolean):[];
+  const list=normalizePoints(pickups);
   if(!list.length&&(pickup||'').trim()) list.push((pickup||'').trim());
-  const r={id:uid('RQ'),agencyId,type,routeId:routeId||null,from,to,pickup:list[0]||'',pickups:list,note:(note||'').trim(),price:Number(price)||0,homePickup:homePickup!==false,status:'pending',adminNote:'',createdAt:new Date().toISOString(),decidedAt:null};
+  const r={id:uid('RQ'),agencyId,type,routeId:routeId||null,from,to,pickup:list[0]||'',pickups:list,note:(note||'').trim(),price:Number(price)||0,homePickup:homePickup!==false,distance:(distance||'').trim(),duration:(duration||'').trim(),status:'pending',adminNote:'',createdAt:new Date().toISOString(),decidedAt:null};
   arr.unshift(r); DB.save('routeRequests',arr);
   audit('route_request',type+' '+from+' → '+to+' • '+agencyId);
   DB.load('users',[]).filter(u=>u.role==='superadmin').forEach(u=>notify(u.email,'Usulan rute baru',(agencyById(agencyId)?.name||agencyId)+' mengusulkan '+(type==='rute-baru'?'rute baru':'titik jemput')+': '+from+' → '+to,'app'));
@@ -170,8 +178,10 @@ export function decideRouteRequest(id,approve,adminNote){
   if(approve){
     if(r.type==='rute-baru'){
       const routes=DB.load('routes',[]);
-      const pts=Array.isArray(r.pickups)&&r.pickups.length?r.pickups:(r.pickup?[r.pickup]:[]);
-      const nr={id:uid('R'),from:r.from,to:r.to,distance:'-',duration:'-',basePrice:Number(r.price)>0?Number(r.price):0,prices:Number(r.price)>0?{[r.agencyId]:Number(r.price)}:{},serviceFee:DEFAULT_SERVICE,homePickup:r.homePickup!==false,pickups:pts.length?['Terminal '+r.from,...pts]:['Terminal '+r.from,'Terminal '+r.to],active:true,agencyId:r.agencyId,agencyIds:[r.agencyId],driverId:null,driverIds:[]};
+      const pts=normalizePoints(Array.isArray(r.pickups)&&r.pickups.length?r.pickups:(r.pickup?[r.pickup]:[]));
+      const allPts=normalizePoints(pts.length?['Terminal '+r.from,...pts]:['Terminal '+r.from,'Terminal '+r.to]);
+      const est=estimateRoute(r.from,r.to)||{};
+      const nr={id:uid('R'),from:r.from,to:r.to,distance:(r.distance||'').trim()||est.distance||'-',duration:(r.duration||'').trim()||est.duration||'-',basePrice:Number(r.price)>0?Number(r.price):0,prices:Number(r.price)>0?{[r.agencyId]:Number(r.price)}:{},serviceFee:DEFAULT_SERVICE,homePickup:r.homePickup!==false,pickups:allPts,active:true,agencyId:r.agencyId,agencyIds:[r.agencyId],driverId:null,driverIds:[]};
       routes.push(nr); DB.save('routes',routes);
       createdRouteId=nr.id;
     }else if(r.type==='ubah-harga'){
@@ -181,8 +191,12 @@ export function decideRouteRequest(id,approve,adminNote){
     }else{
       const routes=DB.load('routes',[]);
       const tgt=routes.find(x=>x.id===r.routeId)||routes.find(x=>x.from===r.from&&x.to===r.to&&(x.agencyIds||[]).includes(r.agencyId));
-      const pts=Array.isArray(r.pickups)&&r.pickups.length?r.pickups:(r.pickup?[r.pickup]:[]);
-      if(tgt&&pts.length){ let ch=false; pts.forEach(p=>{ if(!(tgt.pickups||[]).includes(p)){ tgt.pickups=[...(tgt.pickups||[]),p]; ch=true; } }); if(ch) DB.save('routes',routes); }
+      const pts=normalizePoints(Array.isArray(r.pickups)&&r.pickups.length?r.pickups:(r.pickup?[r.pickup]:[]));
+      if(tgt&&pts.length){
+        const cur=normalizePoints(tgt.pickups); let ch=false;
+        pts.forEach(p=>{ if(!cur.some(x=>x.toLowerCase()===p.toLowerCase())){ cur.push(p); ch=true; } });
+        if(ch){ tgt.pickups=cur; DB.save('routes',routes); }
+      }
     }
   }
   DB.save('routeRequests',arr);

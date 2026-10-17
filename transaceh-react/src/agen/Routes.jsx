@@ -3,6 +3,7 @@ import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
 import { saveRouteRequest, priceForAgency } from '@/lib/domain.js';
 import { PICKUP_ORIGIN } from '@/lib/pickups.js';
+import { estimateRoute, routeMeta } from '@/lib/geo.js';
 import { fmtRp, REGIONS } from '@/lib/utils.js';
 import { Icon, Empty } from '@/components/ui.jsx';
 
@@ -20,6 +21,8 @@ function RequestRouteModal({ ag }) {
   const [custom, setCustom] = useState('');
   const [homePickup, setHomePickup] = useState(true);
   const [note, setNote] = useState('');
+  const [dist, setDist] = useState('');
+  const [dur, setDur] = useState('');
   const allRoutes = DB.load('routes', []);
   const corridorRoutes = allRoutes.filter((r) => r.from === from && r.to === to);
   const myCorridor = corridorRoutes.filter((r) => (r.agencyIds || []).includes(ag.id));
@@ -34,7 +37,7 @@ function RequestRouteModal({ ag }) {
     const all = custom.trim() && !picks.includes(custom.trim()) ? [...picks, custom.trim()] : picks;
     if (isNew) {
       if (!(Number(price) > 0)) { toast('Isi usulan harga tiket', 'err'); return; }
-      saveRouteRequest({ agencyId: ag.id, type: 'rute-baru', from, to, price: Number(price), pickups: all, homePickup, note });
+      saveRouteRequest({ agencyId: ag.id, type: 'rute-baru', from, to, price: Number(price), pickups: all, homePickup, note, distance: dist, duration: dur });
     } else {
       if (!myCorridor.length) { toast('Koridor ini belum tersedia untuk travel Anda — hubungi admin', 'warn'); return; }
       if (!all.length) { toast('Pilih minimal 1 titik jemput', 'err'); return; }
@@ -58,6 +61,17 @@ function RequestRouteModal({ ag }) {
       {isNew ? (
       <div className="mt-3"><label className="text-[12px] font-extrabold">USULAN HARGA TIKET / KURSI (Rp) <span className="text-red-500">*</span></label>
         <input value={price} onChange={(e) => setPrice(e.target.value)} type="number" min="0" placeholder="cth: 300000" className="w-full mt-1 text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" /></div>
+      ) : null}
+      {isNew ? (
+      <div className="grid grid-cols-2 gap-2.5 mt-3">
+        <div><label className="text-[12px] font-extrabold">PERKIRAAN JARAK (opsional)</label>
+          <input value={dist} onChange={(e) => setDist(e.target.value)} placeholder={(estimateRoute(from, to) || {}).distance || 'cth: ±150 km'} className="w-full mt-1 text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" /></div>
+        <div><label className="text-[12px] font-extrabold">PERKIRAAN DURASI (opsional)</label>
+          <input value={dur} onChange={(e) => setDur(e.target.value)} placeholder={(estimateRoute(from, to) || {}).duration || 'cth: ±3 jam'} className="w-full mt-1 text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" /></div>
+      </div>
+      ) : null}
+      {isNew ? (
+      <div className="text-[11.5px] text-slate-500 font-medium bg-slate-50 rounded-xl px-3 py-2 mt-1.5">Kosongkan jarak/durasi untuk pakai estimasi otomatis dari koordinat kota.</div>
       ) : null}
       <div className="mt-3"><label className="text-[12px] font-extrabold">TITIK JEMPUT USULAN {!isNew ? <span className="text-red-500">*</span> : '(opsional, boleh banyak)'}</label>
         {chips.length ? (
@@ -120,7 +134,7 @@ export default function Routes({ ag }) {
           {routes.map((r) => (
             <div key={r.id} className="border-2 border-slate-100 rounded-3xl p-4">
               <div className="flex items-center gap-2 text-[14px] font-extrabold">{r.from} <Icon name="arrow-right" className="w-4 h-4 text-sky-600" /> {r.to}<div className="flex-1"></div><span className={`badge ${r.active ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-500'}`}>{r.active ? 'aktif' : 'nonaktif'}</span></div>
-              <div className="text-[12px] text-slate-500 font-medium mt-1">{r.distance} • {r.duration}</div>
+              <div className="text-[12px] text-slate-500 font-medium mt-1">{routeMeta(r)}</div>
               <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">{r.homePickup !== false ? <span className="badge bg-green-100 text-green-700"><Icon name="map-pin" className="w-3 h-3" />Jemput rumah tersedia</span> : null}</div>
               <div className="flex items-center gap-2 mt-1.5"><span className="text-[13px] font-extrabold">Harga Anda: {fmtRp(priceForAgency(r, ag.id))}<span className="text-slate-400 font-medium">/kursi</span></span><div className="flex-1"></div>
                 <button onClick={() => openModal(<EditPriceModal ag={ag} route={r} />)} className="text-sky-600 text-[12px] font-extrabold px-3 py-1.5 rounded-xl bg-sky-50 hover:bg-sky-100">Ubah Harga</button></div>

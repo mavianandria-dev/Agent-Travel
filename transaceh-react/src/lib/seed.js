@@ -1,6 +1,7 @@
 import { DB } from './db.js';
 import { uid, todayStr } from './utils.js';
-import { simParse, vehLayout, bookingsOf } from './domain.js';
+import { simParse, vehLayout, bookingsOf, normalizePoints } from './domain.js';
+import { estimateRoute } from './geo.js';
 
 /* Diekstrak dari index.html (seed v11 + migrasi). Dijalankan sekali via initDB(). */
 export function initDB(){
@@ -30,10 +31,10 @@ export function initDB(){
     {id:'AG4',name:'Cahaya Perkasa',logo:'',address:'Jl. Diponegoro No.7, Aceh Barat',phone:'0655-31212',bank:'-',status:'pending',feeType:'percent',feeValue:8,refundPolicy:[{minH:72,pct:100},{minH:24,pct:50},{minH:0,pct:0}],rating:5.0,trips:0},
   ];
   const routes=[
-    {id:'R1',from:'Aceh Jaya',to:'Banda Aceh',distance:'±185 km',duration:'±5 jam',basePrice:150000,prices:{AG1:150000,AG2:170000},serviceFee:10000,homePickup:true,pickups:['Terminal Aceh Jaya','Simpang Calang','Lamno','Lhok Kruet','Lhoknga','Terminal Batoh B. Aceh'],active:true,agencyId:'AG1',agencyIds:['AG1','AG2'],driverId:'D1',driverIds:['D1','D2','D4']},
-    {id:'R2',from:'Banda Aceh',to:'Aceh Jaya',distance:'±185 km',duration:'±5 jam',basePrice:150000,prices:{AG1:150000,AG2:165000},serviceFee:10000,homePickup:true,pickups:['Terminal Batoh','Lhoknga','Lhok Kruet','Lamno','Simpang Calang','Terminal Aceh Jaya'],active:true,agencyId:'AG1',agencyIds:['AG1','AG2'],driverId:'D2',driverIds:['D1','D2','D5']},
-    {id:'R3',from:'Aceh Jaya',to:'Aceh Barat',distance:'±75 km',duration:'±2 jam',basePrice:80000,prices:{AG1:80000},serviceFee:5000,homePickup:true,pickups:['Terminal Aceh Jaya','Krueng Sabee','Teunom','Terminal Aceh Barat'],active:true,agencyId:'AG1',agencyIds:['AG1'],driverId:'D1',driverIds:['D1','D2']},
-    {id:'R4',from:'Banda Aceh',to:'Medan',distance:'±600 km',duration:'±12 jam',basePrice:320000,prices:{AG1:320000,AG2:335000,AG3:310000},serviceFee:15000,homePickup:true,pickups:['Terminal Batoh','Sigli','Bireuen','Lhokseumawe','Terminal Amplas Medan'],active:true,agencyId:'AG1',agencyIds:['AG1','AG2','AG3'],driverId:'D1',driverIds:['D1','D4','D6']},
+    {id:'R1',from:'Aceh Jaya',to:'Banda Aceh',distance:'±149 km',duration:'±3 jam',basePrice:150000,prices:{AG1:150000,AG2:170000},serviceFee:10000,homePickup:true,pickups:['Terminal Aceh Jaya','Simpang Calang','Lamno','Lhok Kruet','Lhoknga','Terminal Batoh B. Aceh'],active:true,agencyId:'AG1',agencyIds:['AG1','AG2'],driverId:'D1',driverIds:['D1','D2','D4']},
+    {id:'R2',from:'Banda Aceh',to:'Aceh Jaya',distance:'±149 km',duration:'±3 jam',basePrice:150000,prices:{AG1:150000,AG2:165000},serviceFee:10000,homePickup:true,pickups:['Terminal Batoh','Lhoknga','Lhok Kruet','Lamno','Simpang Calang','Terminal Aceh Jaya'],active:true,agencyId:'AG1',agencyIds:['AG1','AG2'],driverId:'D2',driverIds:['D1','D2','D5']},
+    {id:'R3',from:'Aceh Jaya',to:'Aceh Barat',distance:'±89 km',duration:'±2 jam',basePrice:80000,prices:{AG1:80000},serviceFee:5000,homePickup:true,pickups:['Terminal Aceh Jaya','Krueng Sabee','Teunom','Terminal Aceh Barat'],active:true,agencyId:'AG1',agencyIds:['AG1'],driverId:'D1',driverIds:['D1','D2']},
+    {id:'R4',from:'Banda Aceh',to:'Medan',distance:'±577 km',duration:'±10 jam',basePrice:320000,prices:{AG1:320000,AG2:335000,AG3:310000},serviceFee:15000,homePickup:true,pickups:['Terminal Batoh','Sigli','Bireuen','Lhokseumawe','Terminal Amplas Medan'],active:true,agencyId:'AG1',agencyIds:['AG1','AG2','AG3'],driverId:'D1',driverIds:['D1','D4','D6']},
   ];
   const vehicles=[
     {id:'V1',agencyId:'AG1',brand:'Toyota',model:'Innova Reborn',year:2022,color:'Hitam',plate:'BL 1234 AA',chassis:'MHFXW41G2N2001001',engine:'2GD2001001',vtype:'MPV',vtypeOther:'',baggage:'Besar',tax:'Aktif',stnkExp:'2027-03-10',kir:'Berlaku s.d. 2027',condition:'Sangat baik',capacity:6,photo:'https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?w=600&q=80',facilities:['AC','USB Charger','Air Mineral','Bantal'],status:'aktif',ownerName:'H. Muhammad Nur',ownerBiz:'Barakah Travel',ownerNik:'1173010101800001',ownerAddr:'Jl. Merdeka No.12, Calang',ownerPhone:'0812000001',ownerEmail:'agen@barakah.com',ownership:'Milik perusahaan',coopDriverId:'',hasEmail:'Ya',docs:['STNK','KTP pemilik'],docOther:'',stnkPhoto:'',ktpOwnerPhoto:'',mainRoute:'Calang — Banda Aceh',origin:'Aceh Jaya',dest:'Banda Aceh',freq:'Setiap hari',freqOther:'',services:['Antar jemput alamat','Paket barang'],opSchedule:'07:00 & 14:00 setiap hari',coopTariff:150000,coopSys:'Bagi hasil',coopOther:'',fleetCount:3,hasDriver:'Ya',drvName:'Bang Jamil',drvPhone:'0812000002',drvSim:'A - 1173011203850001',drvSimExp:'2030-05-01',drvExp:'12 tahun lintas Aceh',hasBackup:'Ya',backName:'Ilham Saputra',backPhone:'0812000099',backSim:'B1 - 1171031201970007',backSimExp:'2029-01-01'},
@@ -171,6 +172,33 @@ export function initDB(){
       if(!Array.isArray(v.facilities)){ v.facilities=['AC']; ch=true; }
     });
     if(ch) DB.save('vehicles',vs);
+  }catch(e){}
+})();
+/* Migrasi: bersihkan titik jemput rute (trim + buang duplikat, abaikan besar/kecil huruf) */
+(function migratePickupsV3(){
+  try{
+    const rs=DB.load('routes',[]); let ch=false;
+    rs.forEach(r=>{
+      const pts=normalizePoints(r.pickups);
+      if(JSON.stringify(pts)!==JSON.stringify(Array.isArray(r.pickups)?r.pickups:[])){ r.pickups=pts; ch=true; }
+    });
+    if(ch) DB.save('routes',rs);
+  }catch(e){}
+})();
+/* Migrasi: rapikan jarak/durasi rute — isi "-" + koreksi nilai seed lama yang tidak akurat (pakai override koridor bila ada) */
+(function migrateRouteMetaV3(){
+  try{
+    const SEED_FIX={ 'Banda Aceh|Aceh Jaya':['±185 km','±5 jam'], 'Aceh Jaya|Aceh Barat':['±75 km','±2 jam'], 'Banda Aceh|Medan':['±600 km','±12 jam'] };
+    const rs=DB.load('routes',[]); let ch=false;
+    rs.forEach(r=>{
+      const est=estimateRoute(r.from,r.to); if(!est) return;
+      const lg=SEED_FIX[r.from+'|'+r.to]||SEED_FIX[r.to+'|'+r.from];
+      const sd=!r.distance||r.distance==='-'||(lg&&r.distance===lg[0]);
+      const st=!r.duration||r.duration==='-'||(lg&&r.duration===lg[1]);
+      if(sd&&r.distance!==est.distance){ r.distance=est.distance; ch=true; }
+      if(st&&r.duration!==est.duration){ r.duration=est.duration; ch=true; }
+    });
+    if(ch) DB.save('routes',rs);
   }catch(e){}
 })();
 }

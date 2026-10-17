@@ -5,6 +5,7 @@ import { schedById, schedReady, takenSeats, seatsLeft, routeById, vehicleById, d
 import { fmtRp, todayStr, uid } from '@/lib/utils.js';
 import { Icon, CabinGrid, fmtDate } from '@/components/ui.jsx';
 import { PICKUP_ORIGIN, HOME_PICKUP } from '@/lib/pickups.js';
+import { routeMeta } from '@/lib/geo.js';
 
 const validCoords = (s) => {
   const m = /^(-?\d+(\.\d+)?)\s*,\s*(-?\d+(\.\d+)?)$/.exec((s || '').trim());
@@ -269,7 +270,7 @@ export default function Search() {
       <h3 className="font-extrabold text-[16px]">Pilih Rute Perjalanan</h3>
       <div className="grid sm:grid-cols-2 gap-3 mt-3">{routes.map((r) => (
         <button key={r.id} onClick={() => setBw({ ...bw, routeId: r.id, scheduleId: null })} className={'text-left rounded-2xl border-2 p-4 transition ' + (bw.routeId === r.id ? 'border-sky-500 bg-sky-50 shadow-lg' : 'border-slate-100 hover:border-sky-200')}>
-          <div className="font-extrabold text-[15px]">{r.from} → {r.to}</div><div className="text-[12px] text-slate-500 font-medium">{r.duration} • {r.distance} • mulai {fmtRp(r.basePrice)}</div>
+          <div className="font-extrabold text-[15px]">{r.from} → {r.to}</div><div className="text-[12px] text-slate-500 font-medium">{routeMeta(r, true)} • mulai {fmtRp(r.basePrice)}</div>
           <div className="text-[11px] font-bold text-slate-400 mt-1.5 flex items-center gap-1 flex-wrap"><Icon name="map-pin" className="w-3 h-3" />{r.pickups.length} titik jemput door-to-door{r.homePickup !== false ? <span className="badge bg-green-100 text-green-700 ml-1">Jemput rumah tersedia</span> : null}</div>
         </button>
       ))}</div>

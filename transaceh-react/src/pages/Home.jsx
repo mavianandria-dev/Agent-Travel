@@ -2,6 +2,7 @@ import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
 import { setSession, seatsLeft, audit } from '@/lib/domain.js';
 import { fmtRp, todayStr } from '@/lib/utils.js';
+import { routeMeta } from '@/lib/geo.js';
 import { Icon } from '@/components/ui.jsx';
 
 export default function Home() {
@@ -52,7 +53,7 @@ export default function Home() {
               return (
                 <div key={r.id} onClick={() => quickBook(r.id)} className={'card-hover border-2 rounded-2xl p-4 cursor-pointer ' + (i === 0 ? 'border-sky-500 bg-sky-50/50' : 'border-slate-100 bg-white')}>
                   <div className="flex items-start justify-between"><div className="font-extrabold text-[15px]">{r.from} <span className="text-sky-500">→</span> {r.to}</div>{i === 0 ? <span className="badge bg-red-500 text-white">TERLARIS</span> : null}</div>
-                  <div className="text-[12px] text-slate-500 font-medium mt-0.5 flex items-center gap-2"><Icon name="clock" className="w-3.5 h-3.5" />{r.duration} • {r.distance}</div>
+                  <div className="text-[12px] text-slate-500 font-medium mt-0.5 flex items-center gap-2"><Icon name="clock" className="w-3.5 h-3.5" />{routeMeta(r)}</div>
                   <div className="flex items-center justify-between mt-3"><div><div className="text-[11px] text-slate-400 font-bold">MULAI DARI</div><div className="font-extrabold text-sky-700 text-[17px]">{fmtRp(minP)}</div></div>
                     <span className={'badge ' + (left > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700')}>{left} kursi tersisa</span></div>
                 </div>
