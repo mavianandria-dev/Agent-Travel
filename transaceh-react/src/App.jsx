@@ -9,7 +9,7 @@ import Tickets from '@/pages/Tickets.jsx';
 import TicketDetail from '@/pages/TicketDetail.jsx';
 import History from '@/pages/History.jsx';
 import Profile from '@/pages/Profile.jsx';
-import { Login, Register } from '@/pages/Auth.jsx';
+import { Login, Register, RegisterAgen } from '@/pages/Auth.jsx';
 import Agen from '@/agen/Agen.jsx';
 import VehForm from '@/agen/VehForm.jsx';
 import DrvForm from '@/agen/DrvForm.jsx';
@@ -67,6 +67,7 @@ function Router() {
   else if (view === 'profile') page = user ? <Profile /> : <Login />;
   else if (view === 'login') page = <Login />;
   else if (view === 'register') page = <Register />;
+  else if (view === 'register-agen') page = <RegisterAgen />;
   else if (view.startsWith('agen')) {
     if (!user) page = <Login />;
     else if (view === 'agen-drvform') page = <DrvForm />;
