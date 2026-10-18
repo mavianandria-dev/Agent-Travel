@@ -14,8 +14,8 @@ const STATUS_LABEL = { pending: 'Menunggu', approved: 'Disetujui', rejected: 'Di
 
 function RequestRouteModal({ ag }) {
   const { toast, closeModal, refresh } = useApp();
-  const [from, setFrom] = useState('Aceh Jaya');
-  const [to, setTo] = useState('Banda Aceh');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
   const [price, setPrice] = useState('');
   const [picks, setPicks] = useState([]);
   const [custom, setCustom] = useState('');
@@ -33,6 +33,7 @@ function RequestRouteModal({ ag }) {
   const pickFrom = (v) => { setFrom(v); setPicks([]); setCustom(''); };
   const pickTo = (v) => { setTo(v); setPicks([]); setCustom(''); };
   const submit = () => {
+    if (!from || !to) { toast('Pilih kota asal dan tujuan dulu', 'err'); return; }
     if (from === to) { toast('Kota asal dan tujuan tidak boleh sama', 'err'); return; }
     const all = custom.trim() && !picks.includes(custom.trim()) ? [...picks, custom.trim()] : picks;
     if (isNew) {
@@ -49,14 +50,16 @@ function RequestRouteModal({ ag }) {
   return (
     <div className="p-6">
       <h3 className="font-extrabold text-[16px]">Usulkan Rute</h3>
+      {from && to ? (
       <div className={`mt-2 text-[12px] font-bold rounded-xl px-3 py-2 ${isNew ? 'bg-sky-50 text-sky-700' : 'bg-amber-50 text-amber-700'}`}>
         {isNew ? 'Terdeteksi: koridor baru → tersimpan sebagai usulan RUTE' : 'Terdeteksi: koridor tersedia → tersimpan sebagai usulan TITIK'}
       </div>
+      ) : null}
       <div className="grid grid-cols-2 gap-2.5 mt-3">
         <div><label className="text-[12px] font-extrabold">DARI <span className="text-red-500">*</span></label>
-          <select value={from} onChange={(e) => pickFrom(e.target.value)} className="w-full mt-1 font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">{REGIONS.map((g) => (<optgroup key={g.p} label={g.p}>{g.c.map((n) => (<option key={n}>{n}</option>))}</optgroup>))}</select></div>
+          <select value={from} onChange={(e) => pickFrom(e.target.value)} className="w-full mt-1 font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring"><option value="" disabled>— Pilih kota asal —</option>{REGIONS.map((g) => (<optgroup key={g.p} label={g.p}>{g.c.map((n) => (<option key={n}>{n}</option>))}</optgroup>))}</select></div>
         <div><label className="text-[12px] font-extrabold">KE <span className="text-red-500">*</span></label>
-          <select value={to} onChange={(e) => pickTo(e.target.value)} className="w-full mt-1 font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">{REGIONS.map((g) => (<optgroup key={g.p} label={g.p}>{g.c.map((n) => (<option key={n}>{n}</option>))}</optgroup>))}</select></div>
+          <select value={to} onChange={(e) => pickTo(e.target.value)} className="w-full mt-1 font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring"><option value="" disabled>— Pilih kota tujuan —</option>{REGIONS.map((g) => (<optgroup key={g.p} label={g.p}>{g.c.map((n) => (<option key={n}>{n}</option>))}</optgroup>))}</select></div>
       </div>
       {isNew ? (
       <div className="mt-3"><label className="text-[12px] font-extrabold">USULAN HARGA TIKET / KURSI (Rp) <span className="text-red-500">*</span></label>
