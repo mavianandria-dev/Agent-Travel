@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Alur Aplikasi TransAceh — Flowchart</title>
+<style>
+  :root{
+    --navy:#0b2447; --sky:#0284c7; --emerald:#059669; --violet:#7c3aed; --amber:#b45309; --red:#dc2626; --slate:#334155;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{background:#eef2f7;color:#0f172a;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;line-height:1.45}
+  .wrap{max-width:1300px;margin:0 auto;padding:22px 16px 70px}
+
+  /* ---------- header ---------- */
+  .top{background:linear-gradient(135deg,#0b2447 0%,#14396b 55%,#0d5a8f 100%);color:#fff;border-radius:22px;padding:24px 26px;display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap;box-shadow:0 10px 30px rgba(11,36,71,.22)}
+  .top h1{margin:0;font-size:23px;letter-spacing:-.3px}
+  .top p{margin:6px 0 0;font-size:13px;opacity:.9;max-width:760px}
+  .top .meta{margin-top:8px;font-size:11.5px;opacity:.75}
+  .top .sp{flex:1}
+  .btnprint{background:#fff;color:var(--navy);border:0;border-radius:14px;padding:11px 16px;font-weight:800;font-size:12.5px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.15)}
+  .btnprint:hover{background:#e8f2fb}
+
+  /* ---------- panel ---------- */
+  .panel{background:#fff;border-radius:22px;padding:18px 18px 14px;margin-top:18px;box-shadow:0 1px 2px rgba(15,23,42,.06),0 10px 26px rgba(15,23,42,.06)}
+  .panel h2{margin:0;font-size:17px;display:flex;align-items:center;gap:9px}
+  .panel h2 .num{background:var(--navy);color:#fff;width:26px;height:26px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;font-size:13px;flex:none}
+  .panel .desc{margin:5px 0 12px;font-size:12.5px;color:#64748b}
+  .notes{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:6px}
+  .notes li{background:#f8fafc;border:1px solid #e6ebf1;border-left:4px solid #cbd5e1;border-radius:10px;padding:8px 12px;font-size:12.3px;color:#334155}
+  .notes li b{color:#0f172a}
+  .notes li.sky{border-left-color:#38bdf8}
+  .notes li.em{border-left-color:#34d399}
+  .notes li.vi{border-left-color:#a78bfa}
+  .notes li.am{border-left-color:#fbbf24}
+  .notes li.rd{border-left-color:#f87171}
+
+  /* ---------- kartu info ---------- */
+  .grid3{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
+  .grid4{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}
+  .card{border:1px solid #e6ebf1;border-radius:16px;padding:13px 15px;background:#fbfdff}
+  .card h3{margin:0 0 5px;font-size:13.5px;display:flex;align-items:center;gap:7px}
+  .card p{margin:0;font-size:12.3px;color:#475569}
+  .dot{width:10px;height:10px;border-radius:4px;flex:none}
+  .tag{display:inline-block;font-size:10.5px;font-weight:800;color:#fff;border-radius:999px;padding:3px 9px;margin-bottom:7px}
+  .menu{list-style:none;margin:7px 0 0;padding:0;font-size:12.2px;color:#475569;display:grid;gap:3px}
+  .menu li{padding-left:14px;position:relative}
+  .menu li:before{content:"";position:absolute;left:0;top:7px;width:6px;height:6px;border-radius:2px;background:#cbd5e1}
+
+  /* ---------- svg ---------- */
+  svg{display:block;width:100%;height:auto;font-family:inherit}
+  .lane{stroke-width:1.5}
+  .lane.sk{fill:#f0f9ff;stroke:#e0f2fe}
+  .lane.em{fill:#ecfdf5;stroke:#d1fae5}
+  .lane.vi{fill:#f5f3ff;stroke:#ede9fe}
+  .lane.am{fill:#fffbeb;stroke:#fef3c7}
+  .lane.sl{fill:#f8fafc;stroke:#e2e8f0}
+  .chip{stroke:none}
+  .chip.sk{fill:#0284c7}.chip.em{fill:#059669}.chip.vi{fill:#7c3aed}.chip.am{fill:#b45309}.chip.sl{fill:#475569}.chip.rd{fill:#dc2626}
+  .ct{font-size:12px;font-weight:800;fill:#fff;text-anchor:middle}
+
+  .n rect{stroke-width:2}
+  .n.sk rect{fill:#f0f9ff;stroke:#7dd3fc}
+  .n.em rect{fill:#ecfdf5;stroke:#6ee7b7}
+  .n.vi rect{fill:#f5f3ff;stroke:#c4b5fd}
+  .n.am rect{fill:#fffbeb;stroke:#fcd34d}
+  .n.rd rect{fill:#fef2f2;stroke:#fca5a5}
+  .n.gr rect{fill:#f0fdf4;stroke:#86efac}
+  .n.sl rect{fill:#f8fafc;stroke:#cbd5e1}
+  .t1{font-size:13px;font-weight:800;fill:#0f172a}
+  .t2{font-size:10.8px;font-weight:600;fill:#64748b}
+  .t3{font-size:10.8px;font-weight:600;fill:#64748b}
+  .nb{stroke:none}
+  .nb.sk{fill:#0284c7}.nb.em{fill:#059669}.nb.vi{fill:#7c3aed}.nb.am{fill:#b45309}.nb.sl{fill:#475569}.nb.rd{fill:#dc2626}.nb.gr{fill:#16a34a}
+  .num{font-size:10px;font-weight:800;fill:#fff;text-anchor:middle}
+  .term rect{fill:var(--navy);stroke:var(--navy);stroke-width:2}
+  .term text{font-size:13px;font-weight:800;fill:#fff;text-anchor:middle}
+  .dec polygon{stroke-width:2;fill:#fff;stroke:#cbd5e1}
+  .dec.vi polygon{fill:#f5f3ff;stroke:#c4b5fd}
+  .dec.sl polygon{fill:#f8fafc;stroke:#cbd5e1}
+  .d1{font-size:12.5px;font-weight:800;fill:#0f172a;text-anchor:middle}
+  .e{fill:none;stroke:#94a3b8;stroke-width:2}
+  .e.sk{stroke:#38bdf8}.e.em{stroke:#34d399}.e.vi{stroke:#a78bfa}.e.am{stroke:#fbbf24}.e.rd{stroke:#f87171}.e.nv{stroke:#0b2447}
+  .el{font-size:10.5px;font-weight:800;fill:#64748b}
+  .lbl{font-size:10.5px;font-weight:700;fill:#94a3b8}
+
+  footer{margin-top:22px;font-size:11.5px;color:#64748b;text-align:center}
+
+  @media print{
+    body{background:#fff}
+    .wrap{max-width:none;padding:0}
+    .noprint{display:none!important}
+    .panel,.top{break-inside:avoid;box-shadow:none;border:1px solid #e2e8f0}
+  }
+</style>
+</head>
+<body>
+
+<!-- penanda panah (dipakai semua diagram) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#94a3b8"/></marker>
+  <marker id="ar-sk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#38bdf8"/></marker>
+  <marker id="ar-em" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#34d399"/></marker>
+  <marker id="ar-vi" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#a78bfa"/></marker>
+  <marker id="ar-am" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#fbbf24"/></marker>
+  <marker id="ar-rd" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#f87171"/></marker>
+  <marker id="ar-nv" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0b2447"/></marker>
+</defs></svg>
+
+<div class="wrap">
+
+  <header class="top">
+    <div>
+      <h1>Alur Aplikasi TransAceh — Flowchart</h1>
+      <p>Dokumentasi alur kerja platform: pendaftaran &amp; verifikasi → armada &amp; jadwal → pemesanan penumpang → hari-H &amp; arus uang.</p>
+      <div class="meta">Disusun dari kode aplikasi <b>transaceh-react</b> (simulasi localStorage) · 18 Oktober 2026 · opens offline, tanpa internet</div>
+    </div>
+    <div class="sp"></div>
+    <button class="btnprint noprint" onclick="window.print()">🖨️ Cetak / Simpan PDF</button>
+  </header>
+
+  <!-- ============ LEGENDA ============ -->
+  <section class="panel">
+    <h2><span class="num">i</span> Cara membaca diagram</h2>
+    <p class="desc">Setiap diagram memakai kolom (lane) per pelaku. Warna kotak menandai siapa yang mengerjakan langkah tersebut.</p>
+    <svg viewBox="0 0 700 132" role="img" aria-label="Legenda bentuk dan warna diagram">
+      <rect x="8" y="16" width="150" height="54" rx="16" fill="#0b2447"/>
+      <text x="83" y="48" text-anchor="middle" font-size="12.5" font-weight="800" fill="#fff">Mulai / Selesai</text>
+      <rect x="172" y="16" width="150" height="54" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="2"/>
+      <text x="247" y="40" text-anchor="middle" class="t1">Proses</text>
+      <text x="247" y="58" text-anchor="middle" class="t2">aksi pengguna</text>
+      <polygon points="411,16 461,43 411,70 361,43" fill="#fff" stroke="#cbd5e1" stroke-width="2"/>
+      <text x="411" y="48" text-anchor="middle" class="d1">Keputusan</text>
+      <rect x="475" y="16" width="150" height="54" rx="12" fill="#f8fafc" stroke="#94a3b8" stroke-width="2" stroke-dasharray="6 5"/>
+      <text x="550" y="40" text-anchor="middle" class="t1">Sistem</text>
+      <text x="550" y="58" text-anchor="middle" class="t2">otomatis</text>
+      <rect x="639" y="16" width="53" height="54" rx="12" fill="#fef2f2" stroke="#fca5a5" stroke-width="2"/>
+      <text x="665" y="48" text-anchor="middle" class="t1" style="font-size:11px">Catatan</text>
+
+      <rect class="chip sk" x="8" y="90" width="130" height="28" rx="10"/><text class="ct" x="73" y="108">Pelanggan</text>
+      <rect class="chip em" x="148" y="90" width="130" height="28" rx="10"/><text class="ct" x="213" y="108">Agen Travel</text>
+      <rect class="chip am" x="288" y="90" width="130" height="28" rx="10"/><text class="ct" x="353" y="108">Pengemudi</text>
+      <rect class="chip vi" x="428" y="90" width="130" height="28" rx="10"/><text class="ct" x="493" y="108">Superadmin</text>
+      <rect class="chip sl" x="568" y="90" width="124" height="28" rx="10"/><text class="ct" x="630" y="108">Sistem</text>
+    </svg>
+  </section>
+
+  <!-- ============ PANEL 1: PENDAFTARAN ============ -->
+  <section class="panel">
+    <h2><span class="num">1</span> Pendaftaran, Verifikasi &amp; Login</h2>
+    <p class="desc">Bedanya: penumpang langsung aktif, sedangkan agen travel wajib disetujui Superadmin lebih dulu.</p>
+    <svg viewBox="0 0 1240 470" role="img" aria-label="Diagram alur pendaftaran dan verifikasi akun">
+      <rect class="lane sk" x="20" y="70" width="390" height="380" rx="20"/>
+      <rect class="lane em" x="425" y="70" width="390" height="380" rx="20"/>
+      <rect class="lane vi" x="830" y="70" width="390" height="380" rx="20"/>
+      <rect class="chip sk" x="34" y="40" width="150" height="26" rx="9"/><text class="ct" x="109" y="58">1 · Pelanggan</text>
+      <rect class="chip em" x="439" y="40" width="170" height="26" rx="9"/><text class="ct" x="524" y="58">2 · Agen Travel</text>
+      <rect class="chip vi" x="844" y="40" width="180" height="26" rx="9"/><text class="ct" x="934" y="58">3 · Superadmin</text>
+
+      <g class="n sk"><rect x="65" y="105" width="300" height="62" rx="14"/>
+        <circle class="nb sk" cx="85" cy="126" r="10"/><text class="num" x="85" y="130">1</text>
+        <text class="t1" x="103" y="131">Daftar akun penumpang</text>
+        <text class="t2" x="83" y="155">nama • email • HP • password</text></g>
+      <g class="n sk"><rect x="65" y="215" width="300" height="58" rx="14"/>
+        <circle class="nb sk" cx="85" cy="235" r="10"/><text class="num" x="85" y="239">2</text>
+        <text class="t1" x="103" y="240">Langsung aktif</text>
+        <text class="t2" x="83" y="262">tanpa perlu persetujuan</text></g>
+      <g class="term"><rect x="65" y="325" width="300" height="58" rx="14"/>
+        <text x="215" y="359">Masuk → beranda, cari perjalanan</text></g>
+
+      <g class="n em"><rect x="470" y="105" width="300" height="62" rx="14"/>
+        <circle class="nb em" cx="490" cy="126" r="10"/><text class="num" x="490" y="130">3</text>
+        <text class="t1" x="508" y="131">Daftar sebagai Agen Travel</text>
+        <text class="t2" x="488" y="155">isi nama &amp; alamat travel</text></g>
+      <g class="n em"><rect x="470" y="215" width="300" height="58" rx="14"/>
+        <circle class="nb em" cx="490" cy="235" r="10"/><text class="num" x="490" y="239">4</text>
+        <text class="t1" x="508" y="240">Status Menunggu (pending)</text>
+        <text class="t2" x="488" y="262">belum bisa masuk</text></g>
+      <g class="n em"><rect x="470" y="325" width="300" height="58" rx="14"/>
+        <circle class="nb em" cx="490" cy="345" r="10"/><text class="num" x="490" y="349">5</text>
+        <text class="t1" x="508" y="350">Agen aktif → bisa masuk</text>
+        <text class="t2" x="488" y="372">dashboard, armada, rute, jadwal</text></g>
+
+      <g class="n vi"><rect x="875" y="150" width="300" height="58" rx="14"/>
+        <circle class="nb vi" cx="895" cy="170" r="10"/><text class="num" x="895" y="174">6</text>
+        <text class="t1" x="913" y="175">Tinjau pengajuan</text>
+        <text class="t2" x="893" y="197">halaman Agen (Superadmin)</text></g>
+      <g class="dec vi"><polygon points="1025,235 1175,290 1025,345 875,290"/>
+        <text class="d1" x="1025" y="295">Setujui akun?</text></g>
+      <g class="n rd"><rect x="875" y="370" width="300" height="58" rx="14"/>
+        <circle class="nb rd" cx="895" cy="390" r="10"/><text class="num" x="895" y="394">7</text>
+        <text class="t1" x="913" y="395">Tolak (+ alasan)</text>
+        <text class="t2" x="893" y="417">bisa mendaftar ulang</text></g>
+
+      <path class="e sk" d="M215 167 V215" marker-end="url(#ar-sk)"/>
+      <path class="e sk" d="M215 273 V325" marker-end="url(#ar-sk)"/>
+      <path class="e em" d="M620 167 V215" marker-end="url(#ar-em)"/>
+      <path class="e em" d="M770 244 H810 V179 H875" marker-end="url(#ar-em)"/>
+      <text class="el" x="782" y="234">① masuk antrean</text>
+      <path class="e vi" d="M1025 208 V235" marker-end="url(#ar-vi)"/>
+      <path class="e em" d="M875 290 H620 V325" marker-end="url(#ar-em)"/>
+      <text class="el" x="740" y="281">ya</text>
+      <path class="e rd" d="M1025 345 V370" marker-end="url(#ar-rd)"/>
+      <text class="el" x="1038" y="362">tidak</text>
+    </svg>
+    <ul class="notes">
+      <li class="em"><b>Persetujuan agen:</b> akun agen berstatus <i>pending</i> atau travel-nya <i>suspended</i> tidak bisa login — muncul pesan "menunggu persetujuan super admin".</li>
+      <li class="am"><b>Akun Pengemudi</b> dibuat oleh Agen di halaman <i>Pengemudi</i>. Status driver menentukan login: <b>aktif</b> = boleh masuk halaman Tugas, selain itu akunnya dinonaktifkan.</li>
+      <li class="sk"><b>Setelah login</b> tiap peran langsung diarahkan ke berandanya: Pelanggan → Beranda, Agen → Panel Agen, Pengemudi → Tugas, Superadmin → Panel Admin.</li>
+      <li><b>Superadmin</b> juga bisa mendaftarkan agen manual (halaman Agen) dengan status awal <i>pending</i>, lalu menyetujui/menolak/suspend, serta mengatur fee platform per agen.</li>
+    </ul>
+  </section>
+
+  <!-- ============ PANEL 2: ARMADA + USULAN RUTE ============ -->
+  <section class="panel">
+    <h2><span class="num">2</span> Armada → Usulan Rute → Persetujuan Admin → Rute Aktif</h2>
+    <p class="desc">Inti alur agen travel: siapkan armada, lalu usulkan rute (beserta armadanya). Rute baru hanya aktif setelah disetujui Superadmin.</p>
+    <svg viewBox="0 0 1240 800" role="img" aria-label="Diagram alur usulan rute dan persetujuan admin">
+      <rect class="lane em" x="20" y="70" width="440" height="690" rx="20"/>
+      <rect class="lane sl" x="475" y="70" width="290" height="690" rx="20"/>
+      <rect class="lane vi" x="780" y="70" width="440" height="690" rx="20"/>
+      <rect class="chip em" x="34" y="40" width="170" height="26" rx="9"/><text class="ct" x="119" y="58">2 · Agen Travel</text>
+      <rect class="chip sl" x="489" y="40" width="160" height="26" rx="9"/><text class="ct" x="569" y="58">Sistem (otomatis)</text>
+      <rect class="chip vi" x="794" y="40" width="170" height="26" rx="9"/><text class="ct" x="879" y="58">3 · Superadmin</text>
+
+      <g class="n em"><rect x="70" y="110" width="340" height="62" rx="14"/>
+        <circle class="nb em" cx="90" cy="131" r="10"/><text class="num" x="90" y="135">1</text>
+        <text class="t1" x="108" y="136">Tambah armada</text>
+        <text class="t2" x="88" y="159">nama, plat, kapasitas, sopir (halaman Armada)</text></g>
+      <g class="n em"><rect x="70" y="215" width="340" height="62" rx="14"/>
+        <circle class="nb em" cx="90" cy="236" r="10"/><text class="num" x="90" y="240">2</text>
+        <text class="t1" x="108" y="241">Usulkan Rute</text>
+        <text class="t2" x="88" y="264">pilih DARI &amp; KE — koridor sama tetap boleh</text></g>
+      <g class="n em"><rect x="70" y="320" width="340" height="76" rx="14"/>
+        <circle class="nb em" cx="90" cy="341" r="10"/><text class="num" x="90" y="345">3</text>
+        <text class="t1" x="108" y="346">Lengkapi isi usulan</text>
+        <text class="t2" x="88" y="369">harga /kursi • jarak &amp; durasi • titik jemput</text>
+        <text class="t3" x="88" y="386">jemput ke rumah</text></g>
+      <g class="n em"><rect x="70" y="435" width="340" height="76" rx="14"/>
+        <circle class="nb em" cx="90" cy="456" r="10"/><text class="num" x="90" y="460">4</text>
+        <text class="t1" x="108" y="461">Pilih armada tersedia</text>
+        <text class="t2" x="88" y="484">aktif &amp; belum dipakai rute lain</text>
+        <text class="t3" x="88" y="501">boleh banyak • minimal 1</text></g>
+      <g class="term"><rect x="70" y="555" width="340" height="58" rx="14"/>
+        <text x="240" y="589">Kirim usulan → status Menunggu</text></g>
+      <g class="n em"><rect x="70" y="660" width="340" height="76" rx="14"/>
+        <circle class="nb em" cx="90" cy="681" r="10"/><text class="num" x="90" y="685">7</text>
+        <text class="t1" x="108" y="686">Muncul di Rute Saya</text>
+        <text class="t2" x="88" y="709">badge jumlah armada di tiap kartu</text>
+        <text class="t3" x="88" y="726">klik kartu → tabel detail armada</text></g>
+
+      <g class="n vi"><rect x="830" y="170" width="340" height="62" rx="14"/>
+        <circle class="nb vi" cx="850" cy="191" r="10"/><text class="num" x="850" y="195">5</text>
+        <text class="t1" x="868" y="196">Tinjau usulan rute</text>
+        <text class="t2" x="848" y="219">harga • titik jemput • jumlah armada</text></g>
+      <g class="dec vi"><polygon points="1000,245 1150,300 1000,355 850,300"/>
+        <text class="d1" x="1000" y="305">Setujui rute?</text></g>
+      <g class="n rd"><rect x="830" y="390" width="340" height="58" rx="14"/>
+        <circle class="nb rd" cx="850" cy="410" r="10"/><text class="num" x="850" y="414">6</text>
+        <text class="t1" x="868" y="415">Tolak (+ alasan)</text>
+        <text class="t2" x="848" y="437">notif ke agen • armada tetap bebas</text></g>
+
+      <g class="n sl"><rect x="505" y="555" width="230" height="76" rx="14"/>
+        <circle class="nb sl" cx="525" cy="576" r="10"/><text class="num" x="525" y="580">6</text>
+        <text class="t1" x="543" y="581">Rute baru dibuat</text>
+        <text class="t2" x="523" y="604">harga khusus agen itu</text>
+        <text class="t3" x="523" y="621">+ armada terpasang</text></g>
+      <g class="n sl"><rect x="505" y="660" width="230" height="76" rx="14"/>
+        <circle class="nb sl" cx="525" cy="681" r="10"/><text class="num" x="525" y="685">7</text>
+        <text class="t1" x="543" y="686">Rute aktif</text>
+        <text class="t2" x="523" y="709">tampil di Rute Saya</text>
+        <text class="t3" x="523" y="726">siap dijadwalkan</text></g>
+
+      <path class="e em" d="M240 172 V215" marker-end="url(#ar-em)"/>
+      <path class="e em" d="M240 277 V320" marker-end="url(#ar-em)"/>
+      <path class="e em" d="M240 396 V435" marker-end="url(#ar-em)"/>
+      <path class="e em" d="M240 511 V555" marker-end="url(#ar-em)"/>
+      <path class="e em" d="M410 584 H440 V201 H830" marker-end="url(#ar-em)"/>
+      <text class="el" x="470" y="192">① usulan masuk daftar admin</text>
+      <path class="e vi" d="M1025 232 V245" marker-end="url(#ar-vi)"/>
+      <path class="e sl" d="M850 300 H790 V593 H735" marker-end="url(#ar)"/>
+      <text class="el" x="800" y="292">ya</text>
+      <path class="e rd" d="M1000 355 V390" marker-end="url(#ar-rd)"/>
+      <text class="el" x="1013" y="378">tidak</text>
+      <path class="e sl" d="M620 631 V660" marker-end="url(#ar)"/>
+      <path class="e sl" d="M505 698 H410" marker-end="url(#ar)"/>
+    </svg>
+    <ul class="notes">
+      <li class="em"><b>Satu armada = satu rute:</b> di form usulan hanya armada <i>aktif</i> yang <b>belum dipakai rute lain</b> yang bisa dipilih; jumlah armada yang dipilih menempel di rute tersebut (tampil sebagai badge di kartu Rute Saya).</li>
+      <li class="sk"><b>Rute kembar diizinkan:</b> DARI/KE yang sama boleh diusulkan berkali-kali; yang membedakan isi field lain — <b>harga</b>, <b>armada</b>, dan <b>titik jemput</b>.</li>
+      <li class="vi"><b>Harga per agen:</b> setiap rute menyimpan harga untuk masing-masing agen, jadi dua agen bisa berbeda harga pada koridor yang sama.</li>
+      <li class="rd"><b>Ditolak:</b> Agen menerima notifikasi beserta alasan; armadanya tidak terkunci dan bisa dipilih lagi di usulan berikutnya.</li>
+      <li class="am"><b>Ubah harga</b> juga lewat usulan (dengan persetujuan admin), dan admin bisa <b>men-suspend</b> rute untuk agen tertentu dengan alasan.</li>
+    </ul>
+  </section>
+
+  <!-- ============ PANEL 3: TAMBAH JADWAL ============ -->
+  <section class="panel">
+    <h2><span class="num">3</span> Agen Menambah Jadwal (armada terkunci per rute)</h2>
+    <p class="desc">Urutannya: jam → tanggal → rute (bertag harga) → armada dari rute itu, lalu sistem memeriksa bentrok sebelum menyimpan.</p>
+    <svg viewBox="0 0 1240 810" role="img" aria-label="Diagram alur tambah jadwal">
+      <rect class="lane em" x="20" y="70" width="520" height="715" rx="20"/>
+      <rect class="lane sl" x="560" y="70" width="460" height="715" rx="20"/>
+      <rect class="chip em" x="34" y="40" width="170" height="26" rx="9"/><text class="ct" x="119" y="58">2 · Agen Travel</text>
+      <rect class="chip sl" x="574" y="40" width="180" height="26" rx="9"/><text class="ct" x="664" y="58">Sistem (otomatis)</text>
+
+      <g class="n em"><rect x="90" y="110" width="380" height="62" rx="14"/>
+        <circle class="nb em" cx="110" cy="131" r="10"/><text class="num" x="110" y="135">1</text>
+        <text class="t1" x="128" y="136">Buka Jadwal → Tambah Jadwal</text>
+        <text class="t2" x="108" y="159">halaman Jadwal</text></g>
+      <g class="n em"><rect x="90" y="210" width="380" height="62" rx="14"/>
+        <circle class="nb em" cx="110" cy="231" r="10"/><text class="num" x="110" y="235">2</text>
+        <text class="t1" x="128" y="236">Pilih jam keberangkatan</text>
+        <text class="t2" x="108" y="259">jam : menit</text></g>
+      <g class="n em"><rect x="90" y="310" width="380" height="62" rx="14"/>
+        <circle class="nb em" cx="110" cy="331" r="10"/><text class="num" x="110" y="335">3</text>
+        <text class="t1" x="128" y="336">Pilih tanggal</text>
+        <text class="t2" x="108" y="359">boleh pilih banyak tanggal sekaligus</text></g>
+      <g class="n em"><rect x="90" y="410" width="380" height="76" rx="14"/>
+        <circle class="nb em" cx="110" cy="431" r="10"/><text class="num" x="110" y="435">4</text>
+        <text class="t1" x="128" y="436">Pilih rute</text>
+        <text class="t2" x="108" y="459">Aceh Jaya → Banda Aceh • Rp 140.000</text>
+        <text class="t3" x="108" y="476">harga di ujung = pembeda rute kembar</text></g>
+      <g class="n em"><rect x="90" y="530" width="380" height="76" rx="14"/>
+        <circle class="nb em" cx="110" cy="551" r="10"/><text class="num" x="110" y="555">5</text>
+        <text class="t1" x="128" y="556">Pilih armada</text>
+        <text class="t2" x="108" y="579">hanya armada yang ditetapkan di rute itu</text>
+        <text class="t3" x="108" y="596">bukan semua armada agen</text></g>
+      <g class="term"><rect x="90" y="650" width="380" height="58" rx="14"/>
+        <text x="280" y="684">Simpan Jadwal</text></g>
+
+      <g class="n sl"><rect x="660" y="150" width="340" height="76" rx="14"/>
+        <circle class="nb sl" cx="680" cy="171" r="10"/><text class="num" x="680" y="175">6</text>
+        <text class="t1" x="698" y="176">Armada terisi dari rute</text>
+        <text class="t2" x="678" y="199">dropdown hanya berisi armada</text>
+        <text class="t3" x="678" y="216">yang ditetapkan pada rute itu</text></g>
+      <g class="n am"><rect x="660" y="290" width="340" height="96" rx="14"/>
+        <circle class="nb am" cx="680" cy="311" r="10"/><text class="num" x="680" y="315">7</text>
+        <text class="t1" x="698" y="316">Cek bentrok otomatis</text>
+        <text class="t2" x="678" y="339">① armada / pengemudi sama, jeda &lt; 4 jam</text>
+        <text class="t3" x="678" y="356">② jam sama persis di koridor (DARI→KE) sama</text>
+        <text class="t3" x="678" y="373">— khusus milik agen yang sama</text></g>
+      <g class="n am"><rect x="660" y="450" width="340" height="62" rx="14"/>
+        <circle class="nb am" cx="680" cy="471" r="10"/><text class="num" x="680" y="475">8</text>
+        <text class="t1" x="698" y="476">Tanggal bentrok dilewati</text>
+        <text class="t2" x="678" y="499">toast peringatan + jumlah tanggal</text></g>
+      <g class="n sl"><rect x="660" y="575" width="340" height="76" rx="14"/>
+        <circle class="nb sl" cx="680" cy="596" r="10"/><text class="num" x="680" y="600">9</text>
+        <text class="t1" x="698" y="601">Tanggal yang lolos disimpan</text>
+        <text class="t2" x="678" y="624">harga otomatis dari rute</text>
+        <text class="t3" x="678" y="641">+ jasa agen per kursi</text></g>
+      <g class="term"><rect x="660" y="715" width="340" height="58" rx="14"/>
+        <text x="830" y="749">Jadwal tayang → bisa dipesan</text></g>
+
+      <path class="e em" d="M280 172 V210" marker-end="url(#ar-em)"/>
+      <path class="e em" d="M280 272 V310" marker-end="url(#ar-em)"/>
+      <path class="e em" d="M280 372 V410" marker-end="url(#ar-em)"/>
+      <path class="e em" d="M280 486 V530" marker-end="url(#ar-em)"/>
+      <path class="e em" d="M470 561 H560 V188 H660" marker-end="url(#ar-em)"/>
+      <text class="el" x="486" y="553">rute dipilih</text>
+      <path class="e sl" d="M830 226 V290" marker-end="url(#ar)"/>
+      <path class="e sl" d="M830 651 V715" marker-end="url(#ar)"/>
+      <path class="e am" d="M830 386 V450" marker-end="url(#ar-am)"/>
+      <path class="e am" d="M830 512 V575" marker-end="url(#ar-am)"/>
+      <path class="e em" d="M470 568 H560 V613 H660" marker-end="url(#ar-em)"/>
+      <path class="e em" d="M280 708 V735 H530 V613 H660" marker-end="url(#ar-em)"/>
+      <text class="el" x="300" y="727">tanggal lolos bentrok → masuk daftar jadwal</text>
+    </svg>
+    <ul class="notes">
+      <li class="sk"><b>Dropdown rute membawa harga</b> di ujung (contoh: <i>Aceh Jaya → Banda Aceh • Rp 140.000</i>) supaya dua rute dengan DARI/KE sama tidak tertukar.</li>
+      <li class="em"><b>Armada terkunci per rute:</b> pilihan armada hanya armada yang ditetapkan pada rute tersebut; rute lama tanpa daftar armada ditampilkan semua armada aktif (dengan catatan).</li>
+      <li class="am"><b>Bentrok ①:</b> armada atau pengemudi yang sama punya jadwal lain kurang dari 4 jam pada tanggal yang sama.</li>
+      <li class="am"><b>Bentrok ② (jam kembar):</b> di koridor yang sama, jam keberangkatan harus berbeda antar rute milik agen yang sama — inilah pembeda rute kembar agar tidak membingungkan penumpang.</li>
+      <li class="sl"><b>Tanggal yang bentrok otomatis dilewati</b> (tidak menggagalkan seluruh penyimpanan) dan muncul toast berisi tanggal mana yang terlewat.</li>
+    </ul>
+  </section>
+
+  <!-- ============ PANEL 4: PEMESANAN ============ -->
+  <section class="panel">
+    <h2><span class="num">4</span> Pelanggan Memesan Perjalanan</h2>
+    <p class="desc">Dari cari rute sampai tiket terbit, dengan kunci kursi 15 menit dan verifikasi pembayaran transfer oleh agen.</p>
+    <svg viewBox="0 0 1240 1260" role="img" aria-label="Diagram alur pemesanan penumpang">
+      <rect class="lane sk" x="20" y="70" width="380" height="1160" rx="20"/>
+      <rect class="lane sl" x="420" y="70" width="380" height="1160" rx="20"/>
+      <rect class="lane em" x="820" y="70" width="400" height="1160" rx="20"/>
+      <rect class="chip sk" x="34" y="40" width="150" height="26" rx="9"/><text class="ct" x="109" y="58">1 · Pelanggan</text>
+      <rect class="chip sl" x="434" y="40" width="180" height="26" rx="9"/><text class="ct" x="524" y="58">Sistem (otomatis)</text>
+      <rect class="chip em" x="834" y="40" width="170" height="26" rx="9"/><text class="ct" x="919" y="58">2 · Agen Travel</text>
+
+      <g class="n sk"><rect x="60" y="110" width="300" height="62" rx="14"/>
+        <circle class="nb sk" cx="80" cy="131" r="10"/><text class="num" x="80" y="135">1</text>
+        <text class="t1" x="98" y="136">Cari perjalanan</text>
+        <text class="t2" x="78" y="159">pilih rute: DARI → KE</text></g>
+      <g class="n sk"><rect x="60" y="210" width="300" height="62" rx="14"/>
+        <circle class="nb sk" cx="80" cy="231" r="10"/><text class="num" x="80" y="235">2</text>
+        <text class="t1" x="98" y="236">Pilih tanggal + jadwal</text>
+        <text class="t2" x="78" y="259">jam keberangkatan &amp; armada</text></g>
+      <g class="n sk"><rect x="60" y="310" width="300" height="76" rx="14"/>
+        <circle class="nb sk" cx="80" cy="331" r="10"/><text class="num" x="80" y="335">3</text>
+        <text class="t1" x="98" y="336">Pilih kursi</text>
+        <text class="t2" x="78" y="359">denah kabin armada</text>
+        <text class="t3" x="78" y="376">isi nama &amp; HP penumpang</text></g>
+      <g class="n sk"><rect x="60" y="425" width="300" height="76" rx="14"/>
+        <circle class="nb sk" cx="80" cy="446" r="10"/><text class="num" x="80" y="450">4</text>
+        <text class="t1" x="98" y="451">Tentukan titik jemput</text>
+        <text class="t2" x="78" y="474">terminal / bandara / pelabuhan</text>
+        <text class="t3" x="78" y="491">atau jemput rumah + pin peta</text></g>
+      <g class="n sk"><rect x="60" y="540" width="300" height="76" rx="14"/>
+        <circle class="nb sk" cx="80" cy="561" r="10"/><text class="num" x="80" y="565">5</text>
+        <text class="t1" x="98" y="566">Voucher / waiting list</text>
+        <text class="t2" x="78" y="589">kode diskon (cth. HEMAT20)</text>
+        <text class="t3" x="78" y="606">penuh → masuk antrean</text></g>
+      <g class="n sk"><rect x="60" y="640" width="300" height="62" rx="14"/>
+        <circle class="nb sk" cx="80" cy="661" r="10"/><text class="num" x="80" y="665">6</text>
+        <text class="t1" x="98" y="666">Bayar</text>
+        <text class="t2" x="78" y="689">QRIS • Virtual Account • Transfer</text></g>
+      <g class="term"><rect x="60" y="880" width="300" height="58" rx="14"/>
+        <text x="210" y="914">Tiket terbit + notifikasi</text></g>
+      <g class="n rd"><rect x="60" y="980" width="300" height="76" rx="14"/>
+        <circle class="nb rd" cx="80" cy="1001" r="10"/><text class="num" x="80" y="1005">9</text>
+        <text class="t1" x="98" y="1006">Batalkan (halaman Tiket)</text>
+        <text class="t2" x="78" y="1029">refund sesuai kebijakan travel</text>
+        <text class="t3" x="78" y="1046">100% / 50% / 0%</text></g>
+
+      <g class="n sl"><rect x="460" y="633" width="300" height="76" rx="14"/>
+        <circle class="nb sl" cx="480" cy="654" r="10"/><text class="num" x="480" y="658">7</text>
+        <text class="t1" x="498" y="659">Kursi di-hold 15 menit</text>
+        <text class="t2" x="478" y="682">booking: Menunggu (pending)</text>
+        <text class="t3" x="478" y="699">notif: segera bayar</text></g>
+      <g class="dec sl"><polygon points="610,775 760,830 610,885 460,830"/>
+        <text class="d1" x="610" y="826">Dibayar</text>
+        <text class="d1" x="610" y="844">≤ 15 menit?</text></g>
+      <g class="n am"><rect x="460" y="910" width="300" height="62" rx="14"/>
+        <circle class="nb am" cx="480" cy="931" r="10"/><text class="num" x="480" y="935">8</text>
+        <text class="t1" x="498" y="936">Hold hangus</text>
+        <text class="t2" x="478" y="959">kursi dilepas • waiting list dihubungi</text></g>
+      <g class="n gr"><rect x="460" y="1010" width="300" height="76" rx="14"/>
+        <circle class="nb gr" cx="480" cy="1031" r="10"/><text class="num" x="480" y="1035">9</text>
+        <text class="t1" x="498" y="1036">Status Lunas (paid)</text>
+        <text class="t2" x="478" y="1059">kursi terkunci</text>
+        <text class="t3" x="478" y="1076">uang masuk ke ledger "ditahan"</text></g>
+      <g class="n rd"><rect x="460" y="1130" width="300" height="62" rx="14"/>
+        <circle class="nb rd" cx="480" cy="1151" r="10"/><text class="num" x="480" y="1155">12</text>
+        <text class="t1" x="498" y="1156">Refund diproses</text>
+        <text class="t2" x="478" y="1179">ledger dibatalkan (void)</text></g>
+
+      <g class="n em"><rect x="870" y="1010" width="300" height="76" rx="14"/>
+        <circle class="nb em" cx="890" cy="1031" r="10"/><text class="num" x="890" y="1035">10</text>
+        <text class="t1" x="908" y="1036">Transfer: verifikasi manual</text>
+        <text class="t2" x="888" y="1059">agen ubah status pending → paid</text>
+        <text class="t3" x="888" y="1076">dari halaman Pesanan</text></g>
+      <g class="n sl"><rect x="870" y="1130" width="300" height="76" rx="14"/>
+        <circle class="nb sl" cx="890" cy="1151" r="10"/><text class="num" x="890" y="1155">11</text>
+        <text class="t1" x="908" y="1156">Kelola Pesanan (Agen)</text>
+        <text class="t2" x="888" y="1179">verifikasi • manifest • pembatalan</text>
+        <text class="t3" x="888" y="1196">ekspor CSV</text></g>
+
+      <path class="e sk" d="M210 172 V210" marker-end="url(#ar-sk)"/>
+      <path class="e sk" d="M210 272 V310" marker-end="url(#ar-sk)"/>
+      <path class="e sk" d="M210 386 V425" marker-end="url(#ar-sk)"/>
+      <path class="e sk" d="M210 501 V540" marker-end="url(#ar-sk)"/>
+      <path class="e sk" d="M210 616 V640" marker-end="url(#ar-sk)"/>
+      <path class="e sk" d="M360 671 H460" marker-end="url(#ar-sk)"/>
+      <path class="e sl" d="M610 709 V775" marker-end="url(#ar)"/>
+      <path class="e am" d="M610 885 V910" marker-end="url(#ar-am)"/>
+      <text class="el" x="622" y="902">tidak</text>
+      <path class="e gr" d="M760 830 H790 V1048 H760" marker-end="url(#ar)"/>
+      <text class="el" x="796" y="822">ya</text>
+      <path class="e sk" d="M460 1048 H410 V909 H360" marker-end="url(#ar-sk)"/>
+      <path class="e em" d="M760 1048 H870" marker-end="url(#ar-em)"/>
+      <path class="e em" d="M1020 1086 V1130" marker-end="url(#ar-em)"/>
+      <path class="e sk" d="M210 938 V980" marker-end="url(#ar-sk)"/>
+      <path class="e rd" d="M360 1018 H410 V1161 H460" marker-end="url(#ar-rd)"/>
+    </svg>
+    <ul class="notes">
+      <li class="sk"><b>Kursi mengikuti denah kabin</b> armada yang dipilih (kapasitas = jumlah kursi aktif kendaraan), dan satu kursi hanya untuk satu orang.</li>
+      <li class="sl"><b>Penguncian 15 menit:</b> begitu menekan Bayar, kursi di-<i>hold</i> selama 15 menit; belum dibayar → kursi dilepas dan waiting list diberi tahu.</li>
+      <li class="em"><b>Transfer bank</b> tidak instan: status <i>pending</i> sampai agen memverifikasi manual di halaman Pesanan (QRIS &amp; Virtual Account langsung lunas).</li>
+      <li class="rd"><b>Kebijakan refund</b> mengikuti travel masing-masing (mis. ≥72 jam 100%, ≥24 jam 50%, &lt;24 jam 0%) dan dana di ledger dibatalkan (<i>void</i>).</li>
+    </ul>
+  </section>
+
+  <!-- ============ PANEL 5: HARI H & ARUS UANG ============ -->
+  <section class="panel">
+    <h2><span class="num">5</span> Hari-H (Perjalanan) &amp; Arus Uang</h2>
+    <p class="desc">Setelah lunas: Pengemudi mengubah status perjalanan, lalu uang berpindah dari "ditahan" → "layak" → "dicairkan".</p>
+    <svg viewBox="0 0 1260 780" role="img" aria-label="Diagram hari-H dan alur uang">
+      <rect class="lane am" x="20" y="70" width="290" height="680" rx="20"/>
+      <rect class="lane sk" x="330" y="70" width="290" height="680" rx="20"/>
+      <rect class="lane sl" x="640" y="70" width="290" height="680" rx="20"/>
+      <rect class="lane vi" x="950" y="70" width="290" height="680" rx="20"/>
+      <rect class="chip am" x="34" y="40" width="160" height="26" rx="9"/><text class="ct" x="114" y="58">1 · Pengemudi</text>
+      <rect class="chip sk" x="344" y="40" width="150" height="26" rx="9"/><text class="ct" x="419" y="58">2 · Pelanggan</text>
+      <rect class="chip sl" x="654" y="40" width="160" height="26" rx="9"/><text class="ct" x="734" y="58">Sistem (otomatis)</text>
+      <rect class="chip vi" x="964" y="40" width="180" height="26" rx="9"/><text class="ct" x="1054" y="58">3 · Superadmin</text>
+
+      <g class="n am"><rect x="40" y="150" width="250" height="62" rx="14"/>
+        <circle class="nb am" cx="60" cy="171" r="10"/><text class="num" x="60" y="175">1</text>
+        <text class="t1" x="78" y="176">Lihat Tugas harian</text>
+        <text class="t2" x="58" y="199">jadwal hari ini</text></g>
+      <g class="n am"><rect x="40" y="250" width="250" height="62" rx="14"/>
+        <circle class="nb am" cx="60" cy="271" r="10"/><text class="num" x="60" y="275">2</text>
+        <text class="t1" x="78" y="276">Manifest penumpang</text>
+        <text class="t2" x="58" y="299">cek &amp; cetak</text></g>
+      <g class="n am"><rect x="40" y="370" width="250" height="62" rx="14"/>
+        <circle class="nb am" cx="60" cy="391" r="10"/><text class="num" x="60" y="395">3</text>
+        <text class="t1" x="78" y="396">Status: Dalam Perjalanan</text>
+        <text class="t2" x="58" y="419">notifikasi ke penumpang</text></g>
+      <g class="term"><rect x="40" y="470" width="250" height="58" rx="14"/>
+        <text x="165" y="504">Status: Tiba (arrived)</text></g>
+
+      <g class="n sk"><rect x="350" y="370" width="250" height="62" rx="14"/>
+        <circle class="nb sk" cx="370" cy="391" r="10"/><text class="num" x="370" y="395">4</text>
+        <text class="t1" x="388" y="396">Notif: armada berangkat</text>
+        <text class="t2" x="368" y="419">siap di titik jemput</text></g>
+      <g class="n sk"><rect x="350" y="560" width="250" height="62" rx="14"/>
+        <circle class="nb sk" cx="370" cy="581" r="10"/><text class="num" x="370" y="585">5</text>
+        <text class="t1" x="388" y="586">Notif: sudah tiba</text>
+        <text class="t2" x="368" y="609">booking → Selesai (done)</text></g>
+      <g class="n sk"><rect x="350" y="660" width="250" height="62" rx="14"/>
+        <circle class="nb sk" cx="370" cy="681" r="10"/><text class="num" x="370" y="685">6</text>
+        <text class="t1" x="388" y="686">Riwayat perjalanan</text>
+        <text class="t2" x="368" y="709">lihat tiket &amp; beri rating</text></g>
+
+      <g class="n sl"><rect x="660" y="150" width="250" height="62" rx="14"/>
+        <circle class="nb sl" cx="680" cy="171" r="10"/><text class="num" x="680" y="175">7</text>
+        <text class="t1" x="698" y="176">H-1: kirim notif</text>
+        <text class="t2" x="678" y="199">pengingat berangkat</text></g>
+      <g class="n sl"><rect x="660" y="280" width="250" height="76" rx="14"/>
+        <circle class="nb sl" cx="680" cy="301" r="10"/><text class="num" x="680" y="305">8</text>
+        <text class="t1" x="698" y="306">Booking lunas → DITAHAN</text>
+        <text class="t2" x="678" y="329">tiket pengemudi + jasa agen</text>
+        <text class="t3" x="678" y="346">+ fee platform</text></g>
+      <g class="n sl"><rect x="660" y="400" width="250" height="76" rx="14"/>
+        <circle class="nb sl" cx="680" cy="421" r="10"/><text class="num" x="680" y="425">9</text>
+        <text class="t1" x="698" y="426">Tiba → LAYAK</text>
+        <text class="t2" x="678" y="449">booking jadi selesai</text>
+        <text class="t3" x="678" y="466">dana siap dihitung</text></g>
+      <g class="n sl"><rect x="660" y="520" width="250" height="76" rx="14"/>
+        <circle class="nb sl" cx="680" cy="541" r="10"/><text class="num" x="680" y="545">10</text>
+        <text class="t1" x="698" y="546">Kliring 24 jam</text>
+        <text class="t2" x="678" y="569">syarat dana boleh dicairkan</text>
+        <text class="t3" x="678" y="586">setelah perjalanan selesai</text></g>
+      <g class="n rd"><rect x="660" y="660" width="250" height="62" rx="14"/>
+        <circle class="nb rd" cx="680" cy="681" r="10"/><text class="num" x="680" y="685">11</text>
+        <text class="t1" x="698" y="686">Batal / refund → VOID</text>
+        <text class="t2" x="678" y="709">pos dana tidak bisa dicairkan</text></g>
+
+      <g class="n vi"><rect x="970" y="520" width="250" height="76" rx="14"/>
+        <circle class="nb vi" cx="990" cy="541" r="10"/><text class="num" x="990" y="545">12</text>
+        <text class="t1" x="1008" y="546">Settlement</text>
+        <text class="t2" x="988" y="569">pilih pos layak</text>
+        <text class="t3" x="988" y="586">→ tandai dicairkan</text></g>
+      <g class="n em"><rect x="970" y="640" width="250" height="62" rx="14"/>
+        <circle class="nb em" cx="990" cy="661" r="10"/><text class="num" x="990" y="665">13</text>
+        <text class="t1" x="1008" y="666">Dicairkan</text>
+        <text class="t2" x="988" y="689">bayar ke agen &amp; pengemudi</text></g>
+
+      <path class="e am" d="M165 212 V250" marker-end="url(#ar-am)"/>
+      <path class="e am" d="M165 312 V370" marker-end="url(#ar-am)"/>
+      <path class="e am" d="M165 432 V470" marker-end="url(#ar-am)"/>
+      <path class="e sk" d="M290 401 H350" marker-end="url(#ar-sk)"/>
+      <path class="e sk" d="M290 499 H320 V591 H350" marker-end="url(#ar-sk)"/>
+      <path class="e sk" d="M475 622 V660" marker-end="url(#ar-sk)"/>
+      <path class="e sl" d="M165 150 V100 H785 V150" marker-end="url(#ar)"/>
+      <path class="e sl" d="M785 212 V280" marker-end="url(#ar)"/>
+      <path class="e sl" d="M785 356 V400" marker-end="url(#ar)"/>
+      <path class="e sl" d="M785 476 V520" marker-end="url(#ar)"/>
+      <path class="e vi" d="M910 558 H970" marker-end="url(#ar-vi)"/>
+      <path class="e vi" d="M1095 596 V640" marker-end="url(#ar-vi)"/>
+      <path class="e sl" d="M290 520 H630 V438 H660" marker-end="url(#ar)"/>
+      <path class="e rd" d="M600 591 H630 V691 H660" marker-end="url(#ar-rd)"/>
+    </svg>
+    <ul class="notes">
+      <li class="am"><b>Notifikasi otomatis</b> ke penumpang saat status berubah: "armada berangkat" dan "sudah tiba".</li>
+      <li class="sl"><b>Pembagian tarif</b> total tiket: <b>tiket Pengemudi</b> + <b>jasa Agen</b> (ditempatkan Superadmin per agen, per kursi) + <b>fee platform</b> (persen atau nominal).</li>
+      <li class="sl"><b>Status dana:</b> <i>ditahan</i> (saat bayar) → <i>layak</i> (perjalanan tiba) → <i>dicairkan</i> (Superadmin, minimal kliring 24 jam).</li>
+      <li class="vi"><b>Agen &amp; Pengemudi</b> hanya melihat pos dananya (halaman Keuangan / Dompet) — pencairan tetap dilakukan Superadmin di halaman Settlement.</li>
+    </ul>
+  </section>
+
+  <!-- ============ ATURAN PENTING ============ -->
+  <section class="panel">
+    <h2><span class="num">★</span> Aturan Penting (ringkasan)</h2>
+    <p class="desc">Enam aturan yang paling sering ditanyakan saat menjelaskan sistem ini.</p>
+    <div class="grid3">
+      <div class="card"><h3><span class="dot" style="background:#7c3aed"></span>Persetujuan admin</h3><p>Rute baru (dan perubahan harga) hanya aktif setelah disetujui Superadmin. Agen hanya mengirim usulan.</p></div>
+      <div class="card"><h3><span class="dot" style="background:#059669"></span>Satu armada = satu rute</h3><p>Saat mengusulkan rute, yang bisa dipilih hanya armada aktif yang belum dipakai rute lain. Jumlah armada tampil di kartu rute dan bisa dilihat detailnya.</p></div>
+      <div class="card"><h3><span class="dot" style="background:#0284c7"></span>Rute kembar</h3><p>DARI/KE sama boleh diusulkan berkali-kali; pembeda field lain: harga, armada, titik jemput. Di form jadwal, rute ditampilkan dengan harga di ujung.</p></div>
+      <div class="card"><h3><span class="dot" style="background:#b45309"></span>Jam tidak boleh sama</h3><p>Koridor (DARI→KE) yang sama, tiap rute milik agen yang sama wajib punya jam keberangkatan berbeda pada tanggal yang sama — tanggal yang bentrok otomatis dilewati.</p></div>
+      <div class="card"><h3><span class="dot" style="background:#dc2626"></span>Kursi terkunci 15 menit</h3><p>Setelah menekan Bayar, kursi di-hold 15 menit. Belum bayar → kursi dilepas dan waiting list diberi tahu lewat notifikasi.</p></div>
+      <div class="card"><h3><span class="dot" style="background:#334155"></span>Uang: 3 potong</h3><p>Total tiket dibagi: tiket Pengemudi + jasa Agen (per kursi, diatur admin) + fee platform. Dana: ditahan → layak (tiba + kliring 24 jam) → dicairkan admin.</p></div>
+    </div>
+  </section>
+
+  <!-- ============ RINGKASAN PERAN ============ -->
+  <section class="panel">
+    <h2><span class="num">≡</span> Ringkasan Halaman per Peran</h2>
+    <p class="desc">Peta menu agar alur di atas mudah disambung ke tampilan aplikasinya.</p>
+    <div class="grid4">
+      <div class="card"><span class="tag" style="background:#0284c7">Pelanggan</span>
+        <ul class="menu"><li>Beranda — cari perjalanan cepat</li><li>Cari Perjalanan — 4 langkah pemesanan</li><li>Tiket Saya — bayar lanjut / batal</li><li>Riwayat perjalanan</li><li>Profil &amp; notifikasi</li></ul></div>
+      <div class="card"><span class="tag" style="background:#059669">Agen Travel</span>
+        <ul class="menu"><li>Dashboard — ringkasan</li><li>Pesanan — verifikasi, manifest, CSV</li><li>Jadwal — tambah jadwal</li><li>Rute — usulan &amp; Rute Saya</li><li>Armada — armada &amp; layout kursi</li><li>Pengemudi — daftar &amp; status</li><li>Keuangan — pos dana</li><li>Setting</li></ul></div>
+      <div class="card"><span class="tag" style="background:#b45309">Pengemudi</span>
+        <ul class="menu"><li>Tugas harian + manifest</li><li>Update status perjalanan</li><li>Riwayat trip</li><li>Dompet — posisi dana</li></ul></div>
+      <div class="card"><span class="tag" style="background:#7c3aed">Superadmin</span>
+        <ul class="menu"><li>Overview — monitoring</li><li>Transaksi — semua booking &amp; bayar</li><li>Agen — approve / suspend / fee</li><li>Rute — approve usulan / suspend rute</li><li>Settlement — cairkan dana</li><li>Master — jasa agen, banner, audit</li></ul></div>
+    </div>
+  </section>
+
+  <footer>
+    Flowchart alur aplikasi TransAceh · disusun dari kode <b>transaceh-react</b> · file mandiri (bisa dicetak / disimpan PDF, tanpa perlu internet)
+  </footer>
+</div>
+</body>
+</html>
