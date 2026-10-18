@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { agencyById, routeById, vehicleById, vehName, driverByName, schedConflict, priceForAgency, routeOfferedTo, audit, DEFAULT_SERVICE } from '@/lib/domain.js';
+import { agencyById, routeById, vehicleById, vehName, driverByName, schedConflict, corridorClash, priceForAgency, routeOfferedTo, audit, DEFAULT_SERVICE } from '@/lib/domain.js';
 import { fmtRp, todayStr } from '@/lib/utils.js';
 import { Icon } from '@/components/ui.jsx';
 
@@ -130,29 +130,38 @@ export function SchedFormModal({ agId, onDone }) {
   const today = todayStr(0);
   const atCur = cal.y === Number(today.slice(0, 4)) && cal.m === Number(today.slice(5, 7)) - 1;
   const time = hh + ':' + mm;
-  const veh = vehicleById(vehicleId);
+  /* armada rute: milik agen sendiri + ditetapkan di rute tsb; rute tanpa daftar armada → semua armada agen */
+  const assigned = routeById(routeId)?.vehicleIds || [];
+  const availV = assigned.length ? vs.filter((v) => assigned.includes(v.id)) : vs;
+  const vidOk = availV.some((v) => v.id === vehicleId) ? vehicleId : (availV[0]?.id || '');
+  const veh = vehicleById(vidOk);
   const drvAuto = veh ? driverByName(agId, veh.drvName) : null;
   const backupName = veh && veh.hasBackup === 'Ya' ? (veh.backName || '') : '';
   const selSorted = [...dates].sort();
   const selLabel = selSorted.slice(0, 6).map(fmtShort).join(', ') + (selSorted.length > 6 ? ' +' + (selSorted.length - 6) + ' lagi' : '');
-  const clashList = selSorted.map((d) => ({ d, s: schedConflict(d, time, vehicleId, drvAuto ? drvAuto.id : '', veh ? veh.drvName : '') })).filter((x) => x.s);
-  const okCount = selSorted.length - clashList.length;
+  const clashList = selSorted.map((d) => ({ d, s: schedConflict(d, time, vidOk, drvAuto ? drvAuto.id : '', veh ? veh.drvName : '') })).filter((x) => x.s);
+  /* jam kembar: koridor sama + tanggal sama + jam sama, milik agen ini saja */
+  const dupList = selSorted.map((d) => ({ d, s: corridorClash(d, time, routeId, agId) })).filter((x) => x.s && !clashList.some((c) => c.d === x.d));
+  const skipped = (d) => clashList.some((x) => x.d === d) || dupList.some((x) => x.d === d);
+  const okCount = selSorted.length - clashList.length - dupList.length;
   const finalPrice = priceForAgency(routeById(routeId), agId);
 
   const saveSched = () => {
     if (!selSorted.length) { toast('Pilih minimal 1 tanggal dulu', 'err'); return; }
     const r = routeById(routeId);
+    if (!r) { toast('Pilih rute dulu', 'err'); return; }
     if (!(finalPrice > 0)) { toast('Rute belum punya harga — usulkan harga via halaman Rute', 'err'); return; }
+    if (!vidOk) { toast('Belum ada armada tersedia di rute ini — tambah armada dulu', 'err'); return; }
     if (!okCount) { toast('Semua tanggal bentrok — tidak ada jadwal yang bisa disimpan', 'err'); return; }
-    const ok = selSorted.filter((d) => !clashList.some((x) => x.d === d));
+    const ok = selSorted.filter((d) => !skipped(d));
     const arr = DB.load('schedules', []);
     ok.forEach((d) => {
-      arr.push({ id: 'S-' + Math.random().toString(36).slice(2, 7).toUpperCase(), agencyId: agId, routeId: r.id, date: d, time, vehicleId, driverId: drvAuto ? drvAuto.id : null, driverName: veh ? veh.drvName : '', backupName, price: finalPrice, status: 'open', tripStatus: 'scheduled', blockedSeats: [], createdAt: new Date().toISOString() });
+      arr.push({ id: 'S-' + Math.random().toString(36).slice(2, 7).toUpperCase(), agencyId: agId, routeId: r.id, date: d, time, vehicleId: vidOk, driverId: drvAuto ? drvAuto.id : null, driverName: veh ? veh.drvName : '', backupName, price: finalPrice, status: 'open', tripStatus: 'scheduled', blockedSeats: [], createdAt: new Date().toISOString() });
     });
     DB.save('schedules', arr); refresh();
     audit('schedule_create', r.from + '→' + r.to + ' ' + time + ' • ' + ok.length + ' tanggal • ' + ok.slice(0, 6).join(', ') + (ok.length > 6 ? '…' : ''));
     closeModal();
-    toast(ok.length + ' jadwal disimpan' + (clashList.length ? ' • ' + clashList.length + ' tanggal bentrok dilewati' : ''));
+    toast(ok.length + ' jadwal disimpan' + (clashList.length + dupList.length ? ' • ' + (clashList.length + dupList.length) + ' tanggal bentrok dilewati' : ''));
     refresh();
     if (onDone) onDone();
   };
@@ -188,8 +197,20 @@ export function SchedFormModal({ agId, onDone }) {
       </div>
 
       <div className="mt-4">
-        <label className="text-[12px] font-extrabold">ARMADA</label>
-        <select value={vehicleId} onChange={(e) => setVehicleId(e.target.value)} className="w-full mt-1 text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">{vs.map((v) => <option key={v.id} value={v.id}>{vehName(v)} • {v.plate}</option>)}</select>
+        <label className="text-[12px] font-extrabold">RUTE</label>
+        <select value={routeId} onChange={(e) => setRouteId(e.target.value)} className="w-full mt-1 text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">{routes.map((r) => <option key={r.id} value={r.id}>{r.from} → {r.to} • {fmtRp(priceForAgency(r, agId))}</option>)}</select>
+        <div className="mt-2 bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2.5">
+          <div className="text-[15px] font-extrabold">{finalPrice > 0 ? fmtRp(finalPrice) : '— belum ada harga —'}</div>
+          <div className="text-[11.5px] text-slate-500 font-medium mt-0.5">Harga otomatis dari rute • jasa agen {fmtRp(agencyById(agId)?.serviceFee ?? DEFAULT_SERVICE)}/kursi (ditentukan admin per agen).</div>
+        </div>
+      </div>
+
+      <div className="mt-4">
+        <label className="text-[12px] font-extrabold">ARMADA <span className="text-sky-600">• dari armada rute ini</span></label>
+        <select value={vidOk} onChange={(e) => setVehicleId(e.target.value)} className="w-full mt-1 text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">{availV.map((v) => <option key={v.id} value={v.id}>{vehName(v)} • {v.plate}</option>)}</select>
+        {!availV.length ? <div className="text-[12px] font-bold text-amber-700 bg-amber-50 border-2 border-amber-200 rounded-xl px-3 py-2 mt-1.5">Belum ada armada aktif untuk rute ini — tambah armada dulu di halaman Armada.</div>
+        : !assigned.length ? <div className="text-[11.5px] text-slate-500 font-medium bg-slate-50 rounded-xl px-3 py-2 mt-1.5">Rute ini belum punya daftar armada — semua armada aktif Anda ditampilkan.</div>
+        : <div className="text-[11.5px] text-slate-500 font-medium bg-slate-50 rounded-xl px-3 py-2 mt-1.5">{assigned.length} armada ditetapkan di rute ini.</div>}
         {veh ? (
           <div className="mt-2 bg-slate-50 rounded-2xl p-3">
             <div className="flex items-start gap-2">
@@ -212,19 +233,17 @@ export function SchedFormModal({ agId, onDone }) {
         ) : null}
       </div>
 
-      <div className="mt-4">
-        <label className="text-[12px] font-extrabold">RUTE</label>
-        <select value={routeId} onChange={(e) => setRouteId(e.target.value)} className="w-full mt-1 text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">{routes.map((r) => <option key={r.id} value={r.id}>{r.from} → {r.to}</option>)}</select>
-        <div className="mt-2 bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2.5">
-          <div className="text-[15px] font-extrabold">{finalPrice > 0 ? fmtRp(finalPrice) : '— belum ada harga —'}</div>
-          <div className="text-[11.5px] text-slate-500 font-medium mt-0.5">Harga otomatis dari rute • jasa agen {fmtRp(agencyById(agId)?.serviceFee ?? DEFAULT_SERVICE)}/kursi (ditentukan admin per agen).</div>
-        </div>
-      </div>
-
       {clashList.length ? (
         <div className="mt-3 bg-amber-50 border-2 border-amber-200 text-amber-700 rounded-xl p-3 text-[11.5px] font-bold">
           ⚠ {clashList.length} tanggal bentrok, akan dilewati: {clashList.slice(0, 3).map((x) => fmtShort(x.d) + ' (' + x.s.time + ')').join(', ')}{clashList.length > 3 ? ' +' + (clashList.length - 3) + ' lagi' : ''}
           <div className="text-[11px] font-medium text-amber-600 mt-0.5">Armada/pengemudi sudah terjadwal dalam jeda &lt; 4 jam di tanggal tersebut — jam:menit keberangkatan yang menentukan.</div>
+        </div>
+      ) : null}
+
+      {dupList.length ? (
+        <div className="mt-3 bg-amber-50 border-2 border-amber-200 text-amber-700 rounded-xl p-3 text-[11.5px] font-bold">
+          ⚠ {dupList.length} tanggal dilewati: jam {time} sudah dipakai rute lain di koridor yang sama — {dupList.slice(0, 3).map((x) => fmtShort(x.d)).join(', ')}{dupList.length > 3 ? ' +' + (dupList.length - 3) + ' lagi' : ''}
+          <div className="text-[11px] font-medium text-amber-600 mt-0.5">Jam keberangkatan harus berbeda tiap rute pada koridor (DARI→KE) yang sama di tanggal tersebut.</div>
         </div>
       ) : null}
 

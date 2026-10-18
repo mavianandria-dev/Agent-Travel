@@ -27,6 +27,13 @@ export function vehicleById(id){ return DB.load('vehicles',[]).find(v=>v.id===id
 
 export function vehName(v){ return v?(((v.brand||'')+(v.model?' '+v.model:'')).trim()||'Armada'):''; }
 
+/* Armada agen yang tersedia untuk rute baru: status aktif & belum dipakai rute mana pun. */
+export function fleetAvailable(agencyId){
+  const used=new Set();
+  DB.load('routes',[]).forEach(r=>(r.vehicleIds||[]).forEach(id=>used.add(id)));
+  return DB.load('vehicles',[]).filter(v=>v.agencyId===agencyId&&v.status==='aktif'&&!used.has(v.id));
+}
+
 export function driverById(id){ return DB.load('drivers',[]).find(d=>d.id===id); }
 
 export function schedById(id){ return DB.load('schedules',[]).find(s=>s.id===id); }
@@ -81,6 +88,18 @@ export function schedConflict(date,time,vehicleId,driverId,driverName){
     const dd=s.driverId?driverById(s.driverId):null;
     const sn=String(s.driverName||(dd?dd.name:'')||'').trim().toLowerCase();
     return !!(nm&&sn&&nm===sn);
+  })||null;
+}
+/* Jam kembar: di koridor (DARI→KE) yang sama, satu tanggal tidak boleh punya 2 jadwal dengan jam sama.
+   Dicek per agen travel — jadwal agen lain tidak saling mengunci. */
+export function corridorClash(date,time,routeId,agencyId){
+  const r=routeById(routeId);
+  if(!r) return null;
+  return DB.load('schedules',[]).find(s=>{
+    if(s.agencyId!==agencyId) return false;
+    if(s.date!==date||s.time!==time) return false;
+    const r2=routeById(s.routeId);
+    return !!(r2&&r2.from===r.from&&r2.to===r.to);
   })||null;
 }
 
@@ -202,11 +221,14 @@ export function activateAgencyRoute(routeId,agencyId){
 }
 
 /* Usulan rute agen → admin (model hibrida: agen usul, admin eksekusi) */
-export function saveRouteRequest({ agencyId, type, routeId, from, to, pickup, pickups, note, price, homePickup, distance, duration }){
+export function saveRouteRequest({ agencyId, type, routeId, from, to, pickup, pickups, note, price, homePickup, distance, duration, vehicleIds }){
   const arr=DB.load('routeRequests',[]);
   const list=normalizePoints(pickups);
   if(!list.length&&(pickup||'').trim()) list.push((pickup||'').trim());
-  const r={id:uid('RQ'),agencyId,type,routeId:routeId||null,from,to,pickup:list[0]||'',pickups:list,note:(note||'').trim(),price:Number(price)||0,homePickup:homePickup!==false,distance:(distance||'').trim(),duration:(duration||'').trim(),status:'pending',adminNote:'',createdAt:new Date().toISOString(),decidedAt:null};
+  /* armada hanya milik agen pengusul — id armada agen lain dibuang */
+  const fleet=DB.load('vehicles',[]);
+  const vids=Array.isArray(vehicleIds)?vehicleIds.filter(vid=>fleet.some(v=>v.id===vid&&v.agencyId===agencyId)):[];
+  const r={id:uid('RQ'),agencyId,type,routeId:routeId||null,from,to,pickup:list[0]||'',pickups:list,note:(note||'').trim(),price:Number(price)||0,homePickup:homePickup!==false,distance:(distance||'').trim(),duration:(duration||'').trim(),vehicleIds:vids,status:'pending',adminNote:'',createdAt:new Date().toISOString(),decidedAt:null};
   arr.unshift(r); DB.save('routeRequests',arr);
   audit('route_request',type+' '+from+' → '+to+' • '+agencyId);
   DB.load('users',[]).filter(u=>u.role==='superadmin').forEach(u=>notify(u.email,'Usulan rute baru',(agencyById(agencyId)?.name||agencyId)+' mengusulkan '+(type==='rute-baru'?'rute baru':'titik jemput')+': '+from+' → '+to,'app'));
@@ -226,7 +248,7 @@ export function decideRouteRequest(id,approve,adminNote){
       const pts=normalizePoints(Array.isArray(r.pickups)&&r.pickups.length?r.pickups:(r.pickup?[r.pickup]:[]));
       const allPts=normalizePoints(pts.length?['Terminal '+r.from,...pts]:['Terminal '+r.from,'Terminal '+r.to]);
       const est=estimateRoute(r.from,r.to)||{};
-      const nr={id:uid('R'),from:r.from,to:r.to,distance:(r.distance||'').trim()||est.distance||'-',duration:(r.duration||'').trim()||est.duration||'-',basePrice:Number(r.price)>0?Number(r.price):0,prices:Number(r.price)>0?{[r.agencyId]:Number(r.price)}:{},homePickup:r.homePickup!==false,pickups:allPts,active:true,agencyId:r.agencyId,agencyIds:[r.agencyId],driverId:null,driverIds:[]};
+      const nr={id:uid('R'),from:r.from,to:r.to,distance:(r.distance||'').trim()||est.distance||'-',duration:(r.duration||'').trim()||est.duration||'-',basePrice:Number(r.price)>0?Number(r.price):0,prices:Number(r.price)>0?{[r.agencyId]:Number(r.price)}:{},homePickup:r.homePickup!==false,pickups:allPts,vehicleIds:Array.isArray(r.vehicleIds)?r.vehicleIds.filter(Boolean):[],active:true,agencyId:r.agencyId,agencyIds:[r.agencyId],driverId:null,driverIds:[]};
       routes.push(nr); DB.save('routes',routes);
       createdRouteId=nr.id;
     }else if(r.type==='ubah-harga'){
