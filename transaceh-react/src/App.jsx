@@ -11,6 +11,7 @@ import History from '@/pages/History.jsx';
 import Profile from '@/pages/Profile.jsx';
 import { Login, Register, RegisterAgen } from '@/pages/Auth.jsx';
 import Agen from '@/agen/Agen.jsx';
+import KycWizard from '@/agen/KycWizard.jsx';
 import VehForm from '@/agen/VehForm.jsx';
 import DrvForm from '@/agen/DrvForm.jsx';
 import Tasks from '@/driver/Tasks.jsx';
@@ -18,7 +19,7 @@ import Trips from '@/driver/Trips.jsx';
 import Wallet from '@/driver/Wallet.jsx';
 import Admin from '@/admin/Admin.jsx';
 import { DB } from '@/lib/db.js';
-import { schedById, notify } from '@/lib/domain.js';
+import { schedById, notify, agencyPending } from '@/lib/domain.js';
 import { todayStr } from '@/lib/utils.js';
 
 const AGEN_VIEW_TAB = { 'agen-book': 'book', 'agen-sched': 'sched', 'agen-fleet': 'fleet', 'agen-fin': 'fin' };
@@ -70,6 +71,7 @@ function Router() {
   else if (view === 'register-agen') page = <RegisterAgen />;
   else if (view.startsWith('agen')) {
     if (!user) page = <Login />;
+    else if (view === 'agen-pending' || agencyPending(user)) page = <KycWizard />;
     else if (view === 'agen-drvform') page = <DrvForm />;
     else if (view === 'agen-vehform') page = <VehForm />;
     else page = <Agen />;

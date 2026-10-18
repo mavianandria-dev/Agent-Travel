@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
+import { agencyPending } from '@/lib/domain.js';
 import { Icon } from '@/components/ui.jsx';
 import NotifModal from '@/pages/Notif.jsx';
 
@@ -26,7 +27,7 @@ export default function Header() {
   const avatarDest = () => {
     if (!user) return;
     if (user.role === 'pelanggan') go('profile');
-    else if (user.role === 'agen') { setAgenTab('setting'); go('agen'); }
+    else if (user.role === 'agen') { if (agencyPending(user)) go('agen-pending'); else { setAgenTab('setting'); go('agen'); } }
     else if (user.role === 'pengemudi') go('driver');
     else go('admin');
   };
@@ -99,7 +100,11 @@ export function RoleTabs() {
 export function tabsFor(u, t) {
   if (!u) return [{ v: 'home', icon: 'home', label: 'Beranda' }, { v: 'search', icon: 'search', label: t('search') }, { v: 'login', icon: 'ticket', label: t('myticket') }];
   if (u.role === 'pelanggan') return [{ v: 'home', icon: 'home', label: 'Beranda' }, { v: 'search', icon: 'search', label: 'Pesan' }, { v: 'tickets', icon: 'ticket', label: t('myticket') }, { v: 'history', icon: 'history', label: t('history') }, { v: 'profile', icon: 'user', label: 'Profil' }];
-  if (u.role === 'agen') return [{ v: 'agen', icon: 'layout-dashboard', label: t('dashboard') }, { v: 'agen-book', icon: 'clipboard-list', label: t('bookings') }, { v: 'agen-sched', icon: 'calendar-days', label: t('schedules') }, { v: 'agen-fleet', icon: 'car', label: t('vehicles') }, { v: 'agen-fin', icon: 'wallet', label: t('finance') }];
+  if (u.role === 'agen') {
+    /* Agen pending: hanya satu tab, menuju halaman kelengkapan data */
+    if (agencyPending(u)) return [{ v: 'agen-pending', icon: 'clock', label: 'Status Pengajuan' }];
+    return [{ v: 'agen', icon: 'layout-dashboard', label: t('dashboard') }, { v: 'agen-book', icon: 'clipboard-list', label: t('bookings') }, { v: 'agen-sched', icon: 'calendar-days', label: t('schedules') }, { v: 'agen-fleet', icon: 'car', label: t('vehicles') }, { v: 'agen-fin', icon: 'wallet', label: t('finance') }];
+  }
   if (u.role === 'pengemudi') return [{ v: 'driver', icon: 'car-front', label: t('tasks') }, { v: 'driver-trips', icon: 'route', label: 'Trip' }];
   if (u.role === 'superadmin') return [{ v: 'admin', icon: 'shield-check', label: 'Admin' }, { v: 'admin-tx', icon: 'receipt-text', label: t('transactions') }, { v: 'admin-ag', icon: 'building-2', label: t('agencies') }, { v: 'admin-master', icon: 'database', label: t('master') }];
   return [];

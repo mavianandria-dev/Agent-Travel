@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { setSession, agencyById, audit, notify, schedById, routeById } from '@/lib/domain.js';
+import { setSession, agencyById, audit, notify, schedById, routeById, agencyPending, checkAgenAccess } from '@/lib/domain.js';
 import { uid, inC } from '@/lib/utils.js';
 import { Icon, fmtDate, Sec } from '@/components/ui.jsx';
 import { peekCheckoutDraft, resumeCheckout } from '@/lib/checkoutDraft.js';
@@ -20,8 +20,10 @@ function landAfterAuth(u, { go, setBw, toast }) {
       return true;
     }
   }
-  if (u.role === 'agen') go('agen');
-  else if (u.role === 'pengemudi') go('driver');
+  if (u.role === 'agen') {
+    /* pending tetap boleh masuk — hanya di-restrict ke halaman kelengkapan data */
+    go(agencyPending(u) ? 'agen-pending' : 'agen');
+  } else if (u.role === 'pengemudi') go('driver');
   else if (u.role === 'superadmin') go('admin');
   else go('home');
   return false;
@@ -99,8 +101,8 @@ export function Login() {
     if (!u) { toast('Email / password salah', 'err'); return; }
     if (u.role === 'pengemudi' && (u.status || 'active') !== 'active') { toast('Akun pengemudi dinonaktifkan — hubungi travel Anda', 'warn'); return; }
     if (u.role === 'agen') {
-      const agx = u.agencyId ? agencyById(u.agencyId) : null;
-      if ((u.status || 'active') === 'pending' || !agx || agx.status !== 'active') { toast('Akun agen menunggu persetujuan super admin', 'warn'); return; }
+      const blocked = checkAgenAccess(u);
+      if (blocked) { toast(blocked, 'warn'); return; }
     }
     setSession(u);
     audit('login', u.email);
@@ -221,7 +223,7 @@ export function RegisterAgen() {
       <div className="space-y-2.5">
         <div><label className="text-[12px] font-extrabold">NAMA TRAVEL <span className="text-red-500">*</span></label><input value={agN} onChange={(ev) => setAgN(ev.target.value)} placeholder="cth: Barakah Travel" className={'w-full mt-1 ' + inC} /></div>
         <div><label className="text-[12px] font-extrabold">ALAMAT TRAVEL <span className="text-red-500">*</span></label><input value={agA} onChange={(ev) => setAgA(ev.target.value)} placeholder="cth: Jl. Merdeka No.12, Aceh Jaya" className={'w-full mt-1 ' + inC} /></div>
-        <p className="text-[12px] text-amber-600 font-semibold bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">Pendaftaran agen travel butuh persetujuan super admin sebelum bisa masuk.</p>
+        <p className="text-[12px] text-amber-600 font-semibold bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">Pendaftaran agen travel butuh kelengkapan data yang disetujui super admin, akun tetap bisa masuk.</p>
       </div>
       <div className="grid grid-cols-2 gap-2.5 mt-5"><button onClick={() => go('home')} className="bg-slate-100 font-extrabold text-[14px] py-3 rounded-2xl">Batal</button><button onClick={doRegisterAgen} className="bg-sky-600 text-white font-extrabold text-[14px] py-3 rounded-2xl">Kirim Pengajuan</button></div>
       <div className="text-[12.5px] text-center mt-3 font-semibold text-slate-500">Sudah punya akun? <button onClick={() => go('login')} className="text-sky-600 font-extrabold">Masuk</button></div></div>

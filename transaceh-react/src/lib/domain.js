@@ -271,3 +271,120 @@ export function decideRouteRequest(id,approve,adminNote){
   DB.load('users',[]).filter(u=>u.agencyId===r.agencyId&&u.role==='agen').forEach(u=>notify(u.email,approve?'Usulan rute disetujui':'Usulan rute ditolak',r.from+' → '+r.to+(r.adminNote?' • '+r.adminNote:''),'app'));
   return {req:r,createdRouteId};
 }
+
+/* ---------- KYC / kelengkapan data agen travel ----------
+   Dialur setelah agen mendaftar: login tetap bisa, tapi akun baru bisa
+   ber-operasi penuh setelah kelengkapan data disetujui super admin. */
+
+export const KYC_MIN_AGE = 21;
+export const KYC_JENIS = ['Perorangan / Freelance', 'Badan Usaha (PT/CV)'];
+export const KYC_BENTUK = ['PT', 'CV', 'Firma', 'Koperasi'];
+export const KYC_AGAMA = ['Islam', 'Kristen', 'Katolik', 'Hindu', 'Buddha', 'Konghucu'];
+export const KYC_TINGGAL = ['Rumah Sendiri', 'Sewa', 'Milik Orang Tua'];
+export const KYC_HUBUNGAN = ['Istri / Suami', 'Anak', 'Orang Tua', 'Saudara', 'Lainnya'];
+export const KYC_BANKS = ['BCA', 'Mandiri', 'BRI', 'BSI', 'BNI', 'BNI Syariah', 'CIMB Niaga', 'Permata', 'Lainnya'];
+
+const digits = (v) => String(v || '').replace(/\D/g, '');
+export const normName = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+/** True kalau user agen masih menunggu kelengkapan data (belum full access). */
+export function agencyPending(u) {
+  if (!u || u.role !== 'agen') return false;
+  const st = u.status || 'active';
+  if (st === 'suspended') return false; /* nonaktif: ditolak saat login, bukan pending */
+  if (st === 'pending') return true;
+  const ag = agencyOf(u);
+  return !!(ag && ag.status === 'pending');
+}
+
+/** Usia (tahun) pada tanggal lahir; null bila tidak bisa dihitung. */
+export function kycAge(tgl) {
+  const d = new Date(String(tgl || '') + 'T00:00');
+  if (!tgl || isNaN(d.getTime())) return null;
+  const now = new Date();
+  let a = now.getFullYear() - d.getFullYear();
+  const m = now.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) a--;
+  return a;
+}
+
+/** Gate login agen: pending boleh masuk, suspended / data hilang ditolak. */
+export function checkAgenAccess(u) {
+  if (!u || u.role !== 'agen') return null;
+  const ag = agencyById(u.agencyId);
+  if (!ag) return 'Data travel tidak ditemukan - hubungi super admin';
+  if ((u.status || 'active') === 'suspended' || ag.status === 'suspended') return 'Akun agen dinonaktifkan - hubungi super admin';
+  return null;
+}
+
+const g = (k, f) => String(((k || {})[f]) || '').trim();
+
+/** Validasi Tahap 1 (kelengkapan data). Return null bila valid, atau pesan pertama. */
+export function validateKycStep1(k) {
+  if (!k || !k.jenis) return 'Pilih jenis agen';
+  if (!g(k, 'nama')) return 'Nama lengkap wajib diisi';
+  if (!g(k, 'nik')) return 'NIK wajib diisi';
+  if (!/^\d{16}$/.test(g(k, 'nik'))) return 'NIK harus 16 digit angka';
+  if (!g(k, 'tmpLahir')) return 'Tempat lahir wajib diisi';
+  if (!g(k, 'tglLahir')) return 'Tanggal lahir wajib diisi';
+  const age = kycAge(g(k, 'tglLahir'));
+  if (age === null || age < KYC_MIN_AGE) return 'Usia minimal ' + KYC_MIN_AGE + ' tahun';
+  if (!g(k, 'gender')) return 'Pilih jenis kelamin';
+  if (!g(k, 'agama')) return 'Pilih agama';
+  const al = k.alamat || {};
+  const addr = [['jalan', 'Alamat jalan'], ['rtRw', 'RT/RW'], ['kelurahan', 'Kelurahan'], ['kecamatan', 'Kecamatan'], ['kota', 'Kota/Kabupaten'], ['provinsi', 'Provinsi']];
+  for (const [f, l] of addr) if (!String(al[f] || '').trim()) return l + ' wajib diisi';
+  if (!/^\d{5}$/.test(String(al.kodePos || '').trim())) return 'Kode pos harus 5 digit angka';
+  if (!g(k, 'tinggal')) return 'Pilih status kepemilikan tempat tinggal';
+  if (digits(k.hp).length < 9) return 'No HP utama minimal 9 digit angka';
+  if (digits(k.wa).length < 9) return 'No WhatsApp minimal 9 digit angka';
+  if (!g(k, 'email')) return 'Email wajib diisi';
+  if (!/.+@.+\..+/.test(g(k, 'email'))) return 'Format email belum benar';
+  const dg = k.darurat || {};
+  if (!String(dg.nama || '').trim()) return 'Nama kontak darurat wajib diisi';
+  if (!String(dg.hubungan || '').trim()) return 'Hubungan kontak darurat wajib diisi';
+  if (digits(dg.hp).length < 9) return 'No HP darurat minimal 9 digit angka';
+  if (k.jenis === 'Badan Usaha (PT/CV)') {
+    if (!g(k, 'badanNama')) return 'Nama badan usaha wajib diisi';
+    if (!g(k, 'badanBentuk')) return 'Pilih bentuk usaha';
+    if (!g(k, 'aktaNo')) return 'Nomor akta pendirian wajib diisi';
+    if (!g(k, 'skNo')) return 'Nomor SK Kemenkumham wajib diisi';
+    if (!/^\d{15}$/.test(g(k, 'npwpUsaha'))) return 'NPWP badan usaha harus 15 digit angka';
+    if (!/^\d{13}$/.test(g(k, 'nib'))) return 'NIB harus 13 digit angka';
+    if (!g(k, 'direktur')) return 'Nama direktur / penanggung jawab wajib diisi';
+    if (!g(k, 'alamatUsaha')) return 'Alamat lokasi usaha wajib diisi';
+  }
+  if (!g(k, 'bank')) return 'Pilih nama bank';
+  if (digits(k.rekeningNo).length < 6) return 'Nomor rekening wajib diisi';
+  if (!g(k, 'rekeningNama')) return 'Nama pemilik rekening wajib diisi';
+  const owners = [normName(k.nama), normName(k.badanNama)].filter(Boolean);
+  if (!owners.includes(normName(k.rekeningNama))) return 'Nama pemilik rekening harus sama dengan nama pemohon / badan usaha';
+  if (!g(k, 'rekeningCabang')) return 'Cabang pembukaan rekening wajib diisi';
+  return null;
+}
+
+/** Daftar dokumen wajib per jenis agen (label → key). */
+export function kycDocList(jenis) {
+  return jenis === 'Badan Usaha (PT/CV)'
+    ? [['ktp', 'KTP Penanggung Jawab / Direktur'], ['npwpUsaha', 'NPWP Perusahaan'], ['nib', 'NIB'], ['akta', 'Akta Pendirian Perusahaan'], ['sk', 'SK Kemenkumham'], ['kantorDepan', 'Foto Kantor Tampak Depan'], ['kantorDalam', 'Foto Kantor Tampak Dalam']]
+    : [['ktp', 'Scan / Foto KTP Asli'], ['pasfoto', 'Pasfoto Terbaru (3x4 / 4x6)'], ['npwpPribadi', 'NPWP Pribadi (opsional)'], ['bukuTabungan', 'Foto Halaman Depan Buku Tabungan']];
+}
+
+/** Ringkasan kelengkapan untuk kartu admin & halaman status. */
+export function kycSummary(ag) {
+  const k = (ag && ag.kyc) || {};
+  const docs = kycDocList(k.jenis);
+  const filled = docs.filter(([key]) => !!(k.docs || {})[key]).length;
+  const need = docs.filter(([key]) => key !== 'npwpPribadi').length;
+  return {
+    status: k.status || 'draft',
+    step: k.step || 1,
+    submittedAt: k.submittedAt || null,
+    dataOk: !validateKycStep1(k),
+    docsOk: filled >= need,
+    docsFilled: filled,
+    docsTotal: need,
+    termsOk: !!k.terms,
+    lengkap: !validateKycStep1(k) && filled >= need && !!k.terms,
+  };
+}

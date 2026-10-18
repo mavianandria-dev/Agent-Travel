@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { T } from '@/lib/i18n.js';
 import { todayStr } from '@/lib/utils.js';
 import { initDB } from '@/lib/seed.js';
-import { currentUser, setSession, cleanupHolds, audit } from '@/lib/domain.js';
+import { currentUser, setSession, cleanupHolds, audit, agencyPending } from '@/lib/domain.js';
 import { clearCheckoutDraft } from '@/lib/checkoutDraft.js';
 
 initDB();
@@ -20,6 +20,7 @@ const roleHome = (role) => (role === 'agen' ? 'agen' : role === 'pengemudi' ? 'd
 const initialView = () => {
   try {
     const u = currentUser();
+    if (u && u.role === 'agen' && agencyPending(u)) return 'agen-pending';
     if (u && u.role !== 'pelanggan' && CUSTOMER_VIEWS.includes('home')) return roleHome(u.role);
   } catch (e) { /* abaikan, pakai home */ }
   return 'home';
@@ -55,7 +56,9 @@ export function AppProvider({ children }) {
 
   const go = useCallback((v) => {
     const u = currentUser();
-    const target = (u && u.role !== 'pelanggan' && CUSTOMER_VIEWS.includes(v)) ? roleHome(u.role) : v;
+    let target = (u && u.role !== 'pelanggan' && CUSTOMER_VIEWS.includes(v)) ? roleHome(u.role) : v;
+    /* Agen yang kelengkapan datanya belum diajukan hanya boleh di halaman beranda agen */
+    if (u && u.role === 'agen' && agencyPending(u) && target.startsWith('agen') && target !== 'agen-pending') target = 'agen-pending';
     const my = ++navToken.current;
     setModal(null);
     setNavLoading(true);

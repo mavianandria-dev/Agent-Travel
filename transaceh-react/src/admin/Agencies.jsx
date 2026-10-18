@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { agencyById, audit } from '@/lib/domain.js';
+import { agencyById, audit, kycSummary } from '@/lib/domain.js';
 import { fmtRp, uid } from '@/lib/utils.js';
 import { Icon } from '@/components/ui.jsx';
 
@@ -79,6 +79,47 @@ function AgFormModal() {
   );
 }
 
+function KycModal({ id }) {
+  const { closeModal } = useApp();
+  const ag = agencyById(id);
+  const k = (ag && ag.kyc) || {};
+  const s = kycSummary(ag);
+  const [tab, setTab] = useState('diri');
+  const al = k.alamat || {};
+  const dg = k.darurat || {};
+  const row = (l, v) => (v ? <div className="flex justify-between gap-3 py-1.5 border-b border-slate-100 last:border-0 text-[12.5px]"><span className="text-slate-500 font-semibold shrink-0">{l}</span><b className="text-right">{v}</b></div> : null);
+  const alamat = [al.jalan, al.rtRw && 'RT/RW ' + al.rtRw, al.kelurahan, al.kecamatan, al.kota, al.provinsi, al.kodePos].filter(Boolean).join(', ');
+  return (
+    <div className="p-6 max-h-[85vh] overflow-y-auto">
+      <div className="flex items-center"><h3 className="font-extrabold text-[17px]">Kelengkapan Data — {ag.name}</h3><div className="flex-1"></div>
+        <button onClick={closeModal} className="text-slate-400"><Icon name="x" className="w-5 h-5" /></button></div>
+      <div className="flex gap-1.5 mt-3">{[['diri', 'Data Diri'], ['usaha', 'Legalitas & Rekening'], ['dok', 'Dokumen']].map(([v, l]) => (
+        <button key={v} onClick={() => setTab(v)} className={'px-3 py-2 rounded-xl text-[12px] font-extrabold ' + (tab === v ? 'bg-[#0b2447] text-white' : 'bg-slate-100 text-slate-500')}>{l}</button>
+      ))}</div>
+      {tab === 'diri' ? <div className="mt-3 bg-slate-50 rounded-2xl px-3.5 py-1">
+        {row('Jenis agen', k.jenis)}{row('Nama lengkap', k.nama)}{row('NIK', k.nik)}{row('Tempat, tgl lahir', (k.tmpLahir || '') + (k.tglLahir ? ' • ' + k.tglLahir : ''))}
+        {row('Jenis kelamin', k.gender)}{row('Agama', k.agama)}{row('Alamat domisili', alamat)}{row('Status tinggal', k.tinggal)}
+        {row('No HP', k.hp)}{row('WhatsApp', k.wa)}{row('Email', k.email)}
+        {row('Kontak darurat', (dg.nama || '') + (dg.hubungan ? ' (' + dg.hubungan + ')' : '') + (dg.hp ? ' • ' + dg.hp : ''))}
+        {!k.nik ? <div className="text-[12.5px] font-bold text-slate-400 py-2">Belum ada data — agen belum mengisi tahap kelengkapan.</div> : null}
+      </div> : null}
+      {tab === 'usaha' ? <div className="mt-3 bg-slate-50 rounded-2xl px-3.5 py-1">
+        {k.jenis === 'Badan Usaha (PT/CV)' ? <>
+          {row('Badan usaha', k.badanNama)}{row('Bentuk usaha', k.badanBentuk)}{row('NPWP', k.npwpUsaha)}{row('NIB', k.nib)}
+          {row('Nomor akta', k.aktaNo)}{row('SK Kemenkumham', k.skNo)}{row('Direktur', k.direktur)}{row('Alamat usaha', k.alamatUsaha)}
+        </> : <div className="text-[12.5px] font-bold text-slate-500 py-2">Agen terdaftar sebagai Perorangan / Freelance — legalitas badan usaha tidak berlaku.</div>}
+        {row('Bank', k.bank)}{row('No rekening', k.rekeningNo)}{row('Pemilik rekening', k.rekeningNama)}{row('Cabang', k.rekeningCabang)}
+      </div> : null}
+      {tab === 'dok' ? <div className="mt-3 text-[12.5px] font-bold text-slate-500 py-2">Dokumen: {s.docsFilled}/{s.docsTotal} terunggah. {s.status === 'diajukan' ? 'Pengajuan sudah dikirim agen.' : 'Belum dikirim.'}</div> : null}
+      <div className="grid grid-cols-3 gap-2 mt-4">
+        <div className={'rounded-xl px-3 py-2 text-center text-[11.5px] font-extrabold ' + (s.dataOk ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600')}>Data Diri</div>
+        <div className={'rounded-xl px-3 py-2 text-center text-[11.5px] font-extrabold ' + (s.docsOk ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600')}>Dokumen</div>
+        <div className={'rounded-xl px-3 py-2 text-center text-[11.5px] font-extrabold ' + (s.termsOk ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600')}>S&amp;K</div>
+      </div>
+    </div>
+  );
+}
+
 export function Agencies() {
   const { toast, refresh, openModal } = useApp();
   const ags = DB.load('agencies', []);
@@ -107,7 +148,16 @@ export function Agencies() {
             <div className="flex-1 min-w-0"><div className="font-extrabold text-[14px]">{a.name}</div><div className="text-[12px] text-slate-500 font-medium">{a.address}</div>
               <div className="text-[12px] font-bold mt-0.5">Fee: {a.feeType === 'flat' ? fmtRp(a.feeValue) : a.feeValue + '%'} • ★{a.rating}</div>
               <div className="flex gap-1.5 mt-2 flex-wrap"><span className={`badge ${a.status === 'active' ? 'bg-green-100 text-green-700' : a.status === 'pending' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>{a.status}</span>
-                {a.status === 'pending' ? <><button onClick={() => agSetStatus(a.id, 'active', toast, refresh)} className="badge bg-green-500 text-white cursor-pointer">Approve</button><button onClick={() => agReject(a.id)} className="badge bg-red-100 text-red-600 cursor-pointer">Tolak</button></> : null}
+                {a.status === 'pending' ? (() => { const s = kycSummary(a); return <>
+                  <span className={`badge ${s.dataOk ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>Data Diri {s.dataOk ? '✓' : '—'}</span>
+                  <span className={`badge ${s.docsOk ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>Dokumen {s.docsOk ? '✓' : '—'}</span>
+                  <span className={`badge ${s.termsOk ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>S&amp;K {s.termsOk ? '✓' : '—'}</span>
+                  <button onClick={() => openModal(<KycModal id={a.id} />)} className="badge bg-sky-100 text-sky-700 cursor-pointer">Detail</button>
+                  {s.status === 'diajukan'
+                    ? <button onClick={() => agSetStatus(a.id, 'active', toast, refresh)} className="badge bg-green-500 text-white cursor-pointer">Approve</button>
+                    : <button disabled className="badge bg-slate-200 text-slate-400 cursor-not-allowed" title="Menunggu kelengkapan dikirim agen">Approve</button>}
+                  <button onClick={() => agReject(a.id)} className="badge bg-red-100 text-red-600 cursor-pointer">Tolak</button>
+                </>; })() : null}
                 {a.status === 'active' ? <button onClick={() => agSetStatus(a.id, 'suspended', toast, refresh)} className="badge bg-red-100 text-red-600 cursor-pointer">Suspend</button> : <button onClick={() => agSetStatus(a.id, 'active', toast, refresh)} className="badge bg-sky-100 text-sky-700 cursor-pointer">Aktifkan</button>}
                 <button onClick={() => openModal(<FeeModal id={a.id} />)} className="badge bg-violet-100 text-violet-700 cursor-pointer">Fee</button></div></div>
           </div>
