@@ -30,12 +30,7 @@ export function initDB(){
     {id:'AG3',name:'Lintas Utara',logo:'',address:'Jl. Gatot Subroto No.45, Medan',phone:'061-778899',bank:'BRI 0022-3344-55 a.n. Lintas Utara',status:'active',serviceFee:10000,feeType:'percent',feeValue:10,refundPolicy:[{minH:72,pct:100},{minH:24,pct:50},{minH:0,pct:0}],rating:4.7,trips:310},
     {id:'AG4',name:'Cahaya Perkasa',logo:'',address:'Jl. Diponegoro No.7, Aceh Barat',phone:'0655-31212',bank:'-',status:'pending',serviceFee:10000,feeType:'percent',feeValue:8,refundPolicy:[{minH:72,pct:100},{minH:24,pct:50},{minH:0,pct:0}],rating:5.0,trips:0},
   ];
-  const routes=[
-    {id:'R1',from:'Aceh Jaya',to:'Banda Aceh',distance:'±149 km',duration:'±3 jam',basePrice:150000,prices:{AG1:150000,AG2:170000},serviceFee:10000,homePickup:true,pickups:['Terminal Aceh Jaya','Simpang Calang','Lamno','Lhok Kruet','Lhoknga','Terminal Batoh B. Aceh'],active:true,agencyId:'AG1',agencyIds:['AG1','AG2'],driverId:'D1',driverIds:['D1','D2','D4']},
-    {id:'R2',from:'Banda Aceh',to:'Aceh Jaya',distance:'±149 km',duration:'±3 jam',basePrice:150000,prices:{AG1:150000,AG2:165000},serviceFee:10000,homePickup:true,pickups:['Terminal Batoh','Lhoknga','Lhok Kruet','Lamno','Simpang Calang','Terminal Aceh Jaya'],active:true,agencyId:'AG1',agencyIds:['AG1','AG2'],driverId:'D2',driverIds:['D1','D2','D5']},
-    {id:'R3',from:'Aceh Jaya',to:'Aceh Barat',distance:'±89 km',duration:'±2 jam',basePrice:80000,prices:{AG1:80000},serviceFee:5000,homePickup:true,pickups:['Terminal Aceh Jaya','Krueng Sabee','Teunom','Terminal Aceh Barat'],active:true,agencyId:'AG1',agencyIds:['AG1'],driverId:'D1',driverIds:['D1','D2']},
-    {id:'R4',from:'Banda Aceh',to:'Medan',distance:'±577 km',duration:'±10 jam',basePrice:320000,prices:{AG1:320000,AG2:335000,AG3:310000},serviceFee:15000,homePickup:true,pickups:['Terminal Batoh','Sigli','Bireuen','Lhokseumawe','Terminal Amplas Medan'],active:true,agencyId:'AG1',agencyIds:['AG1','AG2','AG3'],driverId:'D1',driverIds:['D1','D4','D6']},
-  ];
+  const routes=[];  /* Rute dibuat melalui usulan agen (simulasi dari nol). */
   const vehicles=[
     {id:'V1',agencyId:'AG1',brand:'Toyota',model:'Innova Reborn',year:2022,color:'Hitam',plate:'BL 1234 AA',chassis:'MHFXW41G2N2001001',engine:'2GD2001001',vtype:'MPV',vtypeOther:'',baggage:'Besar',tax:'Aktif',stnkExp:'2027-03-10',kir:'Berlaku s.d. 2027',condition:'Sangat baik',capacity:6,photo:'https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?w=600&q=80',facilities:['AC','USB Charger','Air Mineral','Bantal'],status:'aktif',ownerName:'H. Muhammad Nur',ownerBiz:'Barakah Travel',ownerNik:'1173010101800001',ownerAddr:'Jl. Merdeka No.12, Calang',ownerPhone:'0812000001',ownerEmail:'agen@barakah.com',ownership:'Milik perusahaan',coopDriverId:'',hasEmail:'Ya',docs:['STNK','KTP pemilik'],docOther:'',stnkPhoto:'',ktpOwnerPhoto:'',mainRoute:'Calang — Banda Aceh',origin:'Aceh Jaya',dest:'Banda Aceh',freq:'Setiap hari',freqOther:'',services:['Antar jemput alamat','Paket barang'],opSchedule:'07:00 & 14:00 setiap hari',coopTariff:150000,coopSys:'Bagi hasil',coopOther:'',fleetCount:3,hasDriver:'Ya',drvName:'Bang Jamil',drvPhone:'0812000002',drvSim:'A - 1173011203850001',drvSimExp:'2030-05-01',drvExp:'12 tahun lintas Aceh',hasBackup:'Ya',backName:'Ilham Saputra',backPhone:'0812000099',backSim:'B1 - 1171031201970007',backSimExp:'2029-01-01'},
     {id:'V2',agencyId:'AG1',brand:'Daihatsu',model:'Xenia',year:2021,color:'Silver',plate:'BL 5678 BB',chassis:'MHKV1AA2JK2001002',engine:'1NR2001002',vtype:'MPV',vtypeOther:'',baggage:'Sedang',tax:'Aktif',stnkExp:'2026-11-20',kir:'-',condition:'Baik',capacity:6,photo:'https://images.unsplash.com/photo-1533473359331-0135ef1b58bf?w=600&q=80',facilities:['AC','Musik','Air Mineral'],status:'aktif',ownerName:'H. Muhammad Nur',ownerBiz:'',ownerNik:'1173010101800001',ownerAddr:'Jl. Merdeka No.12, Calang',ownerPhone:'0812000001',ownerEmail:'agen@barakah.com',ownership:'Milik pribadi',coopDriverId:'',hasEmail:'Ya',docs:['STNK','KTP pemilik'],docOther:'',stnkPhoto:'',ktpOwnerPhoto:'',mainRoute:'Calang — Banda Aceh',origin:'Aceh Jaya',dest:'Banda Aceh',freq:'Setiap hari',freqOther:'',services:['Antar jemput alamat'],opSchedule:'14:00 setiap hari',coopTariff:140000,coopSys:'Tarif tetap',coopOther:'',fleetCount:3,hasDriver:'Ya',drvName:'Teuku Rizal',drvPhone:'0812000003',drvSim:'A - 1173021507900002',drvSimExp:'2027-06-01',drvExp:'6 tahun',hasBackup:'Tidak',backName:'',backPhone:'',backSim:'',backSimExp:''},
@@ -52,26 +47,13 @@ export function initDB(){
     {id:'D6',agencyId:'AG3',name:'Agus Medan',phone:'0812000021',simType:'B1',simExp:2027,simPhoto:seedSim('B1','Agus Medan','1271010505920006','2027'),ktpPhoto:'',selfie:'',photo:seedAvatar('AM','#06b6d4','#155e75'),status:'aktif',rating:4.7,trips:140,userEmail:'agus@lintasutara.com',birthPlace:'Medan',birthDate:'1992-05-05',gender:'Laki-laki',address:'Jl. Gatot Subroto No.45, Medan',nik:'1271010505920006',marital:'Belum menikah',education:'SMK',emName:'Siti',emPhone:'0813000066',emRelation:'Ibu',simNumber:'1271010505920006',bank:'Mandiri 8900010159006 a.n. Agus Medan'},
     {id:'D7',agencyId:'AG1',name:'Ilham Saputra',phone:'0812000099',simType:'B1',simExp:2029,simPhoto:seedSim('B1','Ilham Saputra','1171031201970007','2029'),ktpPhoto:'',selfie:'',photo:seedAvatar('IS','#14b8a6','#134e4a'),status:'aktif',rating:5.0,trips:0,userEmail:'pengemudibaru@mail.com',birthPlace:'Calang',birthDate:'1997-01-12',gender:'Laki-laki',address:'Jl. Merdeka No.30, Calang',nik:'1171031201970007',marital:'Belum menikah',education:'SMA',emName:'Hasan',emPhone:'0813000077',emRelation:'Saudara',simNumber:'1171031201970007',bank:'BCA 8210099007 a.n. Ilham Saputra'},
   ];
+  /* Penjadwalan sengaja kosong: jadwal dibuat sendiri oleh agen (simulasi dari nol). */
   const schedules=[];
-  let n=0;
-  for(let d=0; d<7; d++){
-    const date=todayStr(d);
-    const isWknd=[0,6].includes(new Date(date).getDay());
-    [['R1','07:00','V1','D1','AG1'],['R1','14:00','V2','D2','AG1'],['R2','08:00','V1','D1','AG1'],['R2','16:00','V2','D2','AG1'],['R3','09:00','V2','D2','AG1'],['R1','10:00','V4','D4','AG2'],['R4','20:00','V4','D5','AG2'],['R4','19:00','V5','D6','AG3']].forEach((s,i)=>{
-      const r=routes.find(x=>x.id===s[0]);
-      let price=r.basePrice+(isWknd?25000:0);
-      n++;
-      schedules.push({id:'S'+(100+n),agencyId:s[4],routeId:s[0],date,time:s[1],vehicleId:s[2],driverId:s[3],price,status:'open',tripStatus:'scheduled',blockedSeats:[],createdAt:new Date().toISOString()});
-    });
-  }
-  // pre-book some seats so layout looks alive
-  const bookings=[
-    {id:'BK-DEMO1',code:'TA-8X2KQA',scheduleId:schedules[0].id,userEmail:'budi@mail.com',passengers:[{name:'Budi Santoso',phone:'0821000111',seat:'A2',pickup:'Terminal Aceh Jaya'}],seats:['A2'],total:150000,discount:0,fare:{ticket:128889,service:10000,fee:11111,total:150000},status:'paid',payMethod:'QRIS',createdAt:new Date(Date.now()-36e5).toISOString(),paidAt:new Date(Date.now()-35e5).toISOString(),refundPct:0,holdExpiry:null,rating:null},
-  ];
+  const bookings=[];
   DB.save('users',users); DB.save('agencies',agencies); DB.save('routes',routes);
   DB.save('vehicles',vehicles); DB.save('drivers',drivers); DB.save('schedules',schedules);
-  DB.save('bookings',bookings); DB.save('payments',[{id:uid('PAY'),bookingId:'BK-DEMO1',amount:150000,method:'QRIS',status:'paid',time:new Date().toISOString(),fee:11111}]);
-  DB.save('ledger',[{id:'LG-DEMO1',bookingId:'BK-DEMO1',scheduleId:schedules[0].id,agencyId:'AG1',driverId:'D1',userEmail:'budi@mail.com',seats:['A2'],ticket:128889,service:10000,fee:11111,total:150000,status:'ditahan',createdAt:new Date().toISOString(),releasedAt:null,paidOutAt:null}]);
+  DB.save('bookings',bookings); DB.save('payments',[]);
+  DB.save('ledger',[]);
   DB.save('vouchers',[{code:'HEMAT20',type:'percent',value:20,maxDisc:30000,quota:100,used:12,active:true,desc:'Diskon 20% maks Rp30rb'},{code:'CALANG50',type:'flat',value:15000,quota:50,used:5,active:true,desc:'Potongan Rp15rb rute Aceh Jaya'}]);
   DB.save('reviews',[{id:uid('RV'),agencyId:'AG1',user:'Rina Amelia',rating:5,text:'Pengemudi ramah, armada bersih dan tepat waktu. Recommended!',date:todayStr(-2),trip:'Aceh Jaya → Banda Aceh'}]);
   DB.save('notifications',[{id:uid('NTF'),to:'user@demo.com',title:'Selamat datang di TransAceh',msg:'Gunakan kode HEMAT20 untuk diskon 20% perjalanan pertama.',ch:'app',time:new Date().toISOString(),read:false}]);
@@ -79,7 +61,7 @@ export function initDB(){
   DB.save('audit',[{id:uid('LOG'),time:new Date().toISOString(),actor:'system',action:'seed',detail:'Database awal dibuat'}]);
   DB.save('banners',[{id:'B1',title:'Diskon 20% Rute Aceh Jaya – Banda Aceh',sub:'Kode: HEMAT20 • s.d. akhir bulan',active:true}]);
   DB.save('waiting',[]);
-  DB.save('routeRequests',[{id:'RQ-DEMO1',agencyId:'AG2',type:'rute-baru',routeId:null,from:'Medan',to:'Banda Aceh',pickup:'',pickups:[],note:'Permintaan rutin penumpang carter',price:300000,homePickup:true,status:'pending',adminNote:'',createdAt:new Date().toISOString(),decidedAt:null},{id:'RQ-DEMO2',agencyId:'AG1',type:'titik-jemput',routeId:'R1',from:'Aceh Jaya',to:'Banda Aceh',pickup:'Pasar Calang',pickups:['Pasar Calang','Lamno'],note:'Dekat pool agen',price:0,status:'pending',adminNote:'',createdAt:new Date().toISOString(),decidedAt:null},{id:'RQ-DEMO3',agencyId:'AG1',type:'ubah-harga',routeId:'R1',from:'Aceh Jaya',to:'Banda Aceh',pickup:'',pickups:[],note:'Penyesuaian BBM',price:160000,status:'pending',adminNote:'',createdAt:new Date().toISOString(),decidedAt:null}]);
+  DB.save('routeRequests',[]);
   localStorage.setItem('at_seeded_v16','1');
   }
   DB.save('ledger',DB.load('ledger',[]));
@@ -200,5 +182,48 @@ export function initDB(){
     });
     if(ch) DB.save('routes',rs);
   }catch(e){}
+})();
+/* Pembersih sekali-jalan (browser yang sudah terlanjur ter-seed): buang HANYA jejak dummy —
+   jadwal ber-id pola seed S1xx, booking BK-DEMO1, dan transaksi yang menempel padanya.
+   Jadwal/transaksi buatan user (id S-XXXXX dsb.) tidak disentuh. */
+(function purgeSeedSchedules(){
+  try{
+    if(localStorage.getItem('at_purge_seed_sched_v1')) return;
+    const seedSet=new Set(DB.load('schedules',[]).filter(s=>/^S1\d\d$/.test(s.id||'')).map(s=>s.id));
+    if(seedSet.size) DB.save('schedules',DB.load('schedules',[]).filter(s=>!seedSet.has(s.id)));
+    const books=DB.load('bookings',[]);
+    const rmBook=b=>b.id==='BK-DEMO1'||seedSet.has(b.scheduleId);
+    const rmIds=new Set(books.filter(rmBook).map(b=>b.id));
+    if(rmIds.size) DB.save('bookings',books.filter(b=>!rmBook(b)));
+    DB.save('payments',DB.load('payments',[]).filter(p=>!rmIds.has(p.bookingId)));
+    DB.save('ledger',DB.load('ledger',[]).filter(l=>!rmIds.has(l.bookingId)&&!seedSet.has(l.scheduleId)));
+    localStorage.setItem('at_purge_seed_sched_v1','1');
+  }catch{}
+})();
+/* Pembersih sekali-jalan rute (browser yang sudah terlanjur ter-seed): buang HANYA jejak dummy —
+   rute ber-id R1–R4, usulan dummy RQ-DEMO1/2/3, usulan yang menempel pada rute dummy, dan
+   jadwal/transaksi yang dibangun di atas rute dummy (agar tidak yatim). Rute/usulan buatan user
+   (id R-XXXXX / RQ-XXXXX) tidak disentuh. */
+(function purgeSeedRoutes(){
+  try{
+    if(localStorage.getItem('at_purge_seed_routes_v1')) return;
+    const seedRouteIds=new Set(['R1','R2','R3','R4']);
+    const seedReqIds=new Set(['RQ-DEMO1','RQ-DEMO2','RQ-DEMO3']);
+    const rs=DB.load('routes',[]);
+    if(rs.some(r=>seedRouteIds.has(r.id))) DB.save('routes',rs.filter(r=>!seedRouteIds.has(r.id)));
+    const rqs=DB.load('routeRequests',[]);
+    DB.save('routeRequests',rqs.filter(q=>!seedReqIds.has(q.id)&&!seedRouteIds.has(q.routeId)));
+    const scheds=DB.load('schedules',[]);
+    const removedSchedIds=new Set(scheds.filter(s=>seedRouteIds.has(s.routeId)).map(s=>s.id));
+    if(removedSchedIds.size){
+      DB.save('schedules',scheds.filter(s=>!removedSchedIds.has(s.id)));
+      const books=DB.load('bookings',[]);
+      const rmBookIds=new Set(books.filter(b=>removedSchedIds.has(b.scheduleId)).map(b=>b.id));
+      DB.save('bookings',books.filter(b=>!removedSchedIds.has(b.scheduleId)));
+      DB.save('payments',DB.load('payments',[]).filter(p=>!rmBookIds.has(p.bookingId)));
+      DB.save('ledger',DB.load('ledger',[]).filter(l=>!rmBookIds.has(l.bookingId)&&!removedSchedIds.has(l.scheduleId)));
+    }
+    localStorage.setItem('at_purge_seed_routes_v1','1');
+  }catch{}
 })();
 }
