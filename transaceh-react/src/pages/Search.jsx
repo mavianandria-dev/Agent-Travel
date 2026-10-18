@@ -5,6 +5,7 @@ import { schedById, schedReady, takenSeats, seatsLeft, routeById, vehicleById, d
 import { fmtRp, todayStr, uid } from '@/lib/utils.js';
 import { Icon, CabinGrid, fmtDate } from '@/components/ui.jsx';
 import { PICKUP_ORIGIN, HOME_PICKUP } from '@/lib/pickups.js';
+import { saveCheckoutDraft, clearCheckoutDraft } from '@/lib/checkoutDraft.js';
 import { CITY_COORDS, routeMeta } from '@/lib/geo.js';
 import { MapPicker } from '@/components/MapPicker.jsx';
 
@@ -96,6 +97,7 @@ export function PaymentModal({ booking, onDone }) {
     refresh();
     closeModal();
     toast('Pembayaran sukses! E-tiket terbit.', 'ok');
+    clearCheckoutDraft();
     setBw({ step: 1, routeId: 'R1', date: todayStr(1), scheduleId: null, seats: [], passengers: [], pickup: '', pickupAddr: '', pickupCoords: '', voucher: '', discount: 0 });
     if (onDone) onDone(b.id);
     else go('ticket-detail:' + b.id);
@@ -216,7 +218,12 @@ export default function Search() {
   };
 
   const doCheckout = () => {
-    if (!user) { toast('Login dulu untuk booking', 'warn'); go('login'); return; }
+    if (!user) {
+      saveCheckoutDraft(bw);
+      toast('Masuk / daftar dulu — pesananmu dilanjutkan otomatis setelah masuk', 'warn');
+      go('login');
+      return;
+    }
     const s = schedById(bw.scheduleId);
     if (!s) return;
     const tk = takenSeats(s.id);

@@ -3,6 +3,7 @@ import { T } from '@/lib/i18n.js';
 import { todayStr } from '@/lib/utils.js';
 import { initDB } from '@/lib/seed.js';
 import { currentUser, setSession, cleanupHolds, audit } from '@/lib/domain.js';
+import { clearCheckoutDraft } from '@/lib/checkoutDraft.js';
 
 initDB();
 
@@ -82,6 +83,8 @@ export function AppProvider({ children }) {
   const logout = useCallback(() => {
     audit('logout', (currentUser() || {}).email || '');
     setSession(null);
+    clearCheckoutDraft();
+    setBw(freshBW());
     setFilter({ q: '', date: '', status: '' });
     setView('home');
     setModal(null);

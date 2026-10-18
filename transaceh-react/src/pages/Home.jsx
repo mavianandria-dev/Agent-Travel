@@ -4,6 +4,7 @@ import { setSession, seatsLeft, audit, routeBookable } from '@/lib/domain.js';
 import { fmtRp, todayStr } from '@/lib/utils.js';
 import { routeMeta } from '@/lib/geo.js';
 import { Icon } from '@/components/ui.jsx';
+import { clearCheckoutDraft } from '@/lib/checkoutDraft.js';
 
 export default function Home() {
   const { go, toast, refresh, setBw, bw, tick } = useApp();
@@ -15,6 +16,7 @@ export default function Home() {
   const scheds = DB.load('schedules', []).filter((s) => s.date >= todayStr(0));
 
   const quickBook = (routeId) => {
+    clearCheckoutDraft();
     setBw({ ...bw, step: 1, routeId, date: todayStr(1), scheduleId: null, seats: [], passengers: [], pickup: '', pickupAddr: '', pickupCoords: '', voucher: '', discount: 0 });
     go('search');
   };
