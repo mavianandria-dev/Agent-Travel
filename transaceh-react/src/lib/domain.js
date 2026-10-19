@@ -373,19 +373,53 @@ export function validateKycStep1(k) {
   return null;
 }
 
-/** Daftar dokumen wajib per jenis agen (label → key). */
+/** Grup dokumen unggahan per jenis agen — wajib/opsional + petunjuk singkat. */
+export function kycDocGroups(jenis) {
+  if (jenis === 'Badan Usaha (PT/CV)') {
+    return [
+      { grup: 'Identitas Penanggung Jawab', docs: [
+        { key: 'ktp', label: 'KTP Penanggung Jawab / Direktur', wajib: true, hint: 'Foto KTP asli, semua sudut terlihat' },
+      ] },
+      { grup: 'Legalitas Usaha', docs: [
+        { key: 'npwpUsaha', label: 'NPWP Perusahaan', wajib: true, hint: 'Kartu NPWP atas nama badan usaha' },
+        { key: 'nib', label: 'NIB', wajib: true, hint: 'Nomor Induk Berusaha' },
+        { key: 'akta', label: 'Akta Pendirian Perusahaan', wajib: true, hint: 'Halaman akta pendirian' },
+      ] },
+      { grup: 'Kantor', docs: [
+        { key: 'kantorDepan', label: 'Foto Kantor Tampak Depan', wajib: true, hint: 'Terlihat papan nama / plang usaha' },
+        { key: 'kantorDalam', label: 'Foto Kantor Tampak Dalam', wajib: true, hint: 'Ruangan kerja / area pelayanan' },
+      ] },
+    ];
+  }
+  return [
+    { grup: 'Identitas Pemohon', docs: [
+      { key: 'ktp', label: 'KTP Pemohon', wajib: true, hint: 'Foto KTP asli, semua sudut terlihat' },
+      { key: 'pasfoto', label: 'Pasfoto Terbaru', wajib: true, hint: 'Latar merah atau biru' },
+    ] },
+    { grup: 'Rekening & Pajak', docs: [
+      { key: 'bukuTabungan', label: 'Buku Tabungan / Rekening', wajib: true, hint: 'Halaman pertama yang memuat nama pemilik' },
+      { key: 'npwpPribadi', label: 'NPWP Pribadi', wajib: false, hint: 'Opsional — kalau ada' },
+    ] },
+  ];
+}
+
+/** Daftar dokumen [key, label] untuk ringkasan kelengkapan & tampilan admin. */
 export function kycDocList(jenis) {
-  return jenis === 'Badan Usaha (PT/CV)'
-    ? [['ktp', 'KTP Penanggung Jawab / Direktur'], ['npwpUsaha', 'NPWP Perusahaan'], ['nib', 'NIB'], ['akta', 'Akta Pendirian Perusahaan'], ['sk', 'SK Kemenkumham'], ['kantorDepan', 'Foto Kantor Tampak Depan'], ['kantorDalam', 'Foto Kantor Tampak Dalam']]
-    : [['ktp', 'Scan / Foto KTP Asli'], ['pasfoto', 'Pasfoto Terbaru (3x4 / 4x6)'], ['npwpPribadi', 'NPWP Pribadi (opsional)'], ['bukuTabungan', 'Foto Halaman Depan Buku Tabungan']];
+  return kycDocGroups(jenis).flatMap((g) => g.docs.map((d) => [d.key, d.label]));
+}
+
+/** Key dokumen wajib — syarat sebelum pengajuan boleh dikirim. */
+export function kycDocWajib(jenis) {
+  return kycDocGroups(jenis).flatMap((g) => g.docs.filter((d) => d.wajib).map((d) => d.key));
 }
 
 /** Ringkasan kelengkapan untuk kartu admin & halaman status. */
 export function kycSummary(ag) {
   const k = (ag && ag.kyc) || {};
-  const docs = kycDocList(k.jenis);
-  const filled = docs.filter(([key]) => !!(k.docs || {})[key]).length;
-  const need = docs.filter(([key]) => key !== 'npwpPribadi').length;
+  const wajib = kycDocWajib(k.jenis);
+  const docs = k.docs || {};
+  const filled = wajib.filter((key) => !!docs[key]).length;
+  const need = wajib.length;
   return {
     status: k.status || 'draft',
     step: k.step || 1,

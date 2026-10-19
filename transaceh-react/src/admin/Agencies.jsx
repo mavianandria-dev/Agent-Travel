@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { agencyById, audit, kycSummary } from '@/lib/domain.js';
+import { agencyById, audit, kycSummary, kycDocGroups } from '@/lib/domain.js';
+import { formatBytes } from '@/lib/upload.js';
 import { fmtRp, uid } from '@/lib/utils.js';
 import { Icon } from '@/components/ui.jsx';
 
@@ -92,6 +93,9 @@ function KycModal({ id }) {
   const k = (ag && ag.kyc) || {};
   const s = kycSummary(ag);
   const [tab, setTab] = useState('diri');
+  const [pv, setPv] = useState('');
+  const groups = kycDocGroups(k.jenis);
+  const docs = k.docs || {};
   const al = k.alamat || {};
   const dg = k.darurat || {};
   const row = (l, v) => (v ? <div className="flex justify-between gap-3 py-1.5 border-b border-slate-100 last:border-0 text-[12.5px]"><span className="text-slate-500 font-semibold shrink-0">{l}</span><b className="text-right">{v}</b></div> : null);
@@ -118,12 +122,52 @@ function KycModal({ id }) {
         {row('Bank', k.bank)}{row('No rekening', k.rekeningNo)}{row('Pemilik rekening', k.rekeningNama)}
         {row('NPWP pemohon', k.npwpSamaKtp === false ? k.npwp : (k.nik ? 'Sama dengan NIK • ' + k.nik : ''))}
       </div> : null}
-      {tab === 'dok' ? <div className="mt-3 text-[12.5px] font-bold text-slate-500 py-2">Dokumen: {s.docsFilled}/{s.docsTotal} terunggah. {s.status === 'diajukan' ? 'Pengajuan sudah dikirim agen.' : 'Belum dikirim.'}</div> : null}
+      {tab === 'dok' ? <div className="mt-3">
+        <p className="text-[12.5px] font-bold text-slate-500">Dokumen wajib: {s.docsFilled}/{s.docsTotal} terunggah. {s.status === 'diajukan' ? 'Pengajuan sudah dikirim agen.' : 'Belum dikirim.'}</p>
+        {groups.map((g) => (
+          <div key={g.grup} className="mt-3">
+            <p className="text-[11px] font-extrabold text-slate-400">{g.grup.toUpperCase()}</p>
+            <div className="grid sm:grid-cols-2 gap-2 mt-1.5">
+              {g.docs.map((d) => {
+                const doc = docs[d.key];
+                return (
+                  <div key={d.key} className="border-2 border-slate-100 rounded-2xl p-2.5 flex gap-2 items-center">
+                    <div className="w-12 h-12 rounded-xl bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center shrink-0">
+                      {doc && doc.type === 'application/pdf' ? <Icon name="file-text" className="w-5 h-5 text-red-500" /> : doc ? <img src={doc.dataUrl} alt={d.label} className="w-full h-full object-cover" /> : <Icon name="image" className="w-5 h-5 text-slate-300" />}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[11.5px] font-extrabold leading-snug">{d.label}{d.wajib ? '' : ' (opsional)'}</p>
+                      {doc
+                        ? <><p className="text-[10px] font-bold text-green-600 truncate">{doc.name} · {formatBytes(doc.size)}</p><button onClick={() => setPv(d.key)} className="text-[10.5px] font-extrabold text-sky-600 mt-0.5">Lihat dokumen</button></>
+                        : <p className="text-[10.5px] font-bold text-slate-400">Belum diunggah</p>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div> : null}
       <div className="grid grid-cols-3 gap-2 mt-4">
         <div className={'rounded-xl px-3 py-2 text-center text-[11.5px] font-extrabold ' + (s.dataOk ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600')}>Data Diri</div>
         <div className={'rounded-xl px-3 py-2 text-center text-[11.5px] font-extrabold ' + (s.docsOk ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600')}>Dokumen</div>
         <div className={'rounded-xl px-3 py-2 text-center text-[11.5px] font-extrabold ' + (s.termsOk ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600')}>S&amp;K</div>
       </div>
+
+      {pv && docs[pv] ? (
+        <div className="fixed inset-0 z-[70] bg-black/70 flex items-center justify-center p-4" onClick={() => setPv('')}>
+          <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[88vh] overflow-auto p-3" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 px-1 pb-2">
+              <p className="text-[13px] font-extrabold flex-1 min-w-0 truncate">{docs[pv].name}</p>
+              <button onClick={() => setPv('')} className="text-slate-400" aria-label="Tutup pratinjau"><Icon name="x" className="w-5 h-5 pointer-events-none" /></button>
+            </div>
+            {docs[pv].type === 'application/pdf'
+              ? <embed src={docs[pv].dataUrl} type="application/pdf" className="w-full h-[65vh] rounded-xl border border-slate-200" />
+              : <img src={docs[pv].dataUrl} alt={docs[pv].name} className="w-full rounded-xl border border-slate-200" />}
+            <a href={docs[pv].dataUrl} download={docs[pv].name} className="mt-2 flex items-center justify-center gap-2 bg-slate-100 font-extrabold text-[12.5px] py-2.5 rounded-xl">Unduh / buka di tab baru</a>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

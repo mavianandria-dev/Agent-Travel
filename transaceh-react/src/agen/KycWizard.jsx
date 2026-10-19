@@ -6,14 +6,18 @@ import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
 import {
-  agencyOf, agencyPending, validateKycStep1, kycAge, kycSummary, kycDocList,
+  agencyOf, agencyPending, validateKycStep1, kycAge, kycSummary, kycDocGroups, kycDocWajib,
   KYC_MIN_AGE, KYC_JENIS, KYC_BENTUK, KYC_AGAMA, KYC_HUBUNGAN, KYC_BANKS,
 } from '@/lib/domain.js';
 import { inC } from '@/lib/utils.js';
+import { DOC_ACCEPT, DOCS_BUDGET_BYTES, fileToDoc, formatBytes, docsBytes } from '@/lib/upload.js';
 import { Icon, Sec, PillRadios } from '@/components/ui.jsx';
 import { PROVINSI, KABKOTA, KECAMATAN, KELURAHAN, PILIHAN_LAIN as LAIN } from '@/lib/daerah.js';
 
 const STEPS = [['Kelengkapan Data', 'clipboard-list'], ['Lampiran Dokumen', 'scan-line'], ['Syarat & Ketentuan', 'scroll-text']];
+
+/* cap waktu simpan dokumen — di luar komponen agar tidak dianggap panggilan tidak murni */
+const nowIso = () => new Date().toISOString();
 
 const TERMS = [
   'Semua data yang diisi harus sama dan sesuai dengan dokumen resmi (KTP, akta, NPWP, NIB).',
@@ -104,7 +108,13 @@ export default function KycWizard() {
     alamatUsaha: Object.assign({ jalan: '', rtRw: '', kelurahan: '', kecamatan: '', kota: '', provinsi: '', kodePos: '' }, k0.alamatUsaha && typeof k0.alamatUsaha === 'object' ? k0.alamatUsaha : k0.alamatUsaha ? { jalan: k0.alamatUsaha } : {}),
     bank: k0.bank || '', rekeningNo: k0.rekeningNo || '', rekeningNama: k0.rekeningNama || '',
     npwpSamaKtp: k0.npwpSamaKtp !== false, npwp: k0.npwp || '',
+    docs: Object.assign({}, k0.docs || {}),
   }));
+
+  /* Status unggahan Tahap 2: dokumen yang sedang diproses, pesan error per dokumen, pratinjau. */
+  const [busy, setBusy] = useState('');
+  const [docErr, setDocErr] = useState({});
+  const [view, setView] = useState('');
 
   if (!ag) return <div className="anim max-w-2xl mx-auto bg-white rounded-3xl shadow-card p-7 text-center font-bold text-slate-500">Data travel tidak ditemukan</div>;
 
@@ -131,6 +141,31 @@ export default function KycWizard() {
     return true;
   };
 
+  /* ---------- Tahap 2: unggah & hapus dokumen ---------- */
+  const uploadDoc = async (key, file) => {
+    if (!file || busy) return;
+    setBusy(key);
+    setDocErr((p) => Object.assign({}, p, { [key]: '' }));
+    try {
+      const d = await fileToDoc(file);
+      const next = Object.assign({}, form.docs, { [key]: Object.assign({}, d, { at: nowIso() }) });
+      if (docsBytes(next) > DOCS_BUDGET_BYTES) {
+        setDocErr((p) => Object.assign({}, p, { [key]: 'Penyimpanan browser hampir penuh — pakai foto (lebih kecil) atau hapus dokumen lain' }));
+      } else if (saveKyc({ docs: next }, 'Dokumen terunggah')) {
+        set('docs', next);
+      }
+    } catch (e) {
+      setDocErr((p) => Object.assign({}, p, { [key]: e.message || 'Dokumen gagal diproses' }));
+    }
+    setBusy('');
+  };
+
+  const hapusDoc = (key) => {
+    const next = Object.assign({}, form.docs);
+    delete next[key];
+    if (saveKyc({ docs: next }, 'Dokumen dihapus')) set('docs', next);
+  };
+
   const submitStep1 = () => {
     const err = validateKycStep1(form);
     if (err) { toast(err, 'err'); return; }
@@ -142,6 +177,8 @@ export default function KycWizard() {
   const submitAll = () => {
     const err = validateKycStep1(form);
     if (err) { toast(err, 'err'); set('step', 1); return; }
+    const kurang = kycDocWajib(form.jenis).filter((key) => !form.docs[key]);
+    if (kurang.length) { toast('Lengkapi dokumen wajib dulu — ' + kurang.length + ' dokumen belum terunggah', 'err'); set('step', 2); return; }
     if (!form.terms) { toast('Centang persetujuan Syarat & Ketentuan dulu', 'err'); return; }
     const { status, step, terms, manualAlamat, manualAlamatUsaha, ...rest } = form;
     saveKyc(Object.assign({}, rest, { wa: form.hp, step: 3, status: 'diajukan', terms: true, submittedAt: new Date().toISOString() }), 'Pengajuan terkirim — menunggu persetujuan super admin');
@@ -150,7 +187,7 @@ export default function KycWizard() {
   };
 
   const pending = agencyPending(user);
-  const sum = kycSummary({ kyc: Object.assign({}, form, { docs: k0.docs }) });
+  const sum = kycSummary({ kyc: form });
   const age = kycAge(form.tglLahir);
   const isBadan = form.jenis === 'Badan Usaha (PT/CV)';
 
@@ -159,6 +196,19 @@ export default function KycWizard() {
   const SEC = isBadan
     ? { diri: 'A', usaha: 'B', rekening: 'C', dokumen: 'D', snk: 'E' }
     : { diri: 'A', rekening: 'B', dokumen: 'C', snk: 'D' };
+
+  /* Dokumen per jenis agen — dipakai Tahap 2 dan gerbang kirim pengajuan. */
+  const docGroups = kycDocGroups(form.jenis);
+  const docLabel = {};
+  docGroups.forEach((g) => g.docs.forEach((d) => { docLabel[d.key] = d.label; }));
+  const wajibDoc = kycDocWajib(form.jenis);
+  const wajibFilled = wajibDoc.filter((key) => !!form.docs[key]).length;
+  const docsLengkap = wajibFilled >= wajibDoc.length;
+  const lanjutDokumen = () => {
+    const kurang = wajibDoc.filter((key) => !form.docs[key]).map((key) => docLabel[key]);
+    if (kurang.length) { toast('Lengkapi dokumen wajib dulu: ' + kurang.join(', '), 'err'); return; }
+    if (saveKyc({ step: 3 }, '')) set('step', 3);
+  };
 
   /* ---------- Setelah disetujui ---------- */
   if (!pending) {
@@ -209,7 +259,7 @@ export default function KycWizard() {
         <div className="flex-1"><h2 className="font-extrabold text-[18px]">Kelengkapan Data Agen Travel</h2>
           <p className="text-[12.5px] text-slate-500 font-medium mt-0.5">Lengkapi data berikut agar travel Anda bisa beroperasi penuh.</p></div>
       </div>
-      <div className="mt-4"><Stepper step={form.step} done={new Set(sum.dataOk ? [1] : [])} /></div>
+      <div className="mt-4"><Stepper step={form.step} done={new Set([...(sum.dataOk ? [1] : []), ...(sum.docsOk ? [2] : [])])} /></div>
 
       {form.step === 1 ? (
         <>
@@ -300,18 +350,54 @@ export default function KycWizard() {
       {form.step === 2 ? (
         <>
           <Sec index={SEC.dokumen} title="LAMPIRAN DOKUMEN" />
-          <div className="bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl p-5 text-center">
-            <Icon name="scan-line" className="w-8 h-8 text-slate-300 mx-auto" />
-            <p className="font-extrabold text-[14px] mt-2">Unggah dokumen</p>
-            <p className="text-[12px] text-slate-500 font-medium mt-1">Fitur unggah foto KTP, pasfoto, NPWP, NIB, akta, dan foto kantor sedang disiapkan.</p>
-            <div className="mt-3 text-left max-w-sm mx-auto bg-white rounded-2xl border border-slate-200 p-3">
-              <p className="text-[11px] font-extrabold text-slate-400 mb-1.5">DOKUMEN YANG AKAN DIBUTUHKAN ({form.jenis})</p>
-              {kycDocList(form.jenis).map(([key, label]) => <div key={key} className="flex items-center gap-2 py-1 text-[12px] font-semibold text-slate-500"><Icon name="clock" className="w-3.5 h-3.5" />{label}</div>)}
+          <div className="bg-sky-50 border-2 border-sky-200 rounded-2xl px-3.5 py-3">
+            <div className="flex items-center justify-between gap-2 text-[12.5px] font-extrabold text-sky-900">
+              <span>{wajibFilled} dari {wajibDoc.length} dokumen wajib terunggah</span>
+              <span>{Math.round((wajibFilled / wajibDoc.length) * 100)}%</span>
             </div>
+            <div className="h-2 bg-white rounded-full mt-2 overflow-hidden">
+              <div className="h-full bg-sky-600 rounded-full transition-all" style={{ width: (wajibFilled / wajibDoc.length) * 100 + '%' }} />
+            </div>
+            <p className="text-[11px] font-semibold text-sky-700 mt-2">Foto otomatis dikompres. PDF maksimal 700KB — kalau kebesaran, foto/screenshot halamannya.</p>
           </div>
+          {docGroups.map((g) => (
+            <div key={g.grup} className="mt-3.5">
+              <p className="text-[11px] font-extrabold text-slate-400 tracking-wide">{g.grup.toUpperCase()}</p>
+              <div className="grid sm:grid-cols-2 gap-2.5 mt-1.5">
+                {g.docs.map((d) => {
+                  const doc = form.docs[d.key];
+                  return (
+                    <div key={d.key} className="border-2 border-slate-200 rounded-2xl p-3 flex flex-col">
+                      <div className="flex gap-2.5 flex-1">
+                        <div className="w-12 h-12 rounded-xl bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center shrink-0">
+                          {doc && doc.type === 'application/pdf' ? <Icon name="file-text" className="w-5 h-5 text-red-500" /> : doc ? <img src={doc.dataUrl} alt={d.label} className="w-full h-full object-cover" /> : <Icon name="image" className="w-5 h-5 text-slate-300" />}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[12px] font-extrabold leading-snug">{d.label}{d.wajib ? <span className="text-red-500"> *</span> : <span className="badge bg-slate-100 text-slate-500 ml-1">Opsional</span>}</p>
+                          <p className="text-[10.5px] text-slate-400 font-medium leading-snug">{d.hint}</p>
+                          {doc ? <p className="text-[10.5px] font-bold text-green-600 mt-1 truncate">{doc.name} · {formatBytes(doc.size)}</p> : <p className="text-[10.5px] font-bold text-amber-600 mt-1">Belum diunggah</p>}
+                        </div>
+                      </div>
+                      {docErr[d.key] ? <p className="text-[10.5px] font-bold text-red-500 leading-snug mt-1.5">{docErr[d.key]}</p> : null}
+                      <div className="flex gap-1.5 mt-2">
+                        <label className={'flex-1 text-center border-2 border-dashed rounded-xl px-2 py-1.5 text-[11.5px] font-extrabold transition cursor-pointer ' + (busy === d.key ? 'border-slate-200 text-slate-400' : 'border-slate-300 text-slate-600 hover:border-sky-400 hover:text-sky-600')}>
+                          {busy === d.key ? 'Memproses…' : doc ? 'Ganti' : 'Pilih file'}
+                          <input type="file" accept={DOC_ACCEPT} className="hidden" disabled={!!busy} onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; uploadDoc(d.key, f); }} />
+                        </label>
+                        {doc ? <>
+                          <button onClick={() => setView(d.key)} className="bg-sky-600 text-white px-2.5 py-1.5 rounded-xl" aria-label={'Lihat ' + d.label}><Icon name="eye" className="w-4 h-4 pointer-events-none" /></button>
+                          <button onClick={() => hapusDoc(d.key)} className="bg-red-100 text-red-600 px-2.5 py-1.5 rounded-xl" aria-label={'Hapus ' + d.label}><Icon name="trash-2" className="w-4 h-4 pointer-events-none" /></button>
+                        </> : null}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
           <div className="grid grid-cols-2 gap-2.5 mt-5">
             <button onClick={() => set('step', 1)} className="bg-slate-100 font-extrabold text-[14px] py-3 rounded-2xl">Kembali</button>
-            <button onClick={() => set('step', 3)} className="bg-sky-600 text-white font-extrabold text-[14px] py-3 rounded-2xl">Lanjut</button>
+            <button onClick={lanjutDokumen} aria-disabled={!docsLengkap} className={'font-extrabold text-[14px] py-3 rounded-2xl transition ' + (docsLengkap ? 'bg-sky-600 text-white' : 'bg-slate-200 text-slate-400')}>Lanjut</button>
           </div>
         </>
       ) : null}
@@ -331,6 +417,21 @@ export default function KycWizard() {
             <button onClick={submitAll} disabled={!form.terms} className={'font-extrabold text-[14px] py-3 rounded-2xl transition ' + (form.terms ? 'bg-sky-600 text-white' : 'bg-slate-200 text-slate-400 cursor-not-allowed')}>Kirim Pengajuan</button>
           </div>
         </>
+      ) : null}
+
+      {view && form.docs[view] ? (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={() => setView('')}>
+          <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[88vh] overflow-auto p-3" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 px-1 pb-2">
+              <p className="text-[13px] font-extrabold flex-1 min-w-0 truncate">{docLabel[view]}</p>
+              <button onClick={() => setView('')} className="text-slate-400" aria-label="Tutup pratinjau"><Icon name="x" className="w-5 h-5 pointer-events-none" /></button>
+            </div>
+            {form.docs[view].type === 'application/pdf'
+              ? <embed src={form.docs[view].dataUrl} type="application/pdf" className="w-full h-[65vh] rounded-xl border border-slate-200" />
+              : <img src={form.docs[view].dataUrl} alt={docLabel[view]} className="w-full rounded-xl border border-slate-200" />}
+            <a href={form.docs[view].dataUrl} download={form.docs[view].name} className="mt-2 flex items-center justify-center gap-2 bg-slate-100 font-extrabold text-[12.5px] py-2.5 rounded-xl">Unduh / buka di tab baru</a>
+          </div>
+        </div>
       ) : null}
     </div>
   );

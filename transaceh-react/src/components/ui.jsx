@@ -3,11 +3,11 @@ import {
   Armchair, ArrowLeft, ArrowRight, BadgePercent, Banknote, Ban, Bell, BellRing, Building2, Bus,
   Calendar, CalendarDays, CalendarX, Car, CarFront, Check, CheckCheck, ChevronDown, Circle,
   CircleAlert, CircleCheckBig, CircleGauge, ClipboardList, Clock, Database, DoorOpen, Eraser,
-  Eye, EyeOff, FileSpreadsheet, Flag, HandCoins, History, House, IdCard, Info, Landmark, Languages,
+  Eye, EyeOff, FileSpreadsheet, FileText, Flag, HandCoins, History, House, IdCard, Image as ImageIcon, Info, Landmark, Languages,
   LayoutDashboard, LayoutGrid, Lock, LogOut, Luggage, MapPin, MessageCircle, MousePointerClick,
   MoveVertical, Navigation, Pencil, Percent, Plus, Printer, QrCode, ReceiptText, Repeat, Route,
   ScanLine, ScrollText, Search, Settings, ShieldCheck, Star, Ticket, Timer, Trash2,
-  TriangleAlert, User, UserRound, Users, Wallet, X,
+  TriangleAlert, Upload, User, UserRound, Users, Wallet, X,
 } from 'lucide-react';
 import Chart from 'chart.js/auto';
 import { useApp } from '@/store/AppContext.jsx';
@@ -20,8 +20,8 @@ const MAP = {
   check: Check, 'check-check': CheckCheck, 'chevron-down': ChevronDown, info: Info,
   'circle-alert': CircleAlert, 'circle-check-big': CircleCheckBig, 'circle-gauge': CircleGauge,
   'clipboard-list': ClipboardList, clock: Clock, database: Database, 'door-open': DoorOpen, eraser: Eraser,
-  eye: Eye, 'eye-off': EyeOff, 'file-spreadsheet': FileSpreadsheet, flag: Flag, 'hand-coins': HandCoins, history: History,
-  home: House, 'id-card': IdCard, landmark: Landmark, languages: Languages,
+  eye: Eye, 'eye-off': EyeOff, 'file-spreadsheet': FileSpreadsheet, 'file-text': FileText, flag: Flag, 'hand-coins': HandCoins, history: History,
+  home: House, 'id-card': IdCard, image: ImageIcon, landmark: Landmark, languages: Languages,
   'layout-dashboard': LayoutDashboard, 'layout-grid': LayoutGrid, lock: Lock, 'log-out': LogOut,
   luggage: Luggage, 'map-pin': MapPin, 'message-circle': MessageCircle,
   'mouse-pointer-click': MousePointerClick, 'move-vertical': MoveVertical, navigation: Navigation,
@@ -29,7 +29,7 @@ const MAP = {
   'receipt-text': ReceiptText, repeat: Repeat, route: Route, 'scan-line': ScanLine,
   'scroll-text': ScrollText, search: Search, settings: Settings, 'shield-check': ShieldCheck,
   star: Star, ticket: Ticket, timer: Timer, 'trash-2': Trash2, 'triangle-alert': TriangleAlert,
-  user: User, 'user-round': UserRound, users: Users, wallet: Wallet, x: X,
+  upload: Upload, user: User, 'user-round': UserRound, users: Users, wallet: Wallet, x: X,
 };
 
 export function Icon({ name, className }) {
