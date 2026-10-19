@@ -79,6 +79,13 @@ function AgFormModal() {
   );
 }
 
+/* Alamat bisa objek berjenjang (kota/kecamatan/kelurahan) atau teks bebas (data lama) */
+function fmtAlamat(a) {
+  if (!a) return '';
+  if (typeof a === 'string') return a;
+  return [a.jalan, a.rtRw && 'RT/RW ' + a.rtRw, a.kelurahan, a.kecamatan, a.kota, a.provinsi, a.kodePos].filter(Boolean).join(', ');
+}
+
 function KycModal({ id }) {
   const { closeModal } = useApp();
   const ag = agencyById(id);
@@ -88,7 +95,7 @@ function KycModal({ id }) {
   const al = k.alamat || {};
   const dg = k.darurat || {};
   const row = (l, v) => (v ? <div className="flex justify-between gap-3 py-1.5 border-b border-slate-100 last:border-0 text-[12.5px]"><span className="text-slate-500 font-semibold shrink-0">{l}</span><b className="text-right">{v}</b></div> : null);
-  const alamat = [al.jalan, al.rtRw && 'RT/RW ' + al.rtRw, al.kelurahan, al.kecamatan, al.kota, al.provinsi, al.kodePos].filter(Boolean).join(', ');
+  const alamat = fmtAlamat(al);
   return (
     <div className="p-6 max-h-[85vh] overflow-y-auto">
       <div className="flex items-center"><h3 className="font-extrabold text-[17px]">Kelengkapan Data — {ag.name}</h3><div className="flex-1"></div>
@@ -98,17 +105,18 @@ function KycModal({ id }) {
       ))}</div>
       {tab === 'diri' ? <div className="mt-3 bg-slate-50 rounded-2xl px-3.5 py-1">
         {row('Jenis agen', k.jenis)}{row('Nama lengkap', k.nama)}{row('NIK', k.nik)}{row('Tempat, tgl lahir', (k.tmpLahir || '') + (k.tglLahir ? ' • ' + k.tglLahir : ''))}
-        {row('Jenis kelamin', k.gender)}{row('Agama', k.agama)}{row('Alamat domisili', alamat)}{row('Status tinggal', k.tinggal)}
-        {row('No HP', k.hp)}{row('WhatsApp', k.wa)}{row('Email', k.email)}
+        {row('Jenis kelamin', k.gender)}{row('Agama', k.agama)}{row('Alamat domisili', alamat)}
+        {row('No HP', k.hp)}{row('Email', k.email)}
         {row('Kontak darurat', (dg.nama || '') + (dg.hubungan ? ' (' + dg.hubungan + ')' : '') + (dg.hp ? ' • ' + dg.hp : ''))}
         {!k.nik ? <div className="text-[12.5px] font-bold text-slate-400 py-2">Belum ada data — agen belum mengisi tahap kelengkapan.</div> : null}
       </div> : null}
       {tab === 'usaha' ? <div className="mt-3 bg-slate-50 rounded-2xl px-3.5 py-1">
         {k.jenis === 'Badan Usaha (PT/CV)' ? <>
           {row('Badan usaha', k.badanNama)}{row('Bentuk usaha', k.badanBentuk)}{row('NPWP', k.npwpUsaha)}{row('NIB', k.nib)}
-          {row('Nomor akta', k.aktaNo)}{row('SK Kemenkumham', k.skNo)}{row('Direktur', k.direktur)}{row('Alamat usaha', k.alamatUsaha)}
+          {row('Nomor akta', k.aktaNo)}{row('Direktur', k.direktur)}{row('Alamat usaha', fmtAlamat(k.alamatUsaha))}
         </> : <div className="text-[12.5px] font-bold text-slate-500 py-2">Agen terdaftar sebagai Perorangan / Freelance — legalitas badan usaha tidak berlaku.</div>}
-        {row('Bank', k.bank)}{row('No rekening', k.rekeningNo)}{row('Pemilik rekening', k.rekeningNama)}{row('Cabang', k.rekeningCabang)}
+        {row('Bank', k.bank)}{row('No rekening', k.rekeningNo)}{row('Pemilik rekening', k.rekeningNama)}
+        {row('NPWP pemohon', k.npwpSamaKtp === false ? k.npwp : (k.nik ? 'Sama dengan NIK • ' + k.nik : ''))}
       </div> : null}
       {tab === 'dok' ? <div className="mt-3 text-[12.5px] font-bold text-slate-500 py-2">Dokumen: {s.docsFilled}/{s.docsTotal} terunggah. {s.status === 'diajukan' ? 'Pengajuan sudah dikirim agen.' : 'Belum dikirim.'}</div> : null}
       <div className="grid grid-cols-3 gap-2 mt-4">

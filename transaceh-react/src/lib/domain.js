@@ -280,9 +280,8 @@ export const KYC_MIN_AGE = 21;
 export const KYC_JENIS = ['Perorangan / Freelance', 'Badan Usaha (PT/CV)'];
 export const KYC_BENTUK = ['PT', 'CV', 'Firma', 'Koperasi'];
 export const KYC_AGAMA = ['Islam', 'Kristen', 'Katolik', 'Hindu', 'Buddha', 'Konghucu'];
-export const KYC_TINGGAL = ['Rumah Sendiri', 'Sewa', 'Milik Orang Tua'];
 export const KYC_HUBUNGAN = ['Istri / Suami', 'Anak', 'Orang Tua', 'Saudara', 'Lainnya'];
-export const KYC_BANKS = ['BCA', 'Mandiri', 'BRI', 'BSI', 'BNI', 'BNI Syariah', 'CIMB Niaga', 'Permata', 'Lainnya'];
+export const KYC_BANKS = ['Bank Aceh Syariah', 'BCA', 'Mandiri', 'BRI', 'BSI', 'BNI', 'BNI Syariah', 'CIMB Niaga', 'Permata', 'Lainnya'];
 
 const digits = (v) => String(v || '').replace(/\D/g, '');
 export const normName = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -319,6 +318,16 @@ export function checkAgenAccess(u) {
 
 const g = (k, f) => String(((k || {})[f]) || '').trim();
 
+/* Cek satu blok alamat berjenjang (domisili maupun lokasi usaha).
+   awalan dipakai untuk pesan agar tidak ambigu saat dua blok sama-sama kosong. */
+const ALAMAT_FIELDS = [['provinsi', 'Provinsi'], ['kota', 'Kota/Kabupaten'], ['kecamatan', 'Kecamatan'], ['kelurahan', 'Kelurahan'], ['rtRw', 'RT/RW'], ['jalan', 'Alamat jalan']];
+function cekAlamat(al, awalan) {
+  const a = al || {};
+  for (const [f, l] of ALAMAT_FIELDS) if (!String(a[f] || '').trim()) return awalan + l + ' wajib diisi';
+  if (!/^\d{5}$/.test(String(a.kodePos || '').trim())) return awalan + 'Kode pos harus 5 digit angka';
+  return null;
+}
+
 /** Validasi Tahap 1 (kelengkapan data). Return null bila valid, atau pesan pertama. */
 export function validateKycStep1(k) {
   if (!k || !k.jenis) return 'Pilih jenis agen';
@@ -332,12 +341,10 @@ export function validateKycStep1(k) {
   if (!g(k, 'gender')) return 'Pilih jenis kelamin';
   if (!g(k, 'agama')) return 'Pilih agama';
   const al = k.alamat || {};
-  const addr = [['jalan', 'Alamat jalan'], ['rtRw', 'RT/RW'], ['kelurahan', 'Kelurahan'], ['kecamatan', 'Kecamatan'], ['kota', 'Kota/Kabupaten'], ['provinsi', 'Provinsi']];
-  for (const [f, l] of addr) if (!String(al[f] || '').trim()) return l + ' wajib diisi';
-  if (!/^\d{5}$/.test(String(al.kodePos || '').trim())) return 'Kode pos harus 5 digit angka';
-  if (!g(k, 'tinggal')) return 'Pilih status kepemilikan tempat tinggal';
+  const errAlamat = cekAlamat(al, '');
+  if (errAlamat) return errAlamat;
   if (digits(k.hp).length < 9) return 'No HP utama minimal 9 digit angka';
-  if (digits(k.wa).length < 9) return 'No WhatsApp minimal 9 digit angka';
+  
   if (!g(k, 'email')) return 'Email wajib diisi';
   if (!/.+@.+\..+/.test(g(k, 'email'))) return 'Format email belum benar';
   const dg = k.darurat || {};
@@ -348,18 +355,21 @@ export function validateKycStep1(k) {
     if (!g(k, 'badanNama')) return 'Nama badan usaha wajib diisi';
     if (!g(k, 'badanBentuk')) return 'Pilih bentuk usaha';
     if (!g(k, 'aktaNo')) return 'Nomor akta pendirian wajib diisi';
-    if (!g(k, 'skNo')) return 'Nomor SK Kemenkumham wajib diisi';
     if (!/^\d{15}$/.test(g(k, 'npwpUsaha'))) return 'NPWP badan usaha harus 15 digit angka';
     if (!/^\d{13}$/.test(g(k, 'nib'))) return 'NIB harus 13 digit angka';
     if (!g(k, 'direktur')) return 'Nama direktur / penanggung jawab wajib diisi';
-    if (!g(k, 'alamatUsaha')) return 'Alamat lokasi usaha wajib diisi';
+    const errAlamatUsaha = cekAlamat(k.alamatUsaha, 'Alamat usaha — ');
+    if (errAlamatUsaha) return errAlamatUsaha;
   }
   if (!g(k, 'bank')) return 'Pilih nama bank';
   if (digits(k.rekeningNo).length < 6) return 'Nomor rekening wajib diisi';
   if (!g(k, 'rekeningNama')) return 'Nama pemilik rekening wajib diisi';
   const owners = [normName(k.nama), normName(k.badanNama)].filter(Boolean);
   if (!owners.includes(normName(k.rekeningNama))) return 'Nama pemilik rekening harus sama dengan nama pemohon / badan usaha';
-  if (!g(k, 'rekeningCabang')) return 'Cabang pembukaan rekening wajib diisi';
+  if (k.npwpSamaKtp === false) {
+    if (!g(k, 'npwp')) return 'Nomor NPWP wajib diisi bila berbeda dari nomor KTP';
+    if (!/^\d{15,16}$/.test(digits(k.npwp))) return 'NPWP harus 15 atau 16 digit angka';
+  }
   return null;
 }
 
