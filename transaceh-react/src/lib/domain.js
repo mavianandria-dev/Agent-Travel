@@ -366,7 +366,8 @@ export function validateKycStep1(k) {
   if (!g(k, 'rekeningNama')) return 'Nama pemilik rekening wajib diisi';
   const owners = [normName(k.nama), normName(k.badanNama)].filter(Boolean);
   if (!owners.includes(normName(k.rekeningNama))) return 'Nama pemilik rekening harus sama dengan nama pemohon / badan usaha';
-  if (k.npwpSamaKtp === false) {
+  /* NPWP pemohon hanya untuk Perorangan — Badan Usaha memakai NPWP badan usaha. */
+  if (k.jenis !== 'Badan Usaha (PT/CV)' && k.npwpSamaKtp === false) {
     if (!g(k, 'npwp')) return 'Nomor NPWP wajib diisi bila berbeda dari nomor KTP';
     if (!/^\d{15,16}$/.test(digits(k.npwp))) return 'NPWP harus 15 atau 16 digit angka';
   }
@@ -385,6 +386,9 @@ export function kycDocGroups(jenis) {
         { key: 'nib', label: 'NIB', wajib: true, hint: 'Nomor Induk Berusaha' },
         { key: 'akta', label: 'Akta Pendirian Perusahaan', wajib: true, hint: 'Halaman akta pendirian' },
       ] },
+      { grup: 'Rekening Bank', docs: [
+        { key: 'bukuTabungan', label: 'Buku Tabungan / Rekening', wajib: true, hint: 'Halaman pertama yang memuat nama pemilik rekening' },
+      ] },
       { grup: 'Kantor', docs: [
         { key: 'kantorDepan', label: 'Foto Kantor Tampak Depan', wajib: true, hint: 'Terlihat papan nama / plang usaha' },
         { key: 'kantorDalam', label: 'Foto Kantor Tampak Dalam', wajib: true, hint: 'Ruangan kerja / area pelayanan' },
@@ -396,7 +400,7 @@ export function kycDocGroups(jenis) {
       { key: 'ktp', label: 'KTP Pemohon', wajib: true, hint: 'Foto KTP asli, semua sudut terlihat' },
       { key: 'pasfoto', label: 'Pasfoto Terbaru', wajib: true, hint: 'Latar merah atau biru' },
     ] },
-    { grup: 'Rekening & Pajak', docs: [
+    { grup: 'Rekening & NPWP', docs: [
       { key: 'bukuTabungan', label: 'Buku Tabungan / Rekening', wajib: true, hint: 'Halaman pertama yang memuat nama pemilik' },
       { key: 'npwpPribadi', label: 'NPWP Pribadi', wajib: false, hint: 'Opsional — kalau ada' },
     ] },

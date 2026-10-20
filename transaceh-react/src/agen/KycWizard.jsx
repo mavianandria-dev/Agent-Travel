@@ -316,12 +316,12 @@ export default function KycWizard() {
             </>
           ) : null}
 
-          <Sec index={SEC.rekening} title="PROFIL REKENING BANK & INFORMASI NPWP" />
+          <Sec index={SEC.rekening} title={isBadan ? 'PROFIL REKENING BANK' : 'PROFIL REKENING BANK & INFORMASI NPWP'} />
           <div className="grid grid-cols-2 gap-2.5">
             <div><label className="text-[12px] font-extrabold">NAMA BANK <span className="text-red-500">*</span></label><select value={form.bank} onChange={(e) => set('bank', e.target.value)} className={'w-full mt-1 ' + inC}><option value="">— Pilih —</option>{KYC_BANKS.map((b) => <option key={b} value={b}>{b}</option>)}</select></div>
             <div><label className="text-[12px] font-extrabold">NOMOR REKENING <span className="text-red-500">*</span></label><input value={form.rekeningNo} onChange={(e) => set('rekeningNo', e.target.value.replace(/\D/g, ''))} inputMode="numeric" placeholder="cth: 1234567890" className={'w-full mt-1 ' + inC} /></div>
-            <div><label className="text-[12px] font-extrabold">NAMA PEMILIK REKENING <span className="text-red-500">*</span></label><input value={form.rekeningNama} onChange={(e) => set('rekeningNama', e.target.value)} placeholder="Harus sama dengan nama pemohon" className={'w-full mt-1 ' + inC} /></div>
-            <div>
+            <div className={isBadan ? 'col-span-2' : ''}><label className="text-[12px] font-extrabold">NAMA PEMILIK REKENING <span className="text-red-500">*</span></label><input value={form.rekeningNama} onChange={(e) => set('rekeningNama', e.target.value)} placeholder="Harus sama dengan nama pemohon" className={'w-full mt-1 ' + inC} /></div>
+            {!isBadan ? <div>
               <label className="text-[12px] font-extrabold">NPWP</label>
               <div className="mt-1 bg-sky-50 border-2 border-sky-200 rounded-2xl px-3 py-2.5">
                 <label className="flex items-start gap-2 cursor-pointer">
@@ -337,7 +337,7 @@ export default function KycWizard() {
                   </div>
                 )}
               </div>
-            </div>
+            </div> : null}
           </div>
           <p className="text-[11.5px] text-slate-400 font-medium mt-2">Nama pemilik rekening wajib sama dengan nama pemohon / badan usaha untuk mencegah penipuan.</p>
           <div className="grid grid-cols-2 gap-2.5 mt-5">

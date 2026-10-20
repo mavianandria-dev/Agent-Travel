@@ -120,7 +120,7 @@ function KycModal({ id }) {
           {row('Nomor akta', k.aktaNo)}{row('Direktur', k.direktur)}{row('Alamat usaha', fmtAlamat(k.alamatUsaha))}
         </> : <div className="text-[12.5px] font-bold text-slate-500 py-2">Agen terdaftar sebagai Perorangan / Freelance — legalitas badan usaha tidak berlaku.</div>}
         {row('Bank', k.bank)}{row('No rekening', k.rekeningNo)}{row('Pemilik rekening', k.rekeningNama)}
-        {row('NPWP pemohon', k.npwpSamaKtp === false ? k.npwp : (k.nik ? 'Sama dengan NIK • ' + k.nik : ''))}
+        {k.jenis === 'Badan Usaha (PT/CV)' ? null : row('NPWP pemohon', k.npwpSamaKtp === false ? k.npwp : (k.nik ? 'Sama dengan NIK • ' + k.nik : ''))}
       </div> : null}
       {tab === 'dok' ? <div className="mt-3">
         <p className="text-[12.5px] font-bold text-slate-500">Dokumen wajib: {s.docsFilled}/{s.docsTotal} terunggah. {s.status === 'diajukan' ? 'Pengajuan sudah dikirim agen.' : 'Belum dikirim.'}</p>
