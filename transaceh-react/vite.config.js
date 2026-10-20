@@ -13,4 +13,10 @@ export default defineConfig(({ mode }) => ({
       '@': import.meta.dirname + '/src',
     },
   },
+  server: {
+    // Wrangler menulis state/temp di worker/.wrangler; jangan memicu reload UI.
+    watch: {
+      ignored: ['**/worker/**'],
+    },
+  },
 }))

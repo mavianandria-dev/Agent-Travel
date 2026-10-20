@@ -1,0 +1,11 @@
+name = "transaceh-ai"
+main = "src/index.js"
+compatibility_date = "2026-10-20"
+
+[observability]
+enabled = true
+
+[vars]
+NVIDIA_MODEL = "meta/muse-glimmer-30b"
+ALLOWED_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173,https://mavianandria-dev.github.io"
+MAX_OUTPUT_TOKENS = "1200"

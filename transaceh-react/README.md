@@ -1,5 +1,9 @@
 # React + Vite
 
+## Pusat Bantuan AI
+
+Chatbot Pusat Bantuan memakai NVIDIA `meta/muse-glimmer-30b` lewat Cloudflare Worker. API key tidak pernah masuk ke bundle frontend. Panduan setup lokal, deploy Worker, CORS, dan rotasi key ada di [`../docs/AI_SETUP.md`](../docs/AI_SETUP.md).
+
 This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 
 Currently, two official plugins are available:

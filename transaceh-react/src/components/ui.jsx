@@ -6,7 +6,7 @@ import {
   Eye, EyeOff, FileSpreadsheet, FileText, Flag, HandCoins, Headset, History, House, IdCard, Image as ImageIcon, Info, Landmark, Languages,
   LayoutDashboard, LayoutGrid, LifeBuoy, Lock, LogOut, Luggage, Mail, MapPin, MessageCircle, MessagesSquare, MousePointerClick,
   MoveVertical, Navigation, Pencil, Percent, Phone, Plus, Printer, QrCode, ReceiptText, Repeat, Route,
-  ScanLine, ScrollText, Search, Send, Settings, ShieldCheck, Star, Ticket, Timer, Trash2,
+  ScanLine, ScrollText, Search, Send, Settings, ShieldCheck, Square, Star, Ticket, Timer, Trash2,
   TriangleAlert, Upload, User, UserRound, Users, Wallet, X,
 } from 'lucide-react';
 import Chart from 'chart.js/auto';
@@ -28,7 +28,7 @@ const MAP = {
   pencil: Pencil, percent: Percent, phone: Phone, plus: Plus, printer: Printer, 'qr-code': QrCode,
   'receipt-text': ReceiptText, repeat: Repeat, route: Route, 'scan-line': ScanLine,
   'scroll-text': ScrollText, search: Search, send: Send, settings: Settings, 'shield-check': ShieldCheck,
-  star: Star, ticket: Ticket, timer: Timer, 'trash-2': Trash2, 'triangle-alert': TriangleAlert,
+  square: Square, star: Star, ticket: Ticket, timer: Timer, 'trash-2': Trash2, 'triangle-alert': TriangleAlert,
   upload: Upload, user: User, 'user-round': UserRound, users: Users, wallet: Wallet, x: X,
 };
 

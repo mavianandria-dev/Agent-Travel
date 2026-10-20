@@ -1,0 +1,3 @@
+# Salin ke worker/.dev.vars untuk development lokal.
+# Jangan commit file .dev.vars.
+NVIDIA_API_KEY=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
