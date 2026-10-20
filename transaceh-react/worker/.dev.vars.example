@@ -1,3 +1,4 @@
 # Salin ke worker/.dev.vars untuk development lokal.
-# Jangan commit file .dev.vars.
-NVIDIA_API_KEY=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
+# JANGAN isi API key asli di file ini — file ini ikut Git.
+# Key asli hanya boleh ada di worker/.dev.vars (sudah di-ignore).
+NVIDIA_API_KEY=isi-api-key-nvidia-di-sini
