@@ -21,6 +21,36 @@ export function setSession(u){ if(u) DB.save('session',{uid:u.id}); else localSt
 
 export function agencyOf(u){ if(!u) return null; return DB.load('agencies',[]).find(a=>a.id===u.agencyId); }
 
+/** Format alamat terstruktur KYC menjadi teks satu baris. */
+export function formatAlamat(a) {
+  if (!a) return '';
+  if (typeof a === 'string') return a;
+  return [a.jalan, a.rtRw && 'RT/RW ' + a.rtRw, a.kelurahan, a.kecamatan, a.kota, a.provinsi, a.kodePos].filter(Boolean).join(', ');
+}
+
+/** Field profil lama yang diturunkan dari KYC agar halaman publik tetap sinkron. */
+export function agencyProfileFromKyc(k) {
+  if (!k) return {};
+  const isBadan = k.jenis === 'Badan Usaha (PT/CV)';
+  const address = formatAlamat(isBadan ? k.alamatUsaha : k.alamat) || formatAlamat(k.alamat);
+  const out = {};
+  if (k.hp) out.phone = k.hp;
+  if (address) out.address = address;
+  if (k.bank && k.rekeningNo && k.rekeningNama) out.bank = [k.bank, k.rekeningNo, 'a.n. ' + k.rekeningNama].join(' ');
+  return out;
+}
+
+/** Sinkronkan phone/address/bank pada agency dari data KYC terbaru. */
+export function syncAgencyProfileFromKyc(ag) {
+  if (!ag) return false;
+  const patch = agencyProfileFromKyc(ag.kyc);
+  let changed = false;
+  Object.entries(patch).forEach(([key, val]) => {
+    if (ag[key] !== val) { ag[key] = val; changed = true; }
+  });
+  return changed;
+}
+
 export function routeById(id){ return DB.load('routes',[]).find(r=>r.id===id); }
 
 export function vehicleById(id){ return DB.load('vehicles',[]).find(v=>v.id===id); }

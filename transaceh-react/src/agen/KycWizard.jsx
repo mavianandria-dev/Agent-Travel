@@ -7,7 +7,7 @@ import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
 import {
   agencyOf, agencyPending, validateKycStep1, kycAge, kycSummary, kycDocGroups, kycDocWajib,
-  KYC_MIN_AGE, KYC_JENIS, KYC_BENTUK, KYC_AGAMA, KYC_HUBUNGAN, KYC_BANKS,
+  syncAgencyProfileFromKyc, KYC_MIN_AGE, KYC_JENIS, KYC_BENTUK, KYC_AGAMA, KYC_HUBUNGAN, KYC_BANKS,
 } from '@/lib/domain.js';
 import { inC } from '@/lib/utils.js';
 import { DOC_ACCEPT, DOCS_BUDGET_BYTES, fileToDoc, formatBytes, docsBytes } from '@/lib/upload.js';
@@ -137,6 +137,7 @@ export default function KycWizard() {
     const cur = arr.find((x) => x.id === ag.id);
     if (!cur) return false;
     cur.kyc = Object.assign({}, cur.kyc || {}, patch, { updatedAt: new Date().toISOString() });
+    syncAgencyProfileFromKyc(cur);
     try {
       DB.save('agencies', arr);
     } catch (e) {

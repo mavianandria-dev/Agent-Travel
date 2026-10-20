@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { agencyOf, audit, uid } from '@/lib/domain.js';
+import { agencyOf, audit, formatAlamat, kycSummary, syncAgencyProfileFromKyc } from '@/lib/domain.js';
 
 export default function Setting({ ag }) {
   const { user, tick } = useApp();
@@ -14,12 +14,13 @@ export default function Setting({ ag }) {
 function SettingInner({ agency }) {
   const { toast, refresh } = useApp();
   const a0 = DB.load('agencies', []).find((x) => x.id === agency.id) || agency;
+  const k = a0.kyc || {};
+  const isBadan = k.jenis === 'Badan Usaha (PT/CV)';
+  const sum = kycSummary(a0);
+  const ttl = [k.tmpLahir, k.tglLahir ? k.tglLahir.split('-').reverse().join('/') : ''].filter(Boolean).join(', ');
+  const darurat = [k.darurat?.nama, k.darurat?.hubungan, k.darurat?.hp].filter(Boolean).join(' • ');
+  const npwp = isBadan ? k.npwpUsaha : (k.npwpSamaKtp ? k.nik : k.npwp);
   const [name, setName] = useState(a0.name || '');
-  const [phone, setPhone] = useState(a0.phone || '');
-  const [addr, setAddr] = useState(a0.address || '');
-  const [bank, setBank] = useState(a0.bank || '');
-  const [feeT, setFeeT] = useState(a0.feeType || 'percent');
-  const [feeV, setFeeV] = useState(a0.feeValue || 0);
   const [nvC, setNvC] = useState('');
   const [nvV, setNvV] = useState('');
   const vouchers = DB.load('vouchers', []);
@@ -29,14 +30,10 @@ function SettingInner({ agency }) {
     const a = arr.find((x) => x.id === agency.id);
     if (!a) { toast('Data travel tidak ditemukan', 'err'); return; }
     a.name = name;
-    a.phone = phone;
-    a.address = addr;
-    a.bank = bank;
-    a.feeType = feeT;
-    a.feeValue = Number(feeV) || 0;
+    syncAgencyProfileFromKyc(a);
     DB.save('agencies', arr); refresh();
     audit('agency_update', a.name);
-    toast('Pengaturan travel disimpan');
+    toast('Profil travel disimpan');
     refresh();
   };
 
@@ -61,24 +58,83 @@ function SettingInner({ agency }) {
     refresh();
   };
 
+  const row = (label, value) => (
+    <div className="flex justify-between gap-3 py-1.5 border-b border-slate-100 last:border-0 text-[12.5px]">
+      <span className="text-slate-500 font-semibold shrink-0">{label}</span>
+      <b className="text-right break-words max-w-[62%]">{value || '-'}</b>
+    </div>
+  );
+  const group = (title, children) => (
+    <div className="mt-3">
+      <p className="text-[10.5px] font-extrabold text-slate-400 tracking-wider">{title}</p>
+      <div className="bg-slate-50 rounded-2xl px-3.5 py-1 mt-1.5">{children}</div>
+    </div>
+  );
+
   return (
     <div className="grid md:grid-cols-2 gap-4">
-      <div className="bg-white rounded-3xl shadow-card p-5"><h3 className="font-extrabold text-[15px]">Profil Travel</h3>
-        <div className="space-y-2.5 mt-3">
-          <input value={name} onChange={(e) => setName(e.target.value)} className="w-full text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" />
-          <input value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full text-[13px] border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" />
-          <input value={addr} onChange={(e) => setAddr(e.target.value)} className="w-full text-[13px] border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" />
-          <input value={bank} onChange={(e) => setBank(e.target.value)} className="w-full text-[13px] border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" />
-          <div className="grid grid-cols-2 gap-2.5"><select value={feeT} onChange={(e) => setFeeT(e.target.value)} className="text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring"><option value="percent">Fee %</option><option value="flat">Fee flat Rp</option></select>
-            <input type="number" value={feeV} onChange={(e) => setFeeV(e.target.value)} className="text-[13px] border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" /></div>
-        </div><button onClick={saveAgency} className="mt-3 w-full bg-[#0b2447] text-white font-extrabold text-[13px] py-2.5 rounded-xl">Simpan</button></div>
+      <div className="bg-white rounded-3xl shadow-card p-5">
+        <div className="flex items-start gap-2">
+          <div className="flex-1">
+            <h3 className="font-extrabold text-[15px]">Profil Travel</h3>
+            <p className="text-[11.5px] text-slate-500 font-medium mt-0.5">Data identitas dan rekening mengikuti Kelengkapan Data Agen Travel.</p>
+          </div>
+          <span className={`badge shrink-0 ${sum.lengkap ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>KYC {sum.lengkap ? 'Lengkap' : 'Belum lengkap'}</span>
+        </div>
+
+        <div className="mt-3">
+          <label className="text-[11px] font-extrabold text-slate-500">NAMA TRAVEL / BRAND</label>
+          <input value={name} onChange={(e) => setName(e.target.value)} className="w-full mt-1 text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" />
+        </div>
+
+        {sum.lengkap ? <>
+          {group('DATA PEMOHON', <>
+            {row('Jenis agen', k.jenis)}
+            {row('Nama lengkap', k.nama)}
+            {row('NIK', k.nik)}
+            {row('Tempat, tgl lahir', ttl)}
+            {row('Jenis kelamin', k.gender)}
+            {row('Agama', k.agama)}
+            {!isBadan ? row('NPWP', npwp ? (k.npwpSamaKtp ? npwp + ' (sama dengan KTP)' : npwp) : '') : null}
+          </>)}
+
+          {group('KONTAK & ALAMAT', <>
+            {row('Email', k.email)}
+            {row('No HP / WhatsApp', k.hp)}
+            {row('Alamat domisili', formatAlamat(k.alamat))}
+            {row('Kontak darurat', darurat)}
+          </>)}
+
+          {isBadan ? group('LEGALITAS USAHA', <>
+            {row('Nama badan usaha', k.badanNama)}
+            {row('Bentuk usaha', k.badanBentuk)}
+            {row('NPWP badan usaha', k.npwpUsaha)}
+            {row('NIB', k.nib)}
+            {row('Nomor akta', k.aktaNo)}
+            {row('Direktur', k.direktur)}
+            {row('Alamat usaha', formatAlamat(k.alamatUsaha))}
+          </>) : null}
+
+          {group('REKENING BANK', <>
+            {row('Bank', k.bank)}
+            {row('Nomor rekening', k.rekeningNo)}
+            {row('Nama pemilik', k.rekeningNama)}
+          </>)}
+        </> : (
+          <div className="mt-3 bg-amber-50 border-2 border-amber-200 rounded-2xl px-3.5 py-3 text-[12.5px] font-semibold text-amber-800">
+            Data kelengkapan belum lengkap. Lengkapi melalui halaman Kelengkapan Data Agen Travel.
+          </div>
+        )}
+
+        <button onClick={saveAgency} className="mt-4 w-full bg-[#0b2447] text-white font-extrabold text-[13px] py-2.5 rounded-xl">Simpan Profil</button>
+      </div>
+
       <div className="bg-white rounded-3xl shadow-card p-5"><h3 className="font-extrabold text-[15px]">Kebijakan Refund & Voucher</h3>
         <div className="text-[12.5px] font-semibold bg-slate-50 rounded-2xl p-3 mt-2">{(a0.refundPolicy || []).map((p) => <div key={p.minH}>• H-{Math.round(p.minH / 24) || '0'} ({p.minH} jam): <b>{p.pct}%</b></div>)}</div>
         <div className="text-[12px] font-extrabold mt-3">VOUCHER AKTIF</div>
         {vouchers.map((vv) => <div key={vv.code} onClick={() => toggleVoucher(vv.code)} title="Klik untuk aktif/nonaktif" className="flex items-center gap-2 mt-1.5 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-[12.5px] font-bold cursor-pointer"><span className="font-mono">{vv.code}</span><span className="text-slate-500 font-medium flex-1">{vv.desc}</span><span className={`badge ${vv.active ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-500'}`}>{vv.used}/{vv.quota}</span></div>)}
         <div className="flex gap-2 mt-2.5"><input value={nvC} onChange={(e) => setNvC(e.target.value)} placeholder="KODE" className="flex-1 text-[12px] font-mono font-bold uppercase border-2 border-slate-200 rounded-xl px-3 py-2 focus-ring" /><input value={nvV} onChange={(e) => setNvV(e.target.value)} type="number" placeholder="Nilai" className="w-24 text-[12px] border-2 border-slate-200 rounded-xl px-3 py-2 focus-ring" /><button onClick={addVoucher} className="bg-amber-400 px-3.5 rounded-xl font-extrabold">+</button></div>
       </div>
-      <span className="hidden">{uid('x')}</span>
     </div>
   );
 }

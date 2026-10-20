@@ -172,9 +172,33 @@ function KycModal({ id }) {
   );
 }
 
+const AG_STATUS_BADGE = {
+  pending: { label: 'Menunggu', cls: 'bg-amber-100 text-amber-700' },
+  active: { label: 'Aktif', cls: 'bg-green-100 text-green-700' },
+  suspended: { label: 'Ditangguhkan', cls: 'bg-red-100 text-red-700' },
+};
+
+function AgencyGroup({ title, count, dotClass, badgeClass, empty, children }) {
+  return (
+    <section className="mt-5 first:mt-0">
+      <div className="flex items-center gap-2">
+        <span className={'w-2 h-2 rounded-full ' + dotClass}></span>
+        <h4 className="font-extrabold text-[13.5px] text-slate-700">{title}</h4>
+        <span className={'badge ' + badgeClass}>{count}</span>
+      </div>
+      {count
+        ? <div className="grid md:grid-cols-2 gap-3 mt-2.5">{children}</div>
+        : <p className="text-[12px] text-slate-400 font-medium mt-2">{empty}</p>}
+    </section>
+  );
+}
+
 export function Agencies() {
   const { toast, refresh, openModal } = useApp();
   const ags = DB.load('agencies', []);
+  const pendingAgs = ags.filter((a) => a.status === 'pending');
+  const activeAgs = ags.filter((a) => a.status === 'active');
+  const suspendedAgs = ags.filter((a) => a.status === 'suspended');
   const agReject = (id) => {
     const a = agencyById(id);
     if (!a) return;
@@ -189,35 +213,64 @@ export function Agencies() {
     toast('Pengajuan ' + a.name + ' ditolak', 'info');
     refresh();
   };
+  const renderAgency = (a) => {
+    const s = kycSummary(a);
+    const st = AG_STATUS_BADGE[a.status] || { label: a.status, cls: 'bg-slate-100 text-slate-500' };
+    const openDetail = () => openModal(<KycModal id={a.id} />);
+    return (
+      <div key={a.id} role="button" tabIndex={0} aria-label={'Lihat detail ' + a.name}
+        onClick={openDetail}
+        onKeyDown={(e) => {
+          if (e.target !== e.currentTarget) return;
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(); }
+        }}
+        className="border-2 border-slate-100 rounded-3xl p-4 flex gap-3 cursor-pointer transition hover:border-sky-200 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-300">
+        <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-sky-500 to-blue-700 text-white font-extrabold text-xl flex items-center justify-center shrink-0">{(a.name || '?')[0]}</div>
+        <div className="flex-1 min-w-0"><div className="font-extrabold text-[14px]">{a.name}</div><div className="text-[12px] text-slate-500 font-medium">{a.address}</div>
+          <div className="text-[12px] font-bold mt-0.5">Fee: {a.feeType === 'flat' ? fmtRp(a.feeValue) : a.feeValue + '%'} • ★{a.rating}</div>
+          <div className="flex gap-1.5 mt-2 flex-wrap">
+            <span className={'badge ' + st.cls}>{st.label}</span>
+            {a.status === 'pending' ? <>
+              <span className={`badge ${s.dataOk ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>Data Diri {s.dataOk ? '✓' : '—'}</span>
+              <span className={`badge ${s.docsOk ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>Dokumen {s.docsOk ? '✓' : '—'}</span>
+              <span className={`badge ${s.termsOk ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>S&amp;K {s.termsOk ? '✓' : '—'}</span>
+            </> : null}
+            {a.status === 'active' ? <span className={`badge ${s.lengkap ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>KYC {s.lengkap ? '✓' : '—'}</span> : null}
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5 mt-3 pt-3 border-t border-slate-100" onClick={(e) => e.stopPropagation()}>
+            {a.status === 'pending' ? <>
+              <button onClick={openDetail} className="badge bg-sky-100 text-sky-700 cursor-pointer">Detail</button>
+              {s.status === 'diajukan' && s.lengkap
+                ? <button onClick={() => agSetStatus(a.id, 'active', toast, refresh)} className="badge bg-green-500 text-white cursor-pointer">Approve</button>
+                : <button disabled className="badge bg-slate-200 text-slate-400 cursor-not-allowed" title="Lengkapi data dan dokumen wajib dulu">Approve</button>}
+              <button onClick={() => agReject(a.id)} className="badge bg-red-100 text-red-600 cursor-pointer">Tolak</button>
+            </> : null}
+            {a.status === 'active' ? <>
+              <button onClick={() => openModal(<KycModal id={a.id} />)} className="badge bg-sky-100 text-sky-700 cursor-pointer">Kelengkapan</button>
+              <button onClick={() => agSetStatus(a.id, 'suspended', toast, refresh)} className="badge bg-red-100 text-red-600 cursor-pointer">Suspend</button>
+            </> : null}
+            {a.status === 'suspended' ? <button onClick={() => agSetStatus(a.id, 'active', toast, refresh)} className="badge bg-sky-100 text-sky-700 cursor-pointer">Aktifkan</button> : null}
+            <button onClick={() => openModal(<FeeModal id={a.id} />)} className="badge bg-violet-100 text-violet-700 cursor-pointer ml-auto">Fee</button>
+          </div></div>
+      </div>
+    );
+  };
   return (
     <div className="bg-white rounded-3xl shadow-card p-5">
       <div className="flex items-center"><h3 className="font-extrabold text-[16px]">Manajemen Travel Agen</h3><div className="flex-1"></div>
         <button onClick={() => openModal(<AgFormModal />)} className="bg-sky-600 text-white text-[12.5px] font-extrabold px-4 py-2.5 rounded-xl flex items-center gap-1.5"><Icon name="plus" className="w-4 h-4" />Registrasi Agen</button></div>
-      <div className="grid md:grid-cols-2 gap-3 mt-3">
-        {ags.map((a) => (
-          <div key={a.id} className="border-2 border-slate-100 rounded-3xl p-4 flex gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-sky-500 to-blue-700 text-white font-extrabold text-xl flex items-center justify-center shrink-0">{(a.name || '?')[0]}</div>
-            <div className="flex-1 min-w-0"><div className="font-extrabold text-[14px]">{a.name}</div><div className="text-[12px] text-slate-500 font-medium">{a.address}</div>
-              <div className="text-[12px] font-bold mt-0.5">Fee: {a.feeType === 'flat' ? fmtRp(a.feeValue) : a.feeValue + '%'} • ★{a.rating}</div>
-              <div className="flex gap-1.5 mt-2 flex-wrap"><span className={`badge ${a.status === 'active' ? 'bg-green-100 text-green-700' : a.status === 'pending' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>{a.status}</span>
-                {a.status === 'pending' ? (() => { const s = kycSummary(a); return <>
-                  <span className={`badge ${s.dataOk ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>Data Diri {s.dataOk ? '✓' : '—'}</span>
-                  <span className={`badge ${s.docsOk ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>Dokumen {s.docsOk ? '✓' : '—'}</span>
-                  <span className={`badge ${s.termsOk ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>S&amp;K {s.termsOk ? '✓' : '—'}</span>
-                  <button onClick={() => openModal(<KycModal id={a.id} />)} className="badge bg-sky-100 text-sky-700 cursor-pointer">Detail</button>
-                  {s.status === 'diajukan' && s.lengkap
-                    ? <button onClick={() => agSetStatus(a.id, 'active', toast, refresh)} className="badge bg-green-500 text-white cursor-pointer">Approve</button>
-                    : <button disabled className="badge bg-slate-200 text-slate-400 cursor-not-allowed" title="Lengkapi data dan dokumen wajib dulu">Approve</button>}
-                  <button onClick={() => agReject(a.id)} className="badge bg-red-100 text-red-600 cursor-pointer">Tolak</button>
-                </>; })() : null}
-                {a.status === 'active' ? (() => { const s = kycSummary(a); return <>
-                  <span className={`badge ${s.lengkap ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>KYC {s.lengkap ? '✓' : '—'}</span>
-                  <button onClick={() => openModal(<KycModal id={a.id} />)} className="badge bg-sky-100 text-sky-700 cursor-pointer">Kelengkapan</button>
-                  <button onClick={() => agSetStatus(a.id, 'suspended', toast, refresh)} className="badge bg-red-100 text-red-600 cursor-pointer">Suspend</button>
-                </>; })() : <button onClick={() => agSetStatus(a.id, 'active', toast, refresh)} className="badge bg-sky-100 text-sky-700 cursor-pointer">Aktifkan</button>}
-                <button onClick={() => openModal(<FeeModal id={a.id} />)} className="badge bg-violet-100 text-violet-700 cursor-pointer">Fee</button></div></div>
-          </div>
-        ))}
+      <div className="mt-4">
+        <AgencyGroup title="Menunggu Persetujuan" count={pendingAgs.length} dotClass="bg-amber-400" badgeClass="bg-amber-100 text-amber-700" empty="Tidak ada pengajuan menunggu persetujuan.">
+          {pendingAgs.map(renderAgency)}
+        </AgencyGroup>
+        <AgencyGroup title="Agen Disetujui" count={activeAgs.length} dotClass="bg-green-500" badgeClass="bg-green-100 text-green-700" empty="Belum ada agen yang disetujui.">
+          {activeAgs.map(renderAgency)}
+        </AgencyGroup>
+        {suspendedAgs.length ? (
+          <AgencyGroup title="Agen Ditangguhkan" count={suspendedAgs.length} dotClass="bg-red-400" badgeClass="bg-red-100 text-red-700" empty="Tidak ada agen ditangguhkan.">
+            {suspendedAgs.map(renderAgency)}
+          </AgencyGroup>
+        ) : null}
       </div>
     </div>
   );

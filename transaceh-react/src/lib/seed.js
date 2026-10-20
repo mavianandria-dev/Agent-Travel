@@ -1,6 +1,6 @@
 import { DB } from './db.js';
 import { uid, todayStr } from './utils.js';
-import { simParse, vehLayout, bookingsOf, normalizePoints } from './domain.js';
+import { simParse, vehLayout, bookingsOf, normalizePoints, agencyProfileFromKyc } from './domain.js';
 import { estimateRoute } from './geo.js';
 
 /* Diekstrak dari index.html (seed v11 + migrasi). Dijalankan sekali via initDB(). */
@@ -87,9 +87,9 @@ export function initDB(){
     {id:'U-CS1',name:'Pelanggan Demo',email:'user@demo.com',phone:'0813000001',pass:'user123',role:'pelanggan',agencyId:null,status:'active',photo:'',favorites:[{name:'Ayah',phone:'0813000002'}]},
   ];
   const agencies=[
-    {id:'AG1',name:'Barakah Travel',logo:'',address:'Jl. Merdeka No.12, Calang, Aceh Jaya',phone:'0654-20112',bank:'BCA 8210-9921-11 a.n. Barakah Travel',status:'active',serviceFee:10000,feeType:'percent',feeValue:8,refundPolicy:[{minH:72,pct:100},{minH:24,pct:50},{minH:0,pct:0}],rating:4.8,trips:1240,kyc:seedKyc.AG1},
-    {id:'AG2',name:'Putra Jaya Trans',logo:'',address:'Jl. T. Umar No.88, Banda Aceh',phone:'0651-77821',bank:'Mandiri 8900-1122-33 a.n. Putra Jaya',status:'active',serviceFee:10000,feeType:'flat',feeValue:5000,refundPolicy:[{minH:48,pct:100},{minH:0,pct:0}],rating:4.6,trips:860,kyc:seedKyc.AG2},
-    {id:'AG3',name:'Lintas Utara',logo:'',address:'Jl. Gatot Subroto No.45, Medan',phone:'061-778899',bank:'BRI 0022-3344-55 a.n. Lintas Utara',status:'active',serviceFee:10000,feeType:'percent',feeValue:10,refundPolicy:[{minH:72,pct:100},{minH:24,pct:50},{minH:0,pct:0}],rating:4.7,trips:310,kyc:seedKyc.AG3},
+    {id:'AG1',name:'Barakah Travel',logo:'',...agencyProfileFromKyc(seedKyc.AG1),status:'active',serviceFee:10000,feeType:'percent',feeValue:8,refundPolicy:[{minH:72,pct:100},{minH:24,pct:50},{minH:0,pct:0}],rating:4.8,trips:1240,kyc:seedKyc.AG1},
+    {id:'AG2',name:'Putra Jaya Trans',logo:'',...agencyProfileFromKyc(seedKyc.AG2),status:'active',serviceFee:10000,feeType:'flat',feeValue:5000,refundPolicy:[{minH:48,pct:100},{minH:0,pct:0}],rating:4.6,trips:860,kyc:seedKyc.AG2},
+    {id:'AG3',name:'Lintas Utara',logo:'',...agencyProfileFromKyc(seedKyc.AG3),status:'active',serviceFee:10000,feeType:'percent',feeValue:10,refundPolicy:[{minH:72,pct:100},{minH:24,pct:50},{minH:0,pct:0}],rating:4.7,trips:310,kyc:seedKyc.AG3},
     {id:'AG4',name:'Cahaya Perkasa',logo:'',address:'Jl. Diponegoro No.7, Aceh Barat',phone:'0655-31212',bank:'-',status:'pending',serviceFee:10000,feeType:'percent',feeValue:8,refundPolicy:[{minH:72,pct:100},{minH:24,pct:50},{minH:0,pct:0}],rating:5.0,trips:0},
   ];
   const routes=[];  /* Rute dibuat melalui usulan agen (simulasi dari nol). */
@@ -138,6 +138,31 @@ export function initDB(){
       if(ch) DB.save('agencies',ags);
       localStorage.setItem('at_kyc_npwp_seed_v1','1');
     }catch{}
+  })();
+  /* Sinkronkan field profil lama (phone/address/bank) dari KYC satu kali.
+     Nilai yang sudah diubah manual agen tidak ditimpa. */
+  (function migrateAgencyProfileFromKycV1(){
+    try{
+      if(localStorage.getItem('at_profile_kyc_sync_v1')) return;
+      const legacy={
+        AG1:{phone:'0654-20112',address:'Jl. Merdeka No.12, Calang, Aceh Jaya',bank:'BCA 8210-9921-11 a.n. Barakah Travel'},
+        AG2:{phone:'0651-77821',address:'Jl. T. Umar No.88, Banda Aceh',bank:'Mandiri 8900-1122-33 a.n. Putra Jaya'},
+        AG3:{phone:'061-778899',address:'Jl. Gatot Subroto No.45, Medan',bank:'BRI 0022-3344-55 a.n. Lintas Utara'},
+      };
+      const ags=DB.load('agencies',[]); let ch=false;
+      ags.forEach(a=>{
+        if(!a.kyc) return;
+        const old=legacy[a.id];
+        const patch=agencyProfileFromKyc(a.kyc);
+        Object.entries(patch).forEach(([key,val])=>{
+          if(val && (!a[key] || (old && a[key]===old[key]))){
+            a[key]=val; ch=true;
+          }
+        });
+      });
+      if(ch) DB.save('agencies',ags);
+      localStorage.setItem('at_profile_kyc_sync_v1','1');
+    }catch{ /* abaikan */ }
   })();
   /* Seed modul Pusat Bantuan sekali saja. Tidak menimpa laporan yang sudah ada. */
   (function seedSupportV1(){
