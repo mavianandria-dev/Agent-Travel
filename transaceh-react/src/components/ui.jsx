@@ -1,12 +1,12 @@
 import { useEffect, useRef } from 'react';
 import {
-  Armchair, ArrowLeft, ArrowRight, BadgePercent, Banknote, Ban, Bell, BellRing, Building2, Bus,
-  Calendar, CalendarDays, CalendarX, Car, CarFront, Check, CheckCheck, ChevronDown, Circle,
-  CircleAlert, CircleCheckBig, CircleGauge, ClipboardList, Clock, Database, DoorOpen, Eraser,
-  Eye, EyeOff, FileSpreadsheet, FileText, Flag, HandCoins, History, House, IdCard, Image as ImageIcon, Info, Landmark, Languages,
-  LayoutDashboard, LayoutGrid, Lock, LogOut, Luggage, MapPin, MessageCircle, MousePointerClick,
-  MoveVertical, Navigation, Pencil, Percent, Plus, Printer, QrCode, ReceiptText, Repeat, Route,
-  ScanLine, ScrollText, Search, Settings, ShieldCheck, Star, Ticket, Timer, Trash2,
+  Armchair, ArrowLeft, ArrowRight, BadgePercent, Banknote, Ban, Bell, BellRing, BookOpen, Bot, Building2, Bus,
+  Calendar, CalendarDays, CalendarX, Car, CarFront, Check, CheckCheck, ChevronDown, Circle, CircleAlert,
+  CircleCheckBig, CircleGauge, CircleHelp, ClipboardList, Clock, Copy, Database, DoorOpen, Eraser,
+  Eye, EyeOff, FileSpreadsheet, FileText, Flag, HandCoins, Headset, History, House, IdCard, Image as ImageIcon, Info, Landmark, Languages,
+  LayoutDashboard, LayoutGrid, LifeBuoy, Lock, LogOut, Luggage, Mail, MapPin, MessageCircle, MessagesSquare, MousePointerClick,
+  MoveVertical, Navigation, Pencil, Percent, Phone, Plus, Printer, QrCode, ReceiptText, Repeat, Route,
+  ScanLine, ScrollText, Search, Send, Settings, ShieldCheck, Star, Ticket, Timer, Trash2,
   TriangleAlert, Upload, User, UserRound, Users, Wallet, X,
 } from 'lucide-react';
 import Chart from 'chart.js/auto';
@@ -15,19 +15,19 @@ import { fmtRp } from '@/lib/utils.js';
 
 const MAP = {
   armchair: Armchair, 'arrow-left': ArrowLeft, 'arrow-right': ArrowRight, 'badge-percent': BadgePercent,
-  banknote: Banknote, ban: Ban, bell: Bell, 'bell-ring': BellRing, 'building-2': Building2, bus: Bus,
+  banknote: Banknote, ban: Ban, bell: Bell, 'bell-ring': BellRing, 'book-open': BookOpen, bot: Bot, 'building-2': Building2, bus: Bus,
   calendar: Calendar, 'calendar-days': CalendarDays, 'calendar-x': CalendarX, car: Car, 'car-front': CarFront,
   check: Check, 'check-check': CheckCheck, 'chevron-down': ChevronDown, info: Info,
-  'circle-alert': CircleAlert, 'circle-check-big': CircleCheckBig, 'circle-gauge': CircleGauge,
-  'clipboard-list': ClipboardList, clock: Clock, database: Database, 'door-open': DoorOpen, eraser: Eraser,
-  eye: Eye, 'eye-off': EyeOff, 'file-spreadsheet': FileSpreadsheet, 'file-text': FileText, flag: Flag, 'hand-coins': HandCoins, history: History,
+  'circle-alert': CircleAlert, 'circle-check-big': CircleCheckBig, 'circle-gauge': CircleGauge, 'circle-help': CircleHelp,
+  'clipboard-list': ClipboardList, clock: Clock, copy: Copy, database: Database, 'door-open': DoorOpen, eraser: Eraser,
+  eye: Eye, 'eye-off': EyeOff, 'file-spreadsheet': FileSpreadsheet, 'file-text': FileText, flag: Flag, 'hand-coins': HandCoins, headset: Headset, history: History,
   home: House, 'id-card': IdCard, image: ImageIcon, landmark: Landmark, languages: Languages,
-  'layout-dashboard': LayoutDashboard, 'layout-grid': LayoutGrid, lock: Lock, 'log-out': LogOut,
-  luggage: Luggage, 'map-pin': MapPin, 'message-circle': MessageCircle,
+  'layout-dashboard': LayoutDashboard, 'layout-grid': LayoutGrid, 'life-buoy': LifeBuoy, lock: Lock, 'log-out': LogOut,
+  luggage: Luggage, mail: Mail, 'map-pin': MapPin, 'message-circle': MessageCircle, 'messages-square': MessagesSquare,
   'mouse-pointer-click': MousePointerClick, 'move-vertical': MoveVertical, navigation: Navigation,
-  pencil: Pencil, percent: Percent, plus: Plus, printer: Printer, 'qr-code': QrCode,
+  pencil: Pencil, percent: Percent, phone: Phone, plus: Plus, printer: Printer, 'qr-code': QrCode,
   'receipt-text': ReceiptText, repeat: Repeat, route: Route, 'scan-line': ScanLine,
-  'scroll-text': ScrollText, search: Search, settings: Settings, 'shield-check': ShieldCheck,
+  'scroll-text': ScrollText, search: Search, send: Send, settings: Settings, 'shield-check': ShieldCheck,
   star: Star, ticket: Ticket, timer: Timer, 'trash-2': Trash2, 'triangle-alert': TriangleAlert,
   upload: Upload, user: User, 'user-round': UserRound, users: Users, wallet: Wallet, x: X,
 };

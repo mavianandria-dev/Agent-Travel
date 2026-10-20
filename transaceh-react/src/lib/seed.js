@@ -64,6 +64,51 @@ export function initDB(){
   DB.save('routeRequests',[]);
   localStorage.setItem('at_seeded_v16','1');
   }
+  /* Seed modul Pusat Bantuan sekali saja. Tidak menimpa laporan yang sudah ada. */
+  (function seedSupportV1(){
+    try{
+      if(localStorage.getItem('at_support_seeded_v1')) return;
+      const cur=DB.load('supportTickets',null);
+      if(!Array.isArray(cur)){
+        const ago=h=>new Date(Date.now()-h*3600000).toISOString();
+        const report={
+          id:'ST-DEMO-1',code:'ADU-DEMO-0001',channel:'report',
+          userId:'U-CS1',userEmail:'user@demo.com',userName:'Pelanggan Demo',userPhone:'0813000001',isGuest:false,
+          category:'Pembatalan & Refund',subject:'Refund tiket belum masuk',bookingCode:'TRX-DEMO',
+          description:'Saya membatalkan tiket 3 hari lalu dan sudah menerima notifikasi refund, tetapi dana belum masuk ke rekening.',
+          status:'resolved',
+          messages:[
+            {id:'MSG-DEMO-1',from:'user',author:'Pelanggan Demo',text:'Saya membatalkan tiket 3 hari lalu dan sudah menerima notifikasi refund, tetapi dana belum masuk ke rekening.',at:ago(74)},
+            {id:'MSG-DEMO-2',from:'cs',author:'CS TransAceh',text:'Mohon maaf atas keterlambatannya. Refund sudah kami proses ulang dan akan masuk maksimal 1×24 jam ke metode pembayaran awal.',at:ago(72)},
+            {id:'MSG-DEMO-3',from:'system',author:'Sistem',text:'Laporan ditandai selesai oleh CS TransAceh.',at:ago(70)},
+          ],
+          statusHistory:[
+            {status:'new',at:ago(74),by:'Pelanggan Demo',note:'Laporan dibuat'},
+            {status:'process',at:ago(73),by:'CS TransAceh',note:'Laporan sedang ditinjau'},
+            {status:'resolved',at:ago(70),by:'CS TransAceh',note:'Refund telah diproses ulang'},
+          ],
+          createdAt:ago(74),updatedAt:ago(70),
+        };
+        const chat={
+          id:'ST-DEMO-2',code:'CHT-DEMO-0001',channel:'chat',
+          userId:'U-CS1',userEmail:'user@demo.com',userName:'Pelanggan Demo',userPhone:'0813000001',isGuest:false,
+          category:'Live Chat',subject:'Live Chat',bookingCode:'',
+          description:'',
+          status:'new',
+          messages:[
+            {id:'MSG-DEMO-4',from:'system',author:'Tim TransAceh',text:'Halo Pelanggan Demo! Tim CS TransAceh akan membalas pesan Anda. Jam layanan 08.00–21.00 WIB.',at:ago(4)},
+            {id:'MSG-DEMO-5',from:'user',author:'Pelanggan Demo',text:'Halo, apakah titik jemput saya bisa diubah ke Terminal Calang?',at:ago(4)},
+          ],
+          statusHistory:[
+            {status:'new',at:ago(4),by:'Pelanggan Demo',note:'Live chat dimulai'},
+          ],
+          createdAt:ago(4),updatedAt:ago(4),
+        };
+        DB.save('supportTickets',[chat,report]);
+      }
+      localStorage.setItem('at_support_seeded_v1','1');
+    }catch{ /* abaikan */ }
+  })();
   DB.save('ledger',DB.load('ledger',[]));
 /* Migrasi DB lama (v1) ke format form terbaru: rute pakai nama kabupaten/kota + agencyIds/driverIds */
 (function migrateRoutesV2(){

@@ -12,7 +12,7 @@ export const useApp = () => useContext(AppCtx);
 
 export const freshBW = () => ({ step: 1, routeId: 'R1', date: todayStr(1), scheduleId: null, seats: [], passengers: [], pickup: '', pickupAddr: '', pickupCoords: '', voucher: '', discount: 0 });
 
-const CUSTOMER_VIEWS = ['home', 'search', 'tickets', 'history', 'profile'];
+const CUSTOMER_VIEWS = ['home', 'search', 'tickets', 'history', 'profile', 'help'];
 export { CUSTOMER_VIEWS };
 
 const roleHome = (role) => (role === 'agen' ? 'agen' : role === 'pengemudi' ? 'driver' : 'admin');

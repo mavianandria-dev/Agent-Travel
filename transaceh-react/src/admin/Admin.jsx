@@ -6,8 +6,9 @@ import { Agencies } from './Agencies.jsx';
 import { Routes } from './Routes.jsx';
 import Settlement from './Settlement.jsx';
 import { Master } from './Master.jsx';
+import Support from './Support.jsx';
 
-const TABS = [['admin', 'shield-check', 'Overview'], ['admin-tx', 'receipt-text', 'Transaksi'], ['admin-ag', 'building-2', 'Agen'], ['admin-rute', 'route', 'Rute'], ['admin-settle', 'wallet', 'Settlement'], ['admin-master', 'database', 'Master']];
+const TABS = [['admin', 'shield-check', 'Overview'], ['admin-tx', 'receipt-text', 'Transaksi'], ['admin-ag', 'building-2', 'Agen'], ['admin-rute', 'route', 'Rute'], ['admin-settle', 'wallet', 'Settlement'], ['admin-master', 'database', 'Master'], ['admin-support', 'life-buoy', 'Bantuan']];
 
 export default function Admin() {
   const { view, go } = useApp();
@@ -18,6 +19,7 @@ export default function Admin() {
   else if (view === 'admin-rute') body = <Routes />;
   else if (view === 'admin-settle') body = <Settlement />;
   else if (view === 'admin-master') body = <Master />;
+  else if (view === 'admin-support') body = <Support />;
   else body = <Overview />;
   return (
     <>

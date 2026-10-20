@@ -9,6 +9,7 @@ import Tickets from '@/pages/Tickets.jsx';
 import TicketDetail from '@/pages/TicketDetail.jsx';
 import History from '@/pages/History.jsx';
 import Profile from '@/pages/Profile.jsx';
+import Help from '@/pages/Help.jsx';
 import { Login, Register, RegisterAgen } from '@/pages/Auth.jsx';
 import Agen from '@/agen/Agen.jsx';
 import KycWizard from '@/agen/KycWizard.jsx';
@@ -43,7 +44,7 @@ function Router() {
 
   // Pengaman: user non-pelanggan tak boleh berada di view pelanggan (mis. sisa state)
   useEffect(() => {
-    if (user && user.role !== 'pelanggan' && ['home', 'search', 'tickets', 'history', 'profile'].includes(view)) go(view);
+    if (user && user.role !== 'pelanggan' && ['home', 'search', 'tickets', 'history', 'profile', 'help'].includes(view)) go(view);
   }, [view, user, go]);
 
   // H-1 reminder simulation (sekali per mount)
@@ -66,6 +67,7 @@ function Router() {
   else if (view === 'tickets') page = user ? <Tickets /> : <Login />;
   else if (view === 'history') page = user ? <History /> : <Login />;
   else if (view === 'profile') page = user ? <Profile /> : <Login />;
+  else if (view === 'help') page = <Help />;
   else if (view === 'login') page = <Login />;
   else if (view === 'register') page = <Register />;
   else if (view === 'register-agen') page = <RegisterAgen />;
