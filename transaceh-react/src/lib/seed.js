@@ -5,6 +5,68 @@ import { estimateRoute } from './geo.js';
 
 /* Diekstrak dari index.html (seed v11 + migrasi). Dijalankan sekali via initDB(). */
 export function initDB(){
+  const seedDoc=(label, note='Dokumen contoh seed')=>({
+    name:label.toLowerCase().replace(/[^a-z0-9]+/g,'-')+'.svg',
+    type:'image/svg+xml',
+    size:1800,
+    dataUrl:'data:image/svg+xml;utf8,'+encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' width='640' height='400'><rect width='640' height='400' rx='20' fill='#0b2447'/><rect x='24' y='24' width='592' height='352' rx='14' fill='none' stroke='#38bdf8' stroke-width='3'/><text x='44' y='88' font-family='Arial,sans-serif' font-size='24' font-weight='bold' fill='#7dd3fc'>DOKUMEN DEMO</text><text x='44' y='146' font-family='Arial,sans-serif' font-size='24' font-weight='bold' fill='#fff'>${label}</text><text x='44' y='182' font-family='Arial,sans-serif' font-size='16' fill='#cbd5e1'>${note}</text><text x='44' y='348' font-family='Arial,sans-serif' font-size='13' fill='#64748b'>Data contoh seed TransAceh</text></svg>`),
+    at:'2026-01-01T00:00:00.000Z',
+  });
+  const seedKyc={
+    AG1:{
+      jenis:'Perorangan / Freelance', nama:'Cut Meutia',
+      nik:'1173010101850001', tmpLahir:'Calang', tglLahir:'1985-03-12',
+      gender:'Perempuan', agama:'Islam',
+      alamat:{ jalan:'Jl. Merdeka No.12', rtRw:'01/02', kelurahan:'Calang Pasar Baru', kecamatan:'Calang', kota:'Aceh Jaya', provinsi:'Aceh', kodePos:'23681' },
+      hp:'0812000001', email:'agen@barakah.com',
+      darurat:{ nama:'Muhammad Nur', hubungan:'Istri / Suami', hp:'0813000011' },
+      bank:'BCA', rekeningNo:'8210099211', rekeningNama:'Cut Meutia',
+      npwpSamaKtp:true, npwp:'',
+      docs:{
+        ktp:seedDoc('KTP Cut Meutia'), pasfoto:seedDoc('Pasfoto Cut Meutia'),
+        bukuTabungan:seedDoc('Buku Tabungan Cut Meutia'), npwpPribadi:seedDoc('NPWP Cut Meutia'),
+      },
+      status:'lengkap', step:3, terms:true,
+      submittedAt:'2026-01-01T00:00:00.000Z', updatedAt:'2026-01-01T00:00:00.000Z',
+    },
+    AG2:{
+      jenis:'Perorangan / Freelance', nama:'Faisal',
+      nik:'1171010101880002', tmpLahir:'Banda Aceh', tglLahir:'1988-04-22',
+      gender:'Laki-laki', agama:'Islam',
+      alamat:{ jalan:'Jl. T. Umar No.88', rtRw:'02/03', kelurahan:'Peuniti', kecamatan:'Baiturrahman', kota:'Banda Aceh', provinsi:'Aceh', kodePos:'23242' },
+      hp:'0812000010', email:'agen@putrajaya.com',
+      darurat:{ nama:'Nur Aini', hubungan:'Istri / Suami', hp:'0813000012' },
+      bank:'Mandiri', rekeningNo:'8900112233', rekeningNama:'Faisal',
+      npwpSamaKtp:true, npwp:'',
+      docs:{
+        ktp:seedDoc('KTP Faisal'), pasfoto:seedDoc('Pasfoto Faisal'),
+        bukuTabungan:seedDoc('Buku Tabungan Faisal'), npwpPribadi:seedDoc('NPWP Faisal'),
+      },
+      status:'lengkap', step:3, terms:true,
+      submittedAt:'2026-01-01T00:00:00.000Z', updatedAt:'2026-01-01T00:00:00.000Z',
+    },
+    AG3:{
+      jenis:'Badan Usaha (PT/CV)', nama:'Rizky',
+      nik:'1271010101900003', tmpLahir:'Medan', tglLahir:'1990-01-01',
+      gender:'Laki-laki', agama:'Islam',
+      alamat:{ jalan:'Jl. Gatot Subroto No.45', rtRw:'05/06', kelurahan:'Suka Maju', kecamatan:'Medan Baru', kota:'Medan', provinsi:'Sumatera Utara', kodePos:'20153' },
+      hp:'0812000020', email:'agen@lintasutara.com',
+      darurat:{ nama:'Siti Aminah', hubungan:'Orang Tua', hp:'0813000022' },
+      badanNama:'Lintas Utara', badanBentuk:'PT', aktaNo:'01/2020',
+      npwpUsaha:'1271010101900003', nib:'1271010101900', direktur:'Rizky',
+      alamatUsaha:{ jalan:'Jl. Gatot Subroto No.45', rtRw:'05/06', kelurahan:'Suka Maju', kecamatan:'Medan Baru', kota:'Medan', provinsi:'Sumatera Utara', kodePos:'20153' },
+      bank:'BRI', rekeningNo:'0022334455', rekeningNama:'Lintas Utara',
+      npwpSamaKtp:false, npwp:'',
+      docs:{
+        ktp:seedDoc('KTP Rizky'), npwpUsaha:seedDoc('NPWP Lintas Utara'),
+        nib:seedDoc('NIB Lintas Utara'), akta:seedDoc('Akta Pendirian Lintas Utara'),
+        bukuTabungan:seedDoc('Buku Tabungan Lintas Utara'),
+        kantorDepan:seedDoc('Kantor Depan Lintas Utara'), kantorDalam:seedDoc('Kantor Dalam Lintas Utara'),
+      },
+      status:'lengkap', step:3, terms:true,
+      submittedAt:'2026-01-01T00:00:00.000Z', updatedAt:'2026-01-01T00:00:00.000Z',
+    },
+  };
   if(!localStorage.getItem('at_seeded_v16')){
   const svgURI=s=>'data:image/svg+xml;utf8,'+encodeURIComponent(s);
   const seedAvatar=(ini,c1,c2)=>svgURI(`<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='${c1}'/><stop offset='1' stop-color='${c2}'/></linearGradient></defs><rect width='160' height='160' fill='url(#g)'/><text x='80' y='94' font-family='Arial,sans-serif' font-size='58' font-weight='bold' fill='#fff' text-anchor='middle'>${ini}</text></svg>`);
@@ -25,9 +87,9 @@ export function initDB(){
     {id:'U-CS1',name:'Pelanggan Demo',email:'user@demo.com',phone:'0813000001',pass:'user123',role:'pelanggan',agencyId:null,status:'active',photo:'',favorites:[{name:'Ayah',phone:'0813000002'}]},
   ];
   const agencies=[
-    {id:'AG1',name:'Barakah Travel',logo:'',address:'Jl. Merdeka No.12, Calang, Aceh Jaya',phone:'0654-20112',bank:'BCA 8210-9921-11 a.n. Barakah Travel',status:'active',serviceFee:10000,feeType:'percent',feeValue:8,refundPolicy:[{minH:72,pct:100},{minH:24,pct:50},{minH:0,pct:0}],rating:4.8,trips:1240},
-    {id:'AG2',name:'Putra Jaya Trans',logo:'',address:'Jl. T. Umar No.88, Banda Aceh',phone:'0651-77821',bank:'Mandiri 8900-1122-33 a.n. Putra Jaya',status:'active',serviceFee:10000,feeType:'flat',feeValue:5000,refundPolicy:[{minH:48,pct:100},{minH:0,pct:0}],rating:4.6,trips:860},
-    {id:'AG3',name:'Lintas Utara',logo:'',address:'Jl. Gatot Subroto No.45, Medan',phone:'061-778899',bank:'BRI 0022-3344-55 a.n. Lintas Utara',status:'active',serviceFee:10000,feeType:'percent',feeValue:10,refundPolicy:[{minH:72,pct:100},{minH:24,pct:50},{minH:0,pct:0}],rating:4.7,trips:310},
+    {id:'AG1',name:'Barakah Travel',logo:'',address:'Jl. Merdeka No.12, Calang, Aceh Jaya',phone:'0654-20112',bank:'BCA 8210-9921-11 a.n. Barakah Travel',status:'active',serviceFee:10000,feeType:'percent',feeValue:8,refundPolicy:[{minH:72,pct:100},{minH:24,pct:50},{minH:0,pct:0}],rating:4.8,trips:1240,kyc:seedKyc.AG1},
+    {id:'AG2',name:'Putra Jaya Trans',logo:'',address:'Jl. T. Umar No.88, Banda Aceh',phone:'0651-77821',bank:'Mandiri 8900-1122-33 a.n. Putra Jaya',status:'active',serviceFee:10000,feeType:'flat',feeValue:5000,refundPolicy:[{minH:48,pct:100},{minH:0,pct:0}],rating:4.6,trips:860,kyc:seedKyc.AG2},
+    {id:'AG3',name:'Lintas Utara',logo:'',address:'Jl. Gatot Subroto No.45, Medan',phone:'061-778899',bank:'BRI 0022-3344-55 a.n. Lintas Utara',status:'active',serviceFee:10000,feeType:'percent',feeValue:10,refundPolicy:[{minH:72,pct:100},{minH:24,pct:50},{minH:0,pct:0}],rating:4.7,trips:310,kyc:seedKyc.AG3},
     {id:'AG4',name:'Cahaya Perkasa',logo:'',address:'Jl. Diponegoro No.7, Aceh Barat',phone:'0655-31212',bank:'-',status:'pending',serviceFee:10000,feeType:'percent',feeValue:8,refundPolicy:[{minH:72,pct:100},{minH:24,pct:50},{minH:0,pct:0}],rating:5.0,trips:0},
   ];
   const routes=[];  /* Rute dibuat melalui usulan agen (simulasi dari nol). */
@@ -64,6 +126,19 @@ export function initDB(){
   DB.save('routeRequests',[]);
   localStorage.setItem('at_seeded_v16','1');
   }
+  /* Lengkapi KYC agen demo aktif tanpa mereset data pengguna yang sudah ada. */
+  (function migrateSeedKycV1(){
+    try{
+      if(localStorage.getItem('at_kyc_npwp_seed_v1')) return;
+      const ags=DB.load('agencies',[]); let ch=false;
+      ags.forEach(a=>{
+        const demo=seedKyc[a.id];
+        if(demo && (!a.kyc || !a.kyc.nama)){ a.kyc=demo; ch=true; }
+      });
+      if(ch) DB.save('agencies',ags);
+      localStorage.setItem('at_kyc_npwp_seed_v1','1');
+    }catch{}
+  })();
   /* Seed modul Pusat Bantuan sekali saja. Tidak menimpa laporan yang sudah ada. */
   (function seedSupportV1(){
     try{

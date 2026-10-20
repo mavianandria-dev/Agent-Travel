@@ -57,7 +57,7 @@ export function AppProvider({ children }) {
   const go = useCallback((v) => {
     const u = currentUser();
     let target = (u && u.role !== 'pelanggan' && CUSTOMER_VIEWS.includes(v)) ? roleHome(u.role) : v;
-    /* Agen yang kelengkapan datanya belum diajukan hanya boleh di halaman beranda agen */
+    /* Agen yang kelengkapan datanya belum lengkap hanya boleh di halaman kelengkapan data. */
     if (u && u.role === 'agen' && agencyPending(u) && target.startsWith('agen') && target !== 'agen-pending') target = 'agen-pending';
     const my = ++navToken.current;
     setModal(null);

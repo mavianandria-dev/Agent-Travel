@@ -286,14 +286,15 @@ export const KYC_BANKS = ['Bank Aceh Syariah', 'BCA', 'Mandiri', 'BRI', 'BSI', '
 const digits = (v) => String(v || '').replace(/\D/g, '');
 export const normName = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
-/** True kalau user agen masih menunggu kelengkapan data (belum full access). */
+/** True kalau user agen belum boleh memakai fitur/menu agen. */
 export function agencyPending(u) {
   if (!u || u.role !== 'agen') return false;
   const st = u.status || 'active';
   if (st === 'suspended') return false; /* nonaktif: ditolak saat login, bukan pending */
-  if (st === 'pending') return true;
   const ag = agencyOf(u);
-  return !!(ag && ag.status === 'pending');
+  if (st === 'pending' || (ag && ag.status === 'pending')) return true;
+  /* Agen lama yang sudah aktif tetap harus melengkapi KYC (termasuk NPWP). */
+  return !!(ag && !kycLengkap(ag));
 }
 
 /** Usia (tahun) pada tanggal lahir; null bila tidak bisa dihitung. */
@@ -355,7 +356,7 @@ export function validateKycStep1(k) {
     if (!g(k, 'badanNama')) return 'Nama badan usaha wajib diisi';
     if (!g(k, 'badanBentuk')) return 'Pilih bentuk usaha';
     if (!g(k, 'aktaNo')) return 'Nomor akta pendirian wajib diisi';
-    if (!/^\d{15}$/.test(g(k, 'npwpUsaha'))) return 'NPWP badan usaha harus 15 digit angka';
+    if (!/^\d{15,16}$/.test(g(k, 'npwpUsaha'))) return 'NPWP badan usaha harus 15 atau 16 digit angka';
     if (!/^\d{13}$/.test(g(k, 'nib'))) return 'NIB harus 13 digit angka';
     if (!g(k, 'direktur')) return 'Nama direktur / penanggung jawab wajib diisi';
     const errAlamatUsaha = cekAlamat(k.alamatUsaha, 'Alamat usaha — ');
@@ -366,8 +367,10 @@ export function validateKycStep1(k) {
   if (!g(k, 'rekeningNama')) return 'Nama pemilik rekening wajib diisi';
   const owners = [normName(k.nama), normName(k.badanNama)].filter(Boolean);
   if (!owners.includes(normName(k.rekeningNama))) return 'Nama pemilik rekening harus sama dengan nama pemohon / badan usaha';
-  /* NPWP pemohon hanya untuk Perorangan — Badan Usaha memakai NPWP badan usaha. */
-  if (k.jenis !== 'Badan Usaha (PT/CV)' && k.npwpSamaKtp === false) {
+  /* NPWP pemohon hanya untuk Perorangan — Badan Usaha memakai NPWP badan usaha.
+     Default tidak memakai NIK: wajib isi nomor, kecuali checkbox sama dengan KTP dicentang.
+     Bila memakai NIK, NIK 16 digit sudah menjadi NPWP sehingga tidak perlu nomor lain. */
+  if (k.jenis !== 'Badan Usaha (PT/CV)' && k.npwpSamaKtp !== true) {
     if (!g(k, 'npwp')) return 'Nomor NPWP wajib diisi bila berbeda dari nomor KTP';
     if (!/^\d{15,16}$/.test(digits(k.npwp))) return 'NPWP harus 15 atau 16 digit angka';
   }
@@ -402,7 +405,7 @@ export function kycDocGroups(jenis) {
     ] },
     { grup: 'Rekening & NPWP', docs: [
       { key: 'bukuTabungan', label: 'Buku Tabungan / Rekening', wajib: true, hint: 'Halaman pertama yang memuat nama pemilik' },
-      { key: 'npwpPribadi', label: 'NPWP Pribadi', wajib: false, hint: 'Opsional — kalau ada' },
+      { key: 'npwpPribadi', label: 'NPWP Pribadi', wajib: true, hint: 'Kartu NPWP / NPWP elektronik — wajib' },
     ] },
   ];
 }
@@ -415,6 +418,11 @@ export function kycDocList(jenis) {
 /** Key dokumen wajib — syarat sebelum pengajuan boleh dikirim. */
 export function kycDocWajib(jenis) {
   return kycDocGroups(jenis).flatMap((g) => g.docs.filter((d) => d.wajib).map((d) => d.key));
+}
+
+/** True kalau data, dokumen wajib, dan S&K sudah lengkap. */
+export function kycLengkap(ag) {
+  return !!kycSummary(ag).lengkap;
 }
 
 /** Ringkasan kelengkapan untuk kartu admin & halaman status. */

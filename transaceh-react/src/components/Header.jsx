@@ -101,8 +101,8 @@ export function tabsFor(u, t) {
   if (!u) return [{ v: 'home', icon: 'home', label: 'Beranda' }, { v: 'search', icon: 'search', label: t('search') }, { v: 'login', icon: 'ticket', label: t('myticket') }, { v: 'help', icon: 'circle-help', label: t('help') }];
   if (u.role === 'pelanggan') return [{ v: 'home', icon: 'home', label: 'Beranda' }, { v: 'search', icon: 'search', label: 'Pesan' }, { v: 'tickets', icon: 'ticket', label: t('myticket') }, { v: 'history', icon: 'history', label: t('history') }, { v: 'help', icon: 'circle-help', label: t('help') }, { v: 'profile', icon: 'user', label: 'Profil' }];
   if (u.role === 'agen') {
-    /* Agen pending: hanya satu tab, menuju halaman kelengkapan data */
-    if (agencyPending(u)) return [{ v: 'agen-pending', icon: 'clock', label: 'Status Pengajuan' }];
+    /* Agen yang belum lengkap: hanya satu tab, menuju halaman kelengkapan data */
+    if (agencyPending(u)) return [{ v: 'agen-pending', icon: 'clipboard-list', label: 'Kelengkapan Data' }];
     return [{ v: 'agen', icon: 'layout-dashboard', label: t('dashboard') }, { v: 'agen-book', icon: 'clipboard-list', label: t('bookings') }, { v: 'agen-sched', icon: 'calendar-days', label: t('schedules') }, { v: 'agen-fleet', icon: 'car', label: t('vehicles') }, { v: 'agen-fin', icon: 'wallet', label: t('finance') }];
   }
   if (u.role === 'pengemudi') return [{ v: 'driver', icon: 'car-front', label: t('tasks') }, { v: 'driver-trips', icon: 'route', label: 'Trip' }];

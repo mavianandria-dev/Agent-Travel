@@ -24,7 +24,6 @@ const TERMS = [
   'Super admin berhak meminta dokumen asli untuk verifikasi jika dibutuhkan.',
   'Dokumen hanya dipakai untuk proses verifikasi dan tidak dibagikan kepada pihak ketiga.',
   'Pendaftaran yang memalsukan dokumen atau data akan ditolak dan akun dinonaktifkan.',
-  'Biaya verifikasi tidak dapat dikembalikan meskipun Anda sudah terdaftar.',
 ];
 
 function Stepper({ step, done }) {
@@ -89,9 +88,16 @@ export default function KycWizard() {
   const ag = agencyOf(user);
 
   const k0 = (ag && ag.kyc) || {};
+  /* Agen baru harus menunggu approval; agen aktif yang KYC-nya belum lengkap
+     hanya perlu melengkapi data + dokumen, lalu aksesnya dibuka kembali. */
+  const isNewAgent = !!ag && (((user && user.status) || 'active') === 'pending' || ag.status === 'pending');
+  const k0Summary = kycSummary({ kyc: k0 });
+  const initialStep = isNewAgent && k0.status !== 'diajukan'
+    ? (k0.step || 1)
+    : (!k0Summary.dataOk ? 1 : !k0Summary.docsOk ? 2 : !k0Summary.termsOk ? 3 : 3);
   const [form, setForm] = useState(() => ({
     status: k0.status || 'draft',
-    step: k0.step || 1,
+    step: initialStep,
     terms: !!k0.terms,
     manualAlamat: k0.manualAlamat || { kota: false, kecamatan: false },
     manualAlamatUsaha: k0.manualAlamatUsaha || { kota: false, kecamatan: false },
@@ -107,7 +113,8 @@ export default function KycWizard() {
     /* data lama: alamat usaha pernah berupa teks bebas → dipindah ke kolom NAMA JALAN */
     alamatUsaha: Object.assign({ jalan: '', rtRw: '', kelurahan: '', kecamatan: '', kota: '', provinsi: '', kodePos: '' }, k0.alamatUsaha && typeof k0.alamatUsaha === 'object' ? k0.alamatUsaha : k0.alamatUsaha ? { jalan: k0.alamatUsaha } : {}),
     bank: k0.bank || '', rekeningNo: k0.rekeningNo || '', rekeningNama: k0.rekeningNama || '',
-    npwpSamaKtp: k0.npwpSamaKtp !== false, npwp: k0.npwp || '',
+    /* Default tidak dicentang: NPWP wajib diisi, centang hanya bila memang sama dengan KTP. */
+    npwpSamaKtp: k0.npwpSamaKtp === true, npwp: k0.npwp || '',
     docs: Object.assign({}, k0.docs || {}),
   }));
 
@@ -181,13 +188,23 @@ export default function KycWizard() {
     if (kurang.length) { toast('Lengkapi dokumen wajib dulu — ' + kurang.length + ' dokumen belum terunggah', 'err'); set('step', 2); return; }
     if (!form.terms) { toast('Centang persetujuan Syarat & Ketentuan dulu', 'err'); return; }
     const { status, step, terms, manualAlamat, manualAlamatUsaha, ...rest } = form;
-    saveKyc(Object.assign({}, rest, { wa: form.hp, step: 3, status: 'diajukan', terms: true, submittedAt: new Date().toISOString() }), 'Pengajuan terkirim — menunggu persetujuan super admin');
-    set('status', 'diajukan');
+    const saved = saveKyc(Object.assign({}, rest, {
+      wa: form.hp,
+      step: 3,
+      status: isNewAgent ? 'diajukan' : 'lengkap',
+      terms: true,
+      submittedAt: new Date().toISOString(),
+    }), isNewAgent
+      ? 'Pengajuan terkirim — menunggu persetujuan super admin'
+      : 'Kelengkapan data tersimpan — akses panel agen dibuka');
+    if (!saved) return;
+    set('status', isNewAgent ? 'diajukan' : 'lengkap');
     set('step', 3);
   };
 
   const pending = agencyPending(user);
   const sum = kycSummary({ kyc: form });
+  const butuhLengkapi = !sum.dataOk || !sum.docsOk || !sum.termsOk;
   const age = kycAge(form.tglLahir);
   const isBadan = form.jenis === 'Badan Usaha (PT/CV)';
 
@@ -216,7 +233,7 @@ export default function KycWizard() {
       <div className="anim max-w-2xl mx-auto bg-white rounded-3xl shadow-card p-5 sm:p-7">
         <div className="bg-green-50 border-2 border-green-200 rounded-2xl p-4 flex gap-3">
           <Icon name="circle-check-big" className="w-6 h-6 text-green-600 shrink-0" />
-          <div><div className="font-extrabold text-[15px] text-green-800">Kelengkapan data sudah disetujui</div>
+          <div><div className="font-extrabold text-[15px] text-green-800">Kelengkapan data sudah lengkap</div>
             <div className="text-[12.5px] font-semibold text-green-700">Semua fitur travel Anda sudah terbuka.</div></div>
         </div>
         <button onClick={() => { go('agen'); }} className="mt-4 w-full bg-sky-600 text-white font-extrabold py-3.5 rounded-2xl">Masuk ke Panel Agen</button>
@@ -224,8 +241,10 @@ export default function KycWizard() {
     );
   }
 
-  /* ---------- Status: sudah diajukan, menunggu persetujuan ---------- */
-  if (form.status === 'diajukan') {
+  /* ---------- Status: sudah diajukan, menunggu persetujuan ----------
+     Bila pengajuan lama belum memenuhi aturan baru (mis. NPWP), tetap
+     tampilkan wizard agar agen bisa melengkapi data/dokumennya. */
+  if (isNewAgent && form.status === 'diajukan' && !butuhLengkapi) {
     const row = (ok, label) => (
       <div className="flex items-center gap-2.5 py-2 border-b border-slate-100 last:border-0 text-[13px]">
         <Icon name={ok ? 'circle-check-big' : 'clock'} className={'w-4 h-4 shrink-0 ' + (ok ? 'text-green-500' : 'text-amber-500')} />
@@ -306,7 +325,7 @@ export default function KycWizard() {
                 <div><label className="text-[12px] font-extrabold">NAMA BADAN USAHA (SESUAI AKTA) <span className="text-red-500">*</span></label><input value={form.badanNama} onChange={(e) => set('badanNama', e.target.value)} className={'w-full mt-1 ' + inC} /></div>
                 <div><label className="text-[12px] font-extrabold">NAMA DIREKTUR / PENANGGUNG JAWAB <span className="text-red-500">*</span></label><input value={form.direktur} onChange={(e) => set('direktur', e.target.value)} className={'w-full mt-1 ' + inC} /></div>
                 <div><label className="text-[12px] font-extrabold">BENTUK USAHA <span className="text-red-500">*</span></label><select value={form.badanBentuk} onChange={(e) => set('badanBentuk', e.target.value)} className={'w-full mt-1 ' + inC}><option value="">— Pilih —</option>{KYC_BENTUK.map((b) => <option key={b} value={b}>{b}</option>)}</select></div>
-                <div><label className="text-[12px] font-extrabold">NPWP BADAN USAHA <span className="text-red-500">*</span></label><input value={form.npwpUsaha} onChange={(e) => set('npwpUsaha', e.target.value.replace(/\D/g, '').slice(0, 15))} inputMode="numeric" maxLength={15} placeholder="15 digit" className={'w-full mt-1 ' + inC} /></div>
+                <div><label className="text-[12px] font-extrabold">NPWP BADAN USAHA <span className="text-red-500">*</span></label><input value={form.npwpUsaha} onChange={(e) => set('npwpUsaha', e.target.value.replace(/\D/g, '').slice(0, 16))} inputMode="numeric" maxLength={16} placeholder="15 atau 16 digit" className={'w-full mt-1 ' + inC} /></div>
                 <div><label className="text-[12px] font-extrabold">NOMOR AKTA PENDIRIAN <span className="text-red-500">*</span></label><input value={form.aktaNo} onChange={(e) => set('aktaNo', e.target.value)} className={'w-full mt-1 ' + inC} /></div>
                 <div><label className="text-[12px] font-extrabold">NIB <span className="text-red-500">*</span></label><input value={form.nib} onChange={(e) => set('nib', e.target.value.replace(/\D/g, '').slice(0, 13))} inputMode="numeric" maxLength={13} placeholder="13 digit" className={'w-full mt-1 ' + inC} /></div>
                 <div className="col-span-2"><label className="text-[12px] font-extrabold">ALAMAT LOKASI USAHA / KANTOR <span className="text-red-500">*</span></label>
@@ -322,7 +341,7 @@ export default function KycWizard() {
             <div><label className="text-[12px] font-extrabold">NOMOR REKENING <span className="text-red-500">*</span></label><input value={form.rekeningNo} onChange={(e) => set('rekeningNo', e.target.value.replace(/\D/g, ''))} inputMode="numeric" placeholder="cth: 1234567890" className={'w-full mt-1 ' + inC} /></div>
             <div className={isBadan ? 'col-span-2' : ''}><label className="text-[12px] font-extrabold">NAMA PEMILIK REKENING <span className="text-red-500">*</span></label><input value={form.rekeningNama} onChange={(e) => set('rekeningNama', e.target.value)} placeholder="Harus sama dengan nama pemohon" className={'w-full mt-1 ' + inC} /></div>
             {!isBadan ? <div>
-              <label className="text-[12px] font-extrabold">NPWP</label>
+              <label className="text-[12px] font-extrabold">NPWP <span className="text-red-500">*</span></label>
               <div className="mt-1 bg-sky-50 border-2 border-sky-200 rounded-2xl px-3 py-2.5">
                 <label className="flex items-start gap-2 cursor-pointer">
                   <input type="checkbox" checked={form.npwpSamaKtp} onChange={(e) => set('npwpSamaKtp', e.target.checked)} className="w-4 h-4 accent-sky-600 shrink-0 mt-0.5" />
@@ -336,6 +355,7 @@ export default function KycWizard() {
                     <input value={form.npwp} onChange={(e) => set('npwp', e.target.value.replace(/\D/g, '').slice(0, 16))} inputMode="numeric" maxLength={16} placeholder="15 atau 16 digit" className={'w-full mt-1 ' + inC} />
                   </div>
                 )}
+                <p className="text-[10.5px] font-semibold text-sky-700 ml-6 mt-1">Wajib — unggah dokumen NPWP di tahap Lampiran Dokumen.</p>
               </div>
             </div> : null}
           </div>

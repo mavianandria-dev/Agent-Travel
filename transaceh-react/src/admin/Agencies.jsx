@@ -120,10 +120,10 @@ function KycModal({ id }) {
           {row('Nomor akta', k.aktaNo)}{row('Direktur', k.direktur)}{row('Alamat usaha', fmtAlamat(k.alamatUsaha))}
         </> : <div className="text-[12.5px] font-bold text-slate-500 py-2">Agen terdaftar sebagai Perorangan / Freelance — legalitas badan usaha tidak berlaku.</div>}
         {row('Bank', k.bank)}{row('No rekening', k.rekeningNo)}{row('Pemilik rekening', k.rekeningNama)}
-        {k.jenis === 'Badan Usaha (PT/CV)' ? null : row('NPWP pemohon', k.npwpSamaKtp === false ? k.npwp : (k.nik ? 'Sama dengan NIK • ' + k.nik : ''))}
+        {k.jenis === 'Badan Usaha (PT/CV)' ? null : row('NPWP pemohon', k.npwpSamaKtp === true ? (k.nik ? 'Sama dengan NIK • ' + k.nik : '') : k.npwp)}
       </div> : null}
       {tab === 'dok' ? <div className="mt-3">
-        <p className="text-[12.5px] font-bold text-slate-500">Dokumen wajib: {s.docsFilled}/{s.docsTotal} terunggah. {s.status === 'diajukan' ? 'Pengajuan sudah dikirim agen.' : 'Belum dikirim.'}</p>
+        <p className="text-[12.5px] font-bold text-slate-500">Dokumen wajib: {s.docsFilled}/{s.docsTotal} terunggah. {s.status === 'diajukan' ? 'Pengajuan sudah dikirim agen.' : s.lengkap ? 'Kelengkapan tersimpan.' : 'Belum lengkap.'}</p>
         {groups.map((g) => (
           <div key={g.grup} className="mt-3">
             <p className="text-[11px] font-extrabold text-slate-400">{g.grup.toUpperCase()}</p>
@@ -205,12 +205,16 @@ export function Agencies() {
                   <span className={`badge ${s.docsOk ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>Dokumen {s.docsOk ? '✓' : '—'}</span>
                   <span className={`badge ${s.termsOk ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>S&amp;K {s.termsOk ? '✓' : '—'}</span>
                   <button onClick={() => openModal(<KycModal id={a.id} />)} className="badge bg-sky-100 text-sky-700 cursor-pointer">Detail</button>
-                  {s.status === 'diajukan'
+                  {s.status === 'diajukan' && s.lengkap
                     ? <button onClick={() => agSetStatus(a.id, 'active', toast, refresh)} className="badge bg-green-500 text-white cursor-pointer">Approve</button>
-                    : <button disabled className="badge bg-slate-200 text-slate-400 cursor-not-allowed" title="Menunggu kelengkapan dikirim agen">Approve</button>}
+                    : <button disabled className="badge bg-slate-200 text-slate-400 cursor-not-allowed" title="Lengkapi data dan dokumen wajib dulu">Approve</button>}
                   <button onClick={() => agReject(a.id)} className="badge bg-red-100 text-red-600 cursor-pointer">Tolak</button>
                 </>; })() : null}
-                {a.status === 'active' ? <button onClick={() => agSetStatus(a.id, 'suspended', toast, refresh)} className="badge bg-red-100 text-red-600 cursor-pointer">Suspend</button> : <button onClick={() => agSetStatus(a.id, 'active', toast, refresh)} className="badge bg-sky-100 text-sky-700 cursor-pointer">Aktifkan</button>}
+                {a.status === 'active' ? (() => { const s = kycSummary(a); return <>
+                  <span className={`badge ${s.lengkap ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>KYC {s.lengkap ? '✓' : '—'}</span>
+                  <button onClick={() => openModal(<KycModal id={a.id} />)} className="badge bg-sky-100 text-sky-700 cursor-pointer">Kelengkapan</button>
+                  <button onClick={() => agSetStatus(a.id, 'suspended', toast, refresh)} className="badge bg-red-100 text-red-600 cursor-pointer">Suspend</button>
+                </>; })() : <button onClick={() => agSetStatus(a.id, 'active', toast, refresh)} className="badge bg-sky-100 text-sky-700 cursor-pointer">Aktifkan</button>}
                 <button onClick={() => openModal(<FeeModal id={a.id} />)} className="badge bg-violet-100 text-violet-700 cursor-pointer">Fee</button></div></div>
           </div>
         ))}
