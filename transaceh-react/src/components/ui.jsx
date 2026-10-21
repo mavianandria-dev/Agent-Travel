@@ -168,8 +168,8 @@ export function DocPreview({ title, src, onBack }) {
   );
 }
 
-/* Denah kabin 4 kolom — dipakai booking (interaktif) & detail armada (statis) */
-export function CabinGrid({ layout, paid = [], hold = [], inactive = [], selected = [], onPick = () => {}, interactive = false, plate, vehName, legend = true }) {
+/* Denah kabin 4 kolom — dipakai booking (interaktif), blokir kursi, & detail armada (statis) */
+export function CabinGrid({ layout, paid = [], hold = [], inactive = [], blocked = [], selected = [], onPick = () => {}, interactive = false, plate, vehName, legend = true }) {
   const cells = [];
   let skip = false;
   layout.forEach((c, i) => {
@@ -186,18 +186,20 @@ export function CabinGrid({ layout, paid = [], hold = [], inactive = [], selecte
     if (c.type === 'seat' || c.type === 'off') {
       const st = c.sid;
       const isOff = c.type === 'off' || inactive.includes(st);
-      const cls = isOff || paid.includes(st) ? 'filled' : hold.includes(st) ? 'held' : selected.includes(st) ? 'selected' : 'avail';
-      const dis = cls !== 'avail' && cls !== 'selected';
-      const icon = isOff ? 'ban' : cls === 'filled' ? 'x' : cls === 'held' ? 'timer' : 'armchair';
+      const isBlocked = blocked.includes(st);
+      const cls = isOff || paid.includes(st) ? 'filled' : hold.includes(st) ? 'held' : isBlocked ? 'blocked' : selected.includes(st) ? 'selected' : 'avail';
+      const dis = isBlocked ? false : (cls !== 'avail' && cls !== 'selected');
+      const icon = isOff ? 'ban' : cls === 'filled' ? 'x' : cls === 'held' ? 'timer' : cls === 'blocked' ? 'ban' : 'armchair';
       const inner = (
         <>
           <Icon name={icon} className="w-4 h-4" />
           <span className="text-[11px]">{st}</span>
           {isOff ? <span className="text-[8px] font-extrabold">OFF</span> : null}
+          {cls === 'blocked' ? <span className="text-[8px] font-extrabold">TUTUP</span> : null}
         </>
       );
       cells.push(interactive ? (
-        <button key={i} disabled={dis} onClick={() => onPick(st)} aria-label={`Kursi ${st}${isOff ? ' nonaktif' : ''}`} title={isOff ? 'Nonaktif oleh agen' : undefined} className={`seat ${cls} rounded-xl h-[58px] min-h-[54px] flex flex-col items-center justify-center font-extrabold text-[14px] active:scale-95`}>
+        <button key={i} disabled={dis} onClick={() => onPick(st)} aria-label={`Kursi ${st}${isOff ? ' nonaktif' : ''}${isBlocked ? ' diblokir' : ''}`} title={isOff ? 'Nonaktif oleh agen' : isBlocked ? 'Diblokir — klik untuk buka lagi' : undefined} className={`seat ${cls} rounded-xl h-[58px] min-h-[54px] flex flex-col items-center justify-center font-extrabold text-[14px] active:scale-95`}>
           {inner}
         </button>
       ) : (
@@ -240,6 +242,7 @@ export function CabinGrid({ layout, paid = [], hold = [], inactive = [], selecte
       {legend ? (
         <div className="flex gap-3 mt-2 text-[11px] font-bold flex-wrap">
           <span className="flex items-center gap-1.5"><span className="w-4 h-4 rounded-md border-2" style={{ background: '#dcfce7', borderColor: '#22c55e' }}></span>Aktif ({n})</span>
+          {blocked.length ? <span className="flex items-center gap-1.5"><span className="w-4 h-4 rounded-md border-2" style={{ background: '#fee2e2', borderColor: '#dc2626' }}></span>Ditutup ({blocked.join(', ')})</span> : null}
           <span className="flex items-center gap-1.5 text-slate-500"><Icon name="ban" className="w-3.5 h-3.5" />Nonaktif ({off.join(', ') || '-'})</span>
         </div>
       ) : null}

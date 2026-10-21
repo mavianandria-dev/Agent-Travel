@@ -36,6 +36,8 @@ body { background: #f1f5f9; }
 .seat.selected { background: #0f7ae5; border: 2px solid #0b63c4; color: #fff; animation: pulseRing 1.2s infinite; }
 .seat.filled { background: #e2e8f0; border: 2px solid #cbd5e1; color: #94a3b8; cursor: not-allowed; text-decoration: line-through; }
 .seat.held { background: #fef3c7; border: 2px dashed #f59e0b; color: #b45309; cursor: not-allowed; }
+.seat.blocked { background: #fee2e2; border: 2px solid #dc2626; color: #b91c1c; }
+.seat.blocked:hover { transform: translateY(-3px) scale(1.06); box-shadow: 0 8px 18px -6px rgba(220, 38, 38, 0.45); }
 .seat.driver { background: #0b2447; border: 2px solid #0b2447; color: #fff; cursor: default; }
 
 .car-body { background: linear-gradient(180deg, #fff 0%, #f8fafc 100%); border: 3px solid #0b2447; border-radius: 42px 42px 26px 26px; position: relative; }

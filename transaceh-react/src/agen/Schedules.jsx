@@ -1,35 +1,13 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { agencyOf, routeById, vehicleById, vehName, driverById, schedById, takenSeats, vehLayout, schedSeatCap, schedReady, scheduleInHistory, scheduleHasTransactions, bookingsOf, audit } from '@/lib/domain.js';
+import { agencyOf, routeById, vehicleById, vehName, driverById, takenSeats, schedSeatCap, schedReady, scheduleInHistory, scheduleHasTransactions, bookingsOf, audit } from '@/lib/domain.js';
 import { fmtRp } from '@/lib/utils.js';
 import { Icon, BadgeStatus, fmtDate } from '@/components/ui.jsx';
 import { ManifestModal } from './Bookings.jsx';
 import { SchedFormModal } from './SchedForm.jsx';
 import CancelTripModal from '@/components/CancelTripModal.jsx';
-
-function BlockSeatModal({ sid }) {
-  const { closeModal, toast, refresh, tick } = useApp();
-  void tick;
-  const s = schedById(sid);
-  if (!s) return <div className="p-6 font-bold text-slate-500">Jadwal tidak ditemukan</div>;
-  const order = vehLayout(vehicleById(s.vehicleId)).filter((c) => c.type === 'seat' || c.type === 'off').map((c) => c.sid);
-  const toggleBlock = (st) => {
-    const arr = DB.load('schedules', []);
-    const m = arr.find((x) => x.id === sid);
-    m.blockedSeats = m.blockedSeats || [];
-    m.blockedSeats = m.blockedSeats.includes(st) ? m.blockedSeats.filter((x) => x !== st) : [...m.blockedSeats, st];
-    DB.save('schedules', arr); refresh();
-    audit('seat_block', sid + ' ' + st);
-    refresh();
-  };
-  void toast;
-  return (
-    <div className="p-6"><h3 className="font-extrabold text-[16px]">Tutup / Buka Kursi Manual</h3><p className="text-[12px] text-slate-500 font-medium">Klik kursi untuk blokir (maintenance/operasional).</p>
-      <div className="grid grid-cols-4 gap-2 mt-3">{order.map((st) => <button key={st} onClick={() => toggleBlock(st)} className={`rounded-xl border-2 py-3 font-extrabold text-[14px] min-h-[60px] ${(s.blockedSeats || []).includes(st) ? 'border-red-400 bg-red-50 text-red-600' : 'border-green-300 bg-green-50 text-green-700'}`}>{st}<br /><span className="text-[10px]">{(s.blockedSeats || []).includes(st) ? 'DIBLOKIR' : 'BUKA'}</span></button>)}</div>
-      <button onClick={() => { closeModal(); refresh(); }} className="mt-4 w-full bg-[#0b2447] text-white font-extrabold text-[13px] py-2.5 rounded-xl">Selesai</button></div>
-  );
-}
+import BlockSeatModal from '@/components/BlockSeatModal.jsx';
 
 export default function Schedules({ ag }) {
   const { user, openModal, toast, refresh, tick } = useApp();
@@ -47,7 +25,7 @@ export default function Schedules({ ag }) {
 
   const schedForm = () => openModal(<SchedFormModal agId={agency.id} />);
   const manifest = (sid) => openModal(<ManifestModal sid={sid} />);
-  const blockSeat = (sid) => openModal(<BlockSeatModal sid={sid} />);
+  const blockSeat = (sid) => openModal(<BlockSeatModal sid={sid} by="agen" />);
   const cancelTrip = (sid) => openModal(<CancelTripModal sid={sid} by="agen" />);
   const delSched = (id) => {
     if (scheduleHasTransactions(id)) { toast('Jadwal sudah memiliki booking/ledger — tidak bisa dihapus', 'err'); return; }

@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { routeById, vehicleById, bookingsOf, vehName, vehLayout, schedSeatCap, takenSeats, seatsLeft, audit, setScheduleTripStatus, scheduleNeedsReview, scheduleInHistory, schedById, setScheduleDelay, reportTripDelay, createDriverBooking, confirmDriverBookingPayment, splitFare } from '@/lib/domain.js';
+import { routeById, vehicleById, bookingsOf, vehName, vehLayout, schedSeatCap, takenSeats, seatsLeft, audit, setScheduleTripStatus, scheduleNeedsReview, scheduleInHistory, schedById, setScheduleDelay, reportTripDelay, createDriverBooking, confirmDriverBookingPayment, splitFare, tripProgress } from '@/lib/domain.js';
 import { fmtClock, fmtRp } from '@/lib/utils.js';
-import { Icon, Empty, BadgeStatus, fmtDate } from '@/components/ui.jsx';
-import { PICKUP_ORIGIN } from '@/lib/pickups.js';
+import { Icon, Empty, BadgeStatus, fmtDate, CabinGrid } from '@/components/ui.jsx';
+import { pickupArea, pickupOptions } from '@/lib/pickups.js';
 import CancelTripModal from '@/components/CancelTripModal.jsx';
+import BlockSeatModal from '@/components/BlockSeatModal.jsx';
 
 export function drvOfUser(u) {
   if (!u) return null;
@@ -21,7 +22,7 @@ export function tripUpdate(sid, st, toast, refresh) {
 }
 
 function ManifestModal({ sid }) {
-  const { closeModal } = useApp();
+  const { closeModal, openModal } = useApp();
   const s = DB.load('schedules', []).find((x) => x.id === sid);
   if (!s) return <div className="p-6">Jadwal tidak ditemukan</div>;
   const r = routeById(s.routeId);
@@ -53,7 +54,10 @@ function ManifestModal({ sid }) {
           );
         })}
       </tbody></table>
-      <button onClick={() => window.print()} className="mt-4 w-full bg-[#0b2447] text-white font-extrabold text-[13px] py-2.5 rounded-xl no-print"><Icon name="printer" className="w-4 h-4 inline" /> Cetak Manifest</button>
+      <div className="flex gap-2 mt-3 no-print">
+        <button onClick={() => openModal(<BlockSeatModal sid={sid} by="pengemudi" />)} className="flex-1 bg-amber-100 text-amber-700 font-extrabold text-[13px] py-2.5 rounded-xl"><Icon name="ban" className="w-4 h-4 inline" /> Tutup / Buka Kursi</button>
+        <button onClick={() => window.print()} className="flex-1 bg-[#0b2447] text-white font-extrabold text-[13px] py-2.5 rounded-xl"><Icon name="printer" className="w-4 h-4 inline" /> Cetak Manifest</button>
+      </div>
     </div>
   );
 }
@@ -185,34 +189,54 @@ function DriverBookingModal({ sid }) {
   const tk = takenSeats(s?.id ?? '');
   const taken = new Set([...tk.paid, ...tk.hold, ...(s?.blockedSeats || []), ...tk.inactive]);
   const layout = vehLayout(v);
-  const available = layout.filter((c) => c.type === 'seat' && c.sid && !taken.has(c.sid)).map((c) => c.sid);
+  const seatOrder = layout.filter((c) => c.type === 'seat' && c.sid).map((c) => c.sid);
+  const available = seatOrder.filter((st) => !taken.has(st));
   const left = available.length;
-  const [count, setCount] = useState(Math.min(1, left));
-  const [pax, setPax] = useState(() => Array.from({ length: Math.min(1, left) }, () => ({ name: '', phone: '' })));
-  const [pickup, setPickup] = useState((PICKUP_ORIGIN[r?.from] || [])[0] || (r?.pickups || [])[0] || '-');
+  const [seats, setSeats] = useState([]);
+  const [pax, setPax] = useState([]);
+  const [pickup, setPickup] = useState(pickupOptions(r)[0] || '-');
   const [payMethod, setPayMethod] = useState('QRIS');
   const [step, setStep] = useState(1);
   const [made, setMade] = useState(null);
-  const rows = Array.from({ length: count }, (_, i) => pax[i] || { name: '', phone: '' });
+  const rows = [...pax].sort((a, b) => seatOrder.indexOf(a.seat) - seatOrder.indexOf(b.seat));
   if (!s) return <div className="p-6 font-bold text-slate-500">Jadwal tidak ditemukan</div>;
 
-  const total = Number(s.price || 0) * count;
-  const fare = splitFare(s, count, 0, 'driver');
+  const total = Number(s.price || 0) * seats.length;
+  const fare = splitFare(s, seats.length, 0, 'driver');
   const va = '8821 ' + String(Math.floor(100000000000 + Math.random() * 899999999999)).slice(0, 12).replace(/(\d{4})(?=\d)/g, '$1 ');
+
+  /* Pilih kursi seperti alur pelanggan: klik denah, klik lagi untuk melepas. */
+  const toggleSeat = (st) => {
+    if (seats.includes(st)) {
+      setSeats(seats.filter((x) => x !== st));
+      setPax(pax.filter((p) => p.seat !== st));
+      return;
+    }
+    const maxS = schedSeatCap(s.id);
+    if (seats.length >= maxS) { toast('Maksimal ' + maxS + ' kursi per booking', 'warn'); return; }
+    setSeats([...seats, st]);
+    setPax([...pax, { seat: st, name: '', phone: '' }]);
+  };
+
+  const setPaxField = (seat, field, val) => {
+    setPax(pax.map((p) => (p.seat === seat ? { ...p, [field]: val } : p)));
+  };
 
   const submit = () => {
     if (!driver) { toast('Data pengemudi tidak ditemukan', 'err'); return; }
-    if (count < 1 || count > left) { toast('Jumlah kursi tidak valid', 'err'); return; }
+    if (!seats.length) { toast('Pilih minimal satu kursi', 'err'); return; }
+    if (rows.length !== seats.length) { toast('Data penumpang belum lengkap', 'err'); return; }
     if (rows.some((p) => !String(p.name || '').trim() || !String(p.phone || '').trim())) {
       toast('Nama dan HP wajib diisi untuk semua penumpang', 'err');
       return;
     }
     const res = createDriverBooking(sid, {
       passengers: rows,
-      seats: available.slice(0, count),
+      seats,
       driverId: driver.id,
       payMethod,
       discount: 0,
+      pickup,
     });
     if (!res.ok) { toast(res.msg, 'err'); return; }
     setMade(res.booking);
@@ -261,33 +285,59 @@ function DriverBookingModal({ sid }) {
 
       <div className="mt-4 space-y-3">
         <div>
-          <label className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wide">Jumlah Kursi</label>
-          <div className="flex items-center gap-2 mt-1">
-            <button onClick={() => setCount((c) => Math.max(1, c - 1))} disabled={count <= 1} className="text-[12px] font-bold text-slate-600 bg-slate-100 rounded-xl px-2 py-1.5">−</button>
-            <input type="number" value={count} min="1" max={left} onChange={(e) => setCount(Math.max(1, Math.min(left, Number(e.target.value || 1))))} className="w-20 text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2 focus-ring text-center" />
-            <button onClick={() => setCount((c) => Math.min(left, c + 1))} disabled={count >= left} className="text-[12px] font-bold text-slate-600 bg-slate-100 rounded-xl px-2 py-1.5">+</button>
-            <span className="text-[12px] text-slate-500">Tersisa {left} kursi</span>
+          <label className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wide">Pilih Kursi</label>
+          <div className="flex gap-3 mt-1.5 text-[11px] font-bold flex-wrap">
+            <span className="flex items-center gap-1.5"><span className="w-4 h-4 rounded-md border-2" style={{ background: '#dcfce7', borderColor: '#22c55e' }}></span>Aktif</span>
+            <span className="flex items-center gap-1.5"><span className="w-4 h-4 rounded-md border-2" style={{ background: '#dbeafe', borderColor: '#3b82f6' }}></span>Dipilih</span>
+            <span className="flex items-center gap-1.5 text-slate-500"><Icon name="x" className="w-3.5 h-3.5" />Terisi</span>
+            <span className="flex items-center gap-1.5 text-slate-500"><Icon name="timer" className="w-3.5 h-3.5" />Ditahan</span>
+            <span className="flex items-center gap-1.5 text-slate-500"><Icon name="ban" className="w-3.5 h-3.5" />Nonaktif</span>
           </div>
-          <div className="text-[11px] text-slate-400 font-semibold">Kursi: {available.slice(0, count).join(', ') || '—'}</div>
+          <CabinGrid
+            layout={layout}
+            paid={tk.paid}
+            hold={tk.hold}
+            inactive={tk.inactive}
+            selected={seats}
+            onPick={toggleSeat}
+            interactive
+            plate={v?.plate}
+            vehName={vehName(v)}
+            legend={false}
+          />
+          <div className="text-[12px] font-semibold mt-2">
+            Terpilih: <b className="text-sky-700">{seats.length ? seats.join(', ') : '-'}</b>
+            <span className="text-slate-400 font-medium"> - kursi kosong {left}</span>
+          </div>
         </div>
 
         <div>
           <label className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wide">Titik Jemput</label>
           <select value={pickup} onChange={(e) => setPickup(e.target.value)} className="mt-1 w-full text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">
-            {(PICKUP_ORIGIN[r?.from] || []).map((p) => (<option key={p} value={p}>{p}</option>))}
+            {pickupOptions(r).map((p) => (<option key={p} value={p}>{p}</option>))}
           </select>
         </div>
 
         <div>
           <label className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wide">Data Penumpang</label>
-          <div className="space-y-2 mt-1">
-            {rows.map((p, i) => (
-              <div key={i} className="grid grid-cols-2 gap-2 sm:grid-cols-4 text-sm">
-                <input value={p.name || ''} onChange={(e) => { const np = [...pax]; np[i] = { ...np[i], name: e.target.value }; setPax(np); }} placeholder="Nama penumpang" className="border-2 border-slate-200 rounded-xl px-3 py-2 focus-ring" />
-                <input value={p.phone || ''} onChange={(e) => { const np = [...pax]; np[i] = { ...np[i], phone: e.target.value }; setPax(np); }} placeholder="No. HP" className="border-2 border-slate-200 rounded-xl px-3 py-2 focus-ring" />
-              </div>
-            ))}
-          </div>
+          {!rows.length ? (
+            <div className="mt-1 bg-amber-50 border border-amber-200 rounded-2xl p-3 text-[12.5px] font-semibold text-amber-800 flex gap-2"><Icon name="mouse-pointer-click" className="w-5 h-5 shrink-0" />Klik kursi pada denah armada. 1 kursi untuk 1 penumpang.</div>
+          ) : (
+            <div className="space-y-2 mt-1">
+              {rows.map((p) => (
+                <div key={p.seat} className="bg-slate-50 border-2 border-slate-200 rounded-2xl p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="badge bg-sky-600 text-white">Kursi {p.seat}</span>
+                    <button onClick={() => toggleSeat(p.seat)} className="text-red-500 hover:bg-red-50 p-1 rounded-lg" title="Lepas kursi"><Icon name="x" className="w-4 h-4" /></button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    <input value={p.name || ''} onChange={(e) => setPaxField(p.seat, 'name', e.target.value)} placeholder="Nama penumpang" className="text-[13px] font-semibold bg-white border border-slate-200 rounded-xl px-3 py-2 focus-ring" />
+                    <input value={p.phone || ''} onChange={(e) => setPaxField(p.seat, 'phone', e.target.value)} placeholder="No. HP" className="text-[13px] font-semibold bg-white border border-slate-200 rounded-xl px-3 py-2 focus-ring" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div>
@@ -319,6 +369,13 @@ function DriverBookingModal({ sid }) {
 export default function Tasks() {
   const { go, user, toast, refresh, openModal } = useApp();
   const me = drvOfUser(user);
+  const [, setClock] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
+  /* Jam lokal: progress bar perjalanan harus berjalan sendiri tiap 30 detik. */
+  useEffect(() => {
+    const iv = setInterval(() => { setNow(Date.now()); setClock((x) => x + 1); }, 30000);
+    return () => clearInterval(iv);
+  }, []);
   const mySched = DB.load('schedules', []).filter((s) => !me || s.driverId === me.id).sort((a, b) => (a.date + b.time).localeCompare(b.date + b.time));
   const overdue = mySched.filter(scheduleNeedsReview);
   const upcoming = mySched.filter((s) => !scheduleInHistory(s) && !scheduleNeedsReview(s) && s.status !== 'cancelled' && !['arrived', 'missed', 'cancelled'].includes(s.tripStatus));
@@ -329,30 +386,82 @@ export default function Tasks() {
     const left = seatsLeft(s.id);
     const delayActive = s.tripStatus === 'scheduled' && s.delayUntil && new Date(s.delayUntil).getTime() > Date.now();
     const tripInfo = s.tripStatus === 'ontrip' && Array.isArray(s.tripDelayInfo) ? s.tripDelayInfo[0] : null;
+    const prog = s.tripStatus === 'ontrip' ? tripProgress(s, r, now) : null;
+    /* Titik jemput penumpang — hanya baris yang benar-benar ada di manifest
+       (kursi yang dipesan), lalu dikelompokkan per titik jemput. */
+    const seatOrder = vehLayout(v).filter((c) => c.type === 'seat' || c.type === 'off').map((c) => c.sid);
+    const paxPicks = (() => {
+      const map = new Map();
+      bk.forEach((b) => {
+        const booked = b.seats && b.seats.length ? b.seats : null;
+        const list = (b.passengers && b.passengers.length) ? b.passengers : [{}];
+        list.forEach((p) => {
+          if (booked && p.seat && !booked.includes(p.seat)) return; // penumpang tanpa kursi (data lama)
+          const raw = String(p.pickup || b.pickup || '').trim();
+          if (!raw) return;
+          const area = pickupArea(raw, r.from);
+          if (!area.label) return;
+          const key = area.label.toLowerCase();
+          const cur = map.get(key);
+          if (cur) { cur.count += 1; return; }
+          const pos = seatOrder.indexOf(p.seat);
+          map.set(key, { label: area.label, count: 1, order: pos < 0 ? 999 : pos });
+        });
+      });
+      return [...map.values()].sort((a, b) => a.order - b.order);
+    })();
     const finish = () => {
       if (late && !window.confirm('Tandai trip ini sebagai Tiba? Pastikan perjalanan benar-benar sudah terjadi.')) return;
       tripUpdate(s.id, 'arrived', toast, refresh);
     };
     return (
-      <div key={s.id} className="bg-white rounded-3xl shadow-card p-4">
+      <div key={s.id} data-sid={s.id} className="bg-white rounded-3xl shadow-card p-4">
         <div className="flex items-center gap-3 flex-wrap">
           <div className="bg-[#0b2447] text-white rounded-2xl px-3.5 py-2 text-center"><div className="text-[11px] font-bold opacity-70">{fmtDate(s.date)}</div><div className="font-extrabold text-[16px]">{s.time}</div></div>
           <div className="flex-1 min-w-[180px]"><div className="font-extrabold text-[15px]">{r.from} → {r.to}</div><div className="text-[12px] text-slate-500 font-medium">{vehName(v)} {v?.plate} • {takenSeats(s.id).paid.length}/{schedSeatCap(s.id)} penumpang</div></div>
+          {prog ? (
+            <div
+              role="progressbar"
+              aria-label={'Progres perjalanan ' + (s.date || '') + ' ' + (s.time || '') + ' ' + prog.pct + ' persen'}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={prog.pct}
+              aria-valuetext={'Berangkat ' + fmtClock(prog.start) + ', estimasi tiba ' + fmtClock(prog.end)}
+              title={'Berangkat ' + fmtClock(prog.start) + ' • Estimasi tiba ' + fmtClock(prog.end) + ' • sisa ±' + prog.remainMin + ' menit'}
+              className="badge relative overflow-hidden bg-slate-100 text-[#0b2447] !text-[12px] py-1.5 px-3 gap-2 min-w-[240px] justify-between ring-1 ring-slate-200"
+            >
+              <div className="absolute inset-y-0 left-0 bg-gradient-to-r from-green-200 via-emerald-300 to-sky-300 transition-[width] duration-700 ease-out" style={{ width: prog.pct + '%' }} />
+              <span className="relative z-10 flex items-center gap-1.5 font-extrabold whitespace-nowrap"><Icon name="car-front" className="w-3.5 h-3.5" /> Berangkat {fmtClock(prog.start)}</span>
+              <span className="relative z-10 font-extrabold whitespace-nowrap">{prog.pct}% <span className="font-bold text-slate-500">• ETA {fmtClock(prog.end)}</span></span>
+            </div>
+          ) : null}
           <BadgeStatus st={s.tripStatus || 'scheduled'} />
         </div>
-        <div className="mt-2.5 bg-slate-50 rounded-2xl p-3 text-[12.5px] font-semibold"><span className="text-slate-400 font-extrabold text-[11px]">TITIK JEMPUT:</span> {(r.pickups || []).join(' → ')}</div>
+        {paxPicks.length ? (
+          <div className="mt-2.5 bg-slate-50 rounded-2xl p-3">
+            <span className="text-slate-400 font-extrabold text-[11px] flex items-center gap-1.5"><Icon name="map-pin" className="w-3.5 h-3.5" /> TITIK JEMPUT</span>
+            <div className="flex flex-wrap items-center gap-1 mt-2">
+              {paxPicks.map((p) => (
+                <span key={p.label} className="badge bg-white text-[#0b2447] !text-[11.5px] px-2 py-1 border border-slate-200">
+                  <span className="font-extrabold">{p.label}</span>
+                  <span className="badge bg-sky-100 text-sky-700 !text-[10px] px-1.5 py-0.5"><Icon name="users" className="w-2.5 h-2.5" />{p.count}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : null}
         {delayActive ? <div className="mt-2.5 bg-amber-50 border border-amber-200 rounded-2xl p-2.5 text-[12px] font-semibold text-amber-900">Delay {s.delayMinutes} menit • estimasi {fmtClock(s.delayUntil)} — {s.delayReason}</div> : null}
         {tripInfo ? <div className="mt-2.5 bg-sky-50 border border-sky-200 rounded-2xl p-2.5 text-[12px] font-semibold text-sky-900">Info keterlambatan: {tripInfo.reason}{tripInfo.note ? ' • ' + tripInfo.note : ''} ({fmtClock(tripInfo.at)})</div> : null}
-        <div className="flex flex-wrap gap-2 mt-3">
-          <button onClick={() => openModal(<ManifestModal sid={s.id} />)} className="flex-1 bg-sky-50 text-sky-700 text-[12.5px] font-extrabold py-2.5 rounded-xl min-w-[130px]"><Icon name="users" className="w-4 h-4 inline" /> Manifest ({bk.length})</button>
-          {late ? <button onClick={finish} className="flex-1 bg-blue-600 text-white text-[12.5px] font-extrabold py-2.5 rounded-xl min-w-[130px]">Tandai Tiba</button> : null}
-          {!late && (s.tripStatus === 'scheduled' || !s.tripStatus) ? <button onClick={() => tripUpdate(s.id, 'ontrip', toast, refresh)} className="flex-1 bg-green-500 text-white text-[12.5px] font-extrabold py-2.5 rounded-xl min-w-[130px]">Berangkat →</button> : null}
-          {!late && (s.tripStatus === 'scheduled' || !s.tripStatus) ? <button onClick={() => openModal(<DelayModal sid={s.id} mode="departure" />)} className="bg-amber-100 text-amber-800 text-[12.5px] font-extrabold px-4 py-2.5 rounded-xl"><Icon name="clock" className="w-4 h-4 inline" /> Delay</button> : null}
-          {!late && (s.tripStatus === 'scheduled' || !s.tripStatus) && bk.length ? <button onClick={() => openModal(<CancelTripModal sid={s.id} by="pengemudi" />)} className="bg-red-50 text-red-600 text-[12.5px] font-extrabold px-4 py-2.5 rounded-xl"><Icon name="calendar-x" className="w-4 h-4 inline" /> Batalkan</button> : null}
-          {!late && s.tripStatus === 'ontrip' ? <button onClick={finish} className="flex-1 bg-blue-600 text-white text-[12.5px] font-extrabold py-2.5 rounded-xl min-w-[130px]">Tiba di Tujuan</button> : null}
-          {s.tripStatus === 'ontrip' && s.status !== 'cancelled' ? <button onClick={() => openModal(<DelayModal sid={s.id} mode="ontrip" />)} className="bg-sky-100 text-sky-800 text-[12.5px] font-extrabold px-4 py-2.5 rounded-xl"><Icon name="clock" className="w-4 h-4 inline" /> Info Delay</button> : null}
-          {!late && (s.tripStatus === 'scheduled' || s.tripStatus === 'ontrip' || !s.tripStatus) && left > 0 ? <button onClick={() => openModal(<DriverBookingModal sid={s.id} />)} className="bg-[#0b2447] text-white text-[12.5px] font-extrabold px-4 py-2.5 rounded-xl"><Icon name="user-plus" className="w-4 h-4 inline" /> Pesan Tiket</button> : null}
-          {s.tripStatus !== 'missed' && s.status !== 'cancelled' ? <button onClick={() => openModal(<ScanModal sid={s.id} />)} className="bg-[#0b2447] text-white text-[12.5px] font-extrabold px-4 py-2.5 rounded-xl"><Icon name="scan-line" className="w-4 h-4 inline" /> Scan QR</button> : null}
+        <div className="flex flex-wrap gap-1.5 mt-3 items-center">
+          <button onClick={() => openModal(<ManifestModal sid={s.id} />)} className="badge bg-sky-100 text-sky-700 cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="users" className="w-3.5 h-3.5" /> Manifest ({bk.length})</button>
+          {late ? <button onClick={finish} className="badge bg-blue-600 text-white cursor-pointer !text-[12px] py-1.5 active:scale-95 transition">Tandai Tiba</button> : null}
+          {!late && (s.tripStatus === 'scheduled' || !s.tripStatus) ? <button onClick={() => tripUpdate(s.id, 'ontrip', toast, refresh)} className="badge bg-green-500 text-white cursor-pointer !text-[12px] py-1.5 active:scale-95 transition">Berangkat →</button> : null}
+          {!late && (s.tripStatus === 'scheduled' || !s.tripStatus) ? <button onClick={() => openModal(<DelayModal sid={s.id} mode="departure" />)} className="badge bg-amber-100 text-amber-700 cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="clock" className="w-3.5 h-3.5" /> Delay</button> : null}
+          {!late && (s.tripStatus === 'scheduled' || !s.tripStatus) && bk.length ? <button onClick={() => openModal(<CancelTripModal sid={s.id} by="pengemudi" />)} className="badge bg-red-100 text-red-600 cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="calendar-x" className="w-3.5 h-3.5" /> Batalkan</button> : null}
+          {!late && s.tripStatus === 'ontrip' ? <button onClick={finish} className="badge bg-blue-600 text-white cursor-pointer !text-[12px] py-1.5 active:scale-95 transition">Tiba di Tujuan</button> : null}
+          {s.tripStatus === 'ontrip' && s.status !== 'cancelled' ? <button onClick={() => openModal(<DelayModal sid={s.id} mode="ontrip" />)} className="badge bg-sky-100 text-sky-700 cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="clock" className="w-3.5 h-3.5" /> Info Delay</button> : null}
+          {!late && (s.tripStatus === 'scheduled' || s.tripStatus === 'ontrip' || !s.tripStatus) && left > 0 ? <button onClick={() => openModal(<DriverBookingModal sid={s.id} />)} className="badge bg-violet-100 text-violet-700 cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="user-plus" className="w-3.5 h-3.5" /> Pesan Tiket</button> : null}
+          {s.tripStatus !== 'missed' && s.status !== 'cancelled' ? <button onClick={() => openModal(<ScanModal sid={s.id} />)} className="badge bg-[#0b2447] text-white cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="scan-line" className="w-3.5 h-3.5" /> Scan QR</button> : null}
         </div>
       </div>
     );

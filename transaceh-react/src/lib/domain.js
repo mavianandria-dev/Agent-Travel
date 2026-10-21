@@ -1,7 +1,7 @@
 import { DB } from './db.js';
 import { uid, todayStr, SIM_TYPES, fmtRp } from './utils.js';
 import { estimateRoute } from './geo.js';
-import { PICKUP_ORIGIN } from './pickups.js';
+import { pickupOptions } from './pickups.js';
 export { uid, todayStr };
 
 /* Diekstrak dari index.html — pure domain logic, tanpa DOM. */
@@ -311,6 +311,40 @@ export function scheduleNeedsReview(s) {
     return scheduleIsPast(s, SCHEDULE_GRACE_HOURS) || (!delayActive && !!s.date && String(s.date) < todayStr(0));
   }
   return false;
+}
+
+/** Durasi rute ("±3 jam", "2,5 jam", "90 menit") → menit.
+ *  Fallback: estimasi geo antar kota, lalu 180 menit. */
+export function durMinutes(route) {
+  const parse = (txt) => {
+    if (!txt || txt === '-') return 0;
+    let m = /([\d.,]+)\s*jam/i.exec(txt);
+    if (m) return Math.round(parseFloat(m[1].replace(',', '.')) * 60);
+    m = /([\d.,]+)\s*menit/i.exec(txt);
+    if (m) return Math.round(parseFloat(m[1].replace(',', '.')));
+    return 0;
+  };
+  let mins = parse(route && route.duration);
+  if (!mins) {
+    const est = estimateRoute(route && route.from, route && route.to);
+    mins = parse(est && est.duration);
+  }
+  return mins || 180;
+}
+
+/** Progres perjalanan berbasis waktu: berangkat → estimasi tiba.
+ *  Info keterlambatan in-trip tidak ikut mengubah ETA (hanya informasi). */
+export function tripProgress(s, route, now = Date.now()) {
+  if (!s) return null;
+  let start = s.departedAt ? new Date(s.departedAt).getTime() : NaN;
+  if (!Number.isFinite(start)) start = new Date(`${s.date || ''}T${(s.time || '00:00')}:00`).getTime();
+  if (!Number.isFinite(start)) return null;
+  const totalMin = durMinutes(route);
+  const end = start + totalMin * 60000;
+  const arrived = s.tripStatus === 'arrived' || !!s.arrivedAt;
+  const raw = ((now - start) / (end - start)) * 100;
+  const pct = arrived ? 100 : Math.max(0, Math.min(99, Math.round(raw)));
+  return { pct, start, end, totalMin, arrived, remainMin: Math.max(0, Math.round((end - now) / 60000)) };
 }
 
 /** Tandai jadwal terlambat sebagai Terlewat dan tutup dari pencarian.
@@ -952,7 +986,7 @@ export function cancelScheduleByOperator(sid, reason, by = 'pengemudi') {
 /** Pembuatan tiket oleh pengemudi untuk penumpang yang tidak pakai aplikasi.
  *  Disimpan sebagai booking 'pending' (15 menit hold) dan harus dibayar online
  *  terlebih dahulu. Ledger baru dibuat setelah pembayaran berhasil. */
-export function createDriverBooking(sid, { passengers = [], seats = [], driverId = '', payMethod = 'QRIS', discount = 0 } = {}) {
+export function createDriverBooking(sid, { passengers = [], seats = [], driverId = '', payMethod = 'QRIS', discount = 0, pickup = '' } = {}) {
   const s = schedById(sid);
   if (!s) return { ok: false, msg: 'Jadwal tidak ditemukan' };
   if (s.status !== 'open') return { ok: false, msg: 'Jadwal tidak terbuka' };
@@ -975,7 +1009,7 @@ export function createDriverBooking(sid, { passengers = [], seats = [], driverId
   }
 
   const r = routeById(s.routeId);
-  const pickup = (PICKUP_ORIGIN[r?.from] || [])[0] || (r?.pickups || [])[0] || '-';
+  const pickupPoint = String(pickup || '').trim() || pickupOptions(r)[0] || '-';
   const now = new Date().toISOString();
   const fare = splitFare(s, seats.length, discount, 'driver');
   const total = Math.max(0, Number(fare.total) || 0);
@@ -987,7 +1021,7 @@ export function createDriverBooking(sid, { passengers = [], seats = [], driverId
       name: String(p.name || '').trim() || 'Penumpang',
       phone: String(p.phone || '').trim() || '-',
       seat: seats[i],
-      pickup,
+      pickup: pickupPoint,
       pickupCoords: '',
     })),
     seats,
@@ -1050,6 +1084,47 @@ export function confirmDriverBookingPayment(bookingId){
   notify(b.userEmail, 'Pembayaran berhasil — ' + b.code, 'E-tiket QR terbit. Tunjukkan ke pengemudi saat boarding.', 'WA+Email');
   audit('booking_driver_paid', b.code + ' • ' + fmtRp(b.total));
   return { ok: true, booking: b, fare };
+}
+
+/** Blokir / buka satu kursi pada jadwal (per jadwal, sementara).
+ *  Kursi yang sudah ada penumpangnya tidak boleh diblokir — harus lewat pembatalan booking. */
+export function toggleScheduleSeatBlock(sid, seat, { reason = '', by = 'agen' } = {}) {
+  const arr = DB.load('schedules', []);
+  const s = arr.find((x) => x.id === sid);
+  if (!s) return { ok: false, msg: 'Jadwal tidak ditemukan' };
+  const blocked = Array.isArray(s.blockedSeats) ? [...s.blockedSeats] : [];
+  const removing = blocked.includes(seat);
+
+  if (!removing) {
+    const why = String(reason || '').trim();
+    if (!why) return { ok: false, msg: 'Alasan blokir kursi wajib diisi' };
+    const tk = takenSeats(sid);
+    const occupied = new Set([...tk.paid, ...tk.hold, ...tk.inactive].filter((x) => !blocked.includes(x)));
+    if (occupied.has(seat)) return { ok: false, msg: 'Kursi ' + seat + ' sudah terisi/ditahan — batalkan booking-nya dulu' };
+    blocked.push(seat);
+  } else {
+    const i = blocked.indexOf(seat);
+    blocked.splice(i, 1);
+  }
+  s.blockedSeats = blocked;
+  s.seatBlockLog = [{ seat, action: removing ? 'buka' : 'blokir', reason: String(reason || '').trim() || null, by, at: new Date().toISOString() }, ...(Array.isArray(s.seatBlockLog) ? s.seatBlockLog : [])].slice(0, 30);
+  DB.save('schedules', arr);
+  audit('seat_block', sid + ' ' + seat + ' • ' + (removing ? 'buka' : 'blokir') + ' • ' + (String(reason || '').trim() || '-') + ' • ' + by);
+
+  if (!removing) {
+    DB.load('users', [])
+      .filter((u) => u.role === 'agen' && u.agencyId === s.agencyId)
+      .forEach((u) => notify(u.email, 'Kursi diblokir — ' + s.date + ' ' + s.time,
+        'Pengemudi memblokir kursi ' + seat + '. Alasan: ' + String(reason || '').trim() + '.', 'app'));
+    if (s.driverId) {
+      const dv = driverById(s.driverId);
+      if (dv && dv.userEmail) notify(dv.userEmail, 'Kursi diblokir di jadwal Anda', 'Kursi ' + seat + ' diblokir oleh agen. Alasan: ' + String(reason || '').trim() + '.', 'app');
+    }
+  } else if (s.driverId) {
+    const dv = driverById(s.driverId);
+    if (dv && dv.userEmail) notify(dv.userEmail, 'Kursi dibuka kembali', 'Kursi ' + seat + ' pada jadwal ' + s.date + ' ' + s.time + ' sudah bisa dipakai lagi.', 'app');
+  }
+  return { ok: true, blocked: !removing, seat };
 }
 
 /** Ubah status trip jadwal; dipakai pengemudi maupun admin. */
