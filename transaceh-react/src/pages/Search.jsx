@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { schedById, schedReady, takenSeats, seatsLeft, routeById, vehicleById, driverById, vehLayout, schedSeatCap, feeFor, audit, notify, vehName, splitFare, createLedger, routeBookable, isRouteSuspended } from '@/lib/domain.js';
-import { fmtRp, todayStr, uid } from '@/lib/utils.js';
+import { schedById, schedReady, takenSeats, seatsLeft, routeById, vehicleById, driverById, vehLayout, schedSeatCap, audit, notify, vehName, splitFare, createLedger, routeBookable, isRouteSuspended, canPayBooking, scheduleIsPast } from '@/lib/domain.js';
+import { fmtRp, todayStr, uid, fmtClock } from '@/lib/utils.js';
 import { Icon, CabinGrid, fmtDate } from '@/components/ui.jsx';
 import { PICKUP_ORIGIN, HOME_PICKUP } from '@/lib/pickups.js';
 import { saveCheckoutDraft, clearCheckoutDraft } from '@/lib/checkoutDraft.js';
@@ -42,6 +42,7 @@ function calcDiscount(voucher, scheduleId, seatCount) {
   if (!voucher) return 0;
   const v = DB.load('vouchers', []).find((x) => x.code === String(voucher).toUpperCase() && x.active);
   if (!v) return 0;
+  if (v.quota != null && Number(v.used || 0) >= Number(v.quota)) return 0;
   const s = schedById(scheduleId);
   if (!s) return 0;
   const sub = s.price * seatCount;
@@ -57,6 +58,15 @@ export function PaymentModal({ booking, onDone }) {
     const iv = setInterval(() => {
       const b = DB.load('bookings', []).find((x) => x.id === booking.id);
       if (!b) { clearInterval(iv); return; }
+      const s = schedById(b.scheduleId);
+      if (!s || s.status === 'cancelled' || ['ontrip', 'arrived', 'missed', 'cancelled'].includes(s.tripStatus)) {
+        clearInterval(iv);
+        closeModal();
+        toast('Pembayaran ditutup — jadwal sudah berjalan/dibatalkan.', 'err');
+        refresh();
+        go('tickets');
+        return;
+      }
       const ms = new Date(b.holdExpiry).getTime() - Date.now();
       if (ms <= 0) {
         clearInterval(iv);
@@ -82,16 +92,24 @@ export function PaymentModal({ booking, onDone }) {
     const arr = DB.load('bookings', []);
     const b = arr.find((x) => x.id === booking.id);
     if (!b) return;
+    const s = schedById(b.scheduleId);
+    if (!canPayBooking(b, s)) {
+      closeModal();
+      toast('Pembayaran ditutup — jadwal sudah berangkat/dibatalkan atau hold kedaluwarsa.', 'err');
+      refresh();
+      go('tickets');
+      return;
+    }
     b.status = 'paid';
     b.paidAt = new Date().toISOString();
-    b.fare = splitFare(schedById(b.scheduleId), (b.seats || []).length, b.discount || 0);
+    b.fare = splitFare(s, (b.seats || []).length, b.discount || 0);
     DB.save('bookings', arr);
     refresh();
     createLedger(b);
     refresh();
     const pays = DB.load('payments', []);
     const p = pays.find((x) => x.bookingId === booking.id);
-    if (p) { p.status = 'paid'; DB.save('payments', pays); refresh(); }
+    if (p) { p.status = 'paid'; p.fee = b.fare.fee; DB.save('payments', pays); refresh(); }
     audit('payment_paid', b.code + ' • ' + fmtRp(b.total));
     notify(b.userEmail, 'Pembayaran berhasil — ' + b.code, 'E-tiket QR terbit. Tunjukkan ke pengemudi saat boarding.', 'WA+Email');
     refresh();
@@ -108,6 +126,7 @@ export function PaymentModal({ booking, onDone }) {
       <div className="flex items-center justify-between"><h3 className="font-extrabold text-[17px] flex items-center gap-2"><Icon name="wallet" className="w-5 h-5 text-sky-600" />Pembayaran {booking.payMethod}</h3>
         <button onClick={() => { closeModal(); go('tickets'); }} className="text-slate-400 hover:text-slate-700"><Icon name="x" className="w-5 h-5" /></button></div>
       <div className="text-center bg-amber-50 border border-amber-200 rounded-2xl py-2.5 mt-3 font-extrabold text-amber-800 text-[14px]">Sisa waktu bayar: <span className="font-mono">{mm}:{ss}</span></div>
+      {_ps?.tripStatus === 'scheduled' && _ps.delayUntil && new Date(_ps.delayUntil).getTime() > Date.now() ? <div className="mt-2 bg-sky-50 border border-sky-200 rounded-2xl p-2.5 text-[12px] font-semibold text-sky-900">Jadwal delay {_ps.delayMinutes} menit • estimasi keberangkatan {fmtClock(_ps.delayUntil)}.</div> : null}
       {booking.payMethod === 'QRIS' ? (
         <>
           <img src={'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + booking.code + '-' + booking.total} className="w-48 h-48 mx-auto mt-4 rounded-2xl border-4 border-[#0b2447]" alt="QRIS" />
@@ -130,7 +149,7 @@ export function PaymentModal({ booking, onDone }) {
 
 export function openPayment(bid, openModal) {
   const b = DB.load('bookings', []).find((x) => x.id === bid);
-  if (!b) return;
+  if (!b || !canPayBooking(b, schedById(b.scheduleId))) return;
   const nb = { ...b, holdExpiry: new Date(Date.now() + 15 * 60 * 1000).toISOString() };
   DB.save('bookings', DB.load('bookings', []).map((x) => (x.id === bid ? nb : x)));
   openModal(<PaymentModal booking={nb} />);
@@ -141,7 +160,9 @@ export default function Search() {
   void tick;
 
   const routes = DB.load('routes', []).filter(routeBookable);
-  const stepSchedules = () => DB.load('schedules', []).filter((x) => x.routeId === bw.routeId && x.date === bw.date && x.status === 'open' && !isRouteSuspended(routeById(x.routeId), x.agencyId)).sort((a, b) => a.time.localeCompare(b.time));
+  const stepSchedules = () => DB.load('schedules', [])
+    .filter((x) => x.routeId === bw.routeId && x.date === bw.date && x.status === 'open' && !scheduleIsPast(x, 0) && !['ontrip', 'arrived', 'missed', 'cancelled'].includes(x.tripStatus) && !isRouteSuspended(routeById(x.routeId), x.agencyId))
+    .sort((a, b) => a.time.localeCompare(b.time));
 
 
   const wizNext = () => {
@@ -150,7 +171,7 @@ export default function Search() {
     if (bw.step === 3 && bw.scheduleId && !schedReady(schedById(bw.scheduleId))) {
       setBw({ ...bw, scheduleId: null });
       refresh();
-      return toast('Jadwal tidak tersedia (armada maintenance / pengemudi nonaktif / ditutup) — pilih yang lain', 'err');
+      return toast('Jadwal tidak tersedia (sudah lewat / armada maintenance / pengemudi nonaktif / ditutup) — pilih yang lain', 'err');
     }
     if (bw.step === 4) {
       if (!bw.seats.length) return toast('Pilih minimal 1 kursi', 'warn');
@@ -225,7 +246,12 @@ export default function Search() {
       return;
     }
     const s = schedById(bw.scheduleId);
-    if (!s) return;
+    if (!s || !schedReady(s)) {
+      toast('Jadwal sudah tidak tersedia — pilih jadwal lain', 'err');
+      setBw({ ...bw, step: 3, scheduleId: null });
+      refresh();
+      return;
+    }
     const tk = takenSeats(s.id);
     const clash = bw.seats.find((x) => tk.paid.includes(x) || tk.hold.includes(x));
     if (clash) {
@@ -244,6 +270,7 @@ export default function Search() {
       passengers: bw.passengers.map((p) => ({ ...p, pickup: pickupLabel, pickupCoords: isHome ? bw.pickupCoords.trim() : '' })),
       pickupCoords: isHome ? bw.pickupCoords.trim() : '',
       seats: [...bw.seats], subtotal: sub, discount, total, status: 'pending', payMethod,
+      voucher: bw.voucher ? String(bw.voucher).toUpperCase() : '',
       createdAt: new Date().toISOString(), paidAt: null, holdExpiry: new Date(Date.now() + 15 * 60 * 1000).toISOString(), tripStatus: 'scheduled',
     };
     const arr = DB.load('bookings', []);
@@ -251,11 +278,11 @@ export default function Search() {
     DB.save('bookings', arr);
     refresh();
     const pays = DB.load('payments', []);
-    pays.unshift({ id: uid('PAY'), bookingId: booking.id, amount: total, method: payMethod, status: 'pending', time: new Date().toISOString(), fee: feeFor(s.agencyId, total) });
+    pays.unshift({ id: uid('PAY'), bookingId: booking.id, amount: total, method: payMethod, status: 'pending', time: new Date().toISOString(), fee: splitFare(s, bw.seats.length, discount).fee });
     DB.save('payments', pays);
     refresh();
     const vs = DB.load('vouchers', []);
-    const v = vs.find((x) => x.code === bw.voucher && x.active);
+    const v = vs.find((x) => x.code === String(bw.voucher || '').toUpperCase() && x.active);
     if (v && discount > 0) { v.used = (v.used || 0) + 1; DB.save('vouchers', vs); refresh(); }
     audit('booking_create', code + ' • ' + user.email + ' • ' + bw.seats.join(','));
     notify(user.email, 'Booking dibuat — ' + code, 'Segera bayar ' + fmtRp(total) + ' sebelum hold 15 menit habis.', 'WA');
@@ -266,6 +293,11 @@ export default function Search() {
   const repay = (bid) => {
     const b = DB.load('bookings', []).find((x) => x.id === bid);
     if (!b) return;
+    if (!canPayBooking(b, schedById(b.scheduleId))) {
+      toast('Pembayaran ditutup — jadwal sudah berjalan/dibatalkan atau hold kedaluwarsa.', 'err');
+      refresh();
+      return;
+    }
     const nb = { ...b, holdExpiry: new Date(Date.now() + 15 * 60 * 1000).toISOString() };
     DB.save('bookings', DB.load('bookings', []).map((x) => (x.id === bid ? nb : x)));
     refresh();
@@ -338,7 +370,7 @@ export default function Search() {
           return (
             <div key={s.id} onClick={() => { if (ready) setBw({ ...bw, scheduleId: s.id }); }} className={(ready ? 'cursor-pointer card-hover active:scale-[.99]' : 'opacity-70') + ' rounded-2xl border-2 p-3 sm:p-3.5 flex flex-col xs:flex-row sm:flex-row gap-3 transition ' + (sel && ready ? 'border-sky-500 shadow-lg bg-sky-50/50' : 'border-slate-100 hover:border-sky-200 bg-white')}>
               <img src={v.photo} onError={(e) => { e.currentTarget.src = 'https://picsum.photos/seed/' + v.id + '/400/250'; }} className="w-full h-36 xs:w-28 xs:h-24 sm:w-40 sm:h-28 object-cover rounded-2xl shrink-0" loading="lazy" alt={vehName(v)} />
-              <div className="flex-1 min-w-0"><div className="flex items-center gap-2 flex-wrap"><span className="font-extrabold text-[15px]">{vehName(v)}</span><span className="badge bg-slate-100 text-slate-600">{v.plate}</span>{routeById(s.routeId)?.homePickup !== false ? <span className="badge bg-green-100 text-green-700">Jemput rumah</span> : null}{!ready ? <span className="badge bg-amber-100 text-amber-700">{why}</span> : left <= 2 && left > 0 ? <span className="badge bg-red-100 text-red-700">Sisa {left}</span> : null}{ready && left === 0 ? <span className="badge bg-red-500 text-white">PENUH</span> : null}</div>
+              <div className="flex-1 min-w-0"><div className="flex items-center gap-2 flex-wrap"><span className="font-extrabold text-[15px]">{vehName(v)}</span><span className="badge bg-slate-100 text-slate-600">{v.plate}</span>{routeById(s.routeId)?.homePickup !== false ? <span className="badge bg-green-100 text-green-700">Jemput rumah</span> : null}{s.tripStatus === 'scheduled' && s.delayUntil && new Date(s.delayUntil).getTime() > Date.now() ? <span className="badge bg-amber-100 text-amber-700">Delay {s.delayMinutes} mnt • {fmtClock(s.delayUntil)}</span> : null}{!ready ? <span className="badge bg-amber-100 text-amber-700">{why}</span> : left <= 2 && left > 0 ? <span className="badge bg-red-100 text-red-700">Sisa {left}</span> : null}{ready && left === 0 ? <span className="badge bg-red-500 text-white">PENUH</span> : null}</div>
                 <div className="text-[12.5px] font-bold text-sky-700 mt-1 flex items-center gap-2"><Icon name="clock" className="w-3.5 h-3.5" />Berangkat {s.time} WIB • <Icon name="user" className="w-3.5 h-3.5" />{dr.name} ★{dr.rating}</div>
                 <div className="flex flex-wrap gap-1.5 mt-2">{(v.facilities || []).map((f) => (<span key={f} className="badge bg-slate-100 text-slate-600 !font-semibold"><Icon name="check" className="w-3 h-3" />{f}</span>))}</div>
                 <div className="flex items-center justify-between mt-2.5"><div className="font-extrabold text-[17px] text-[#0b2447]">{fmtRp(s.price)}<span className="text-[11px] font-semibold text-slate-400">/kursi</span></div>
@@ -423,6 +455,7 @@ export default function Search() {
           <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200">
             <div className="font-extrabold text-[14px]">{r.from} → {r.to}</div>
             <div className="text-[12.5px] font-semibold text-slate-600 mt-1">{fmtDate(s.date)} • {s.time} WIB • {vehName(v)} ({v.plate})</div>
+            {s.tripStatus === 'scheduled' && s.delayUntil && new Date(s.delayUntil).getTime() > Date.now() ? <div className="text-[12px] font-extrabold text-amber-700 mt-1">Delay {s.delayMinutes} menit • estimasi {fmtClock(s.delayUntil)}</div> : null}
             <div className="text-[12.5px] font-semibold text-slate-600">Kursi: <b>{bw.seats.join(', ')}</b> • Jemput: <b>{bw.pickup === HOME_PICKUP ? 'Rumah: ' + bw.pickupAddr : bw.pickup || ((PICKUP_ORIGIN[r.from] || [])[0] || '')}</b>{bw.pickup === HOME_PICKUP && bw.pickupCoords ? <b> ({bw.pickupCoords})</b> : null}</div>
             <div className="mt-2 space-y-1 text-[13px] font-semibold"><div className="flex justify-between"><span>Subtotal ({bw.seats.length} kursi)</span><span>{fmtRp(sub)}</span></div>
               <div className="flex justify-between text-green-700"><span>Diskon voucher</span><span>− {fmtRp(discount)}</span></div>

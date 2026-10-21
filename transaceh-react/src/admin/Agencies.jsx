@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { agencyById, audit, kycSummary, kycDocGroups } from '@/lib/domain.js';
+import { agencyById, audit, kycSummary, kycDocGroups, platformFeeOf } from '@/lib/domain.js';
 import { formatBytes } from '@/lib/upload.js';
 import { fmtRp, uid } from '@/lib/utils.js';
 import { Icon } from '@/components/ui.jsx';
@@ -21,32 +21,6 @@ export function agSetStatus(id, st, toast, refresh) {
   audit('agency_status', id + ' → ' + st);
   toast('Agen ' + st);
   refresh();
-}
-
-function FeeModal({ id }) {
-  const { toast, closeModal, refresh } = useApp();
-  const a = agencyById(id);
-  const [feeT, setFeeT] = useState(a.feeType);
-  const [feeV, setFeeV] = useState(a.feeValue);
-  const saveFee = () => {
-    const arr = DB.load('agencies', []);
-    const x = arr.find((y) => y.id === id);
-    x.feeType = feeT; x.feeValue = Number(feeV) || 0;
-    DB.save('agencies', arr);
-    refresh();
-    audit('fee_update', id + ' ' + x.feeType + ' ' + x.feeValue);
-    closeModal();
-    toast('Fee agen diperbarui');
-    refresh();
-  };
-  return (
-    <div className="p-6"><h3 className="font-extrabold">Fee Platform - {a.name}</h3>
-      <div className="grid grid-cols-2 gap-2.5 mt-3">
-        <select value={feeT} onChange={(e) => setFeeT(e.target.value)} className="text-[13px] font-bold border-2 border-slate-200 rounded-xl px-3 py-2.5"><option value="percent">Persen %</option><option value="flat">Flat Rp</option></select>
-        <input type="number" value={feeV} onChange={(e) => setFeeV(e.target.value)} className="text-[13px] border-2 border-slate-200 rounded-xl px-3 py-2.5" />
-      </div>
-      <button onClick={saveFee} className="mt-3 w-full bg-violet-600 text-white font-extrabold py-3 rounded-2xl">Simpan Fee</button></div>
-  );
 }
 
 function AgFormModal() {
@@ -196,6 +170,7 @@ function AgencyGroup({ title, count, dotClass, badgeClass, empty, children }) {
 export function Agencies() {
   const { toast, refresh, openModal } = useApp();
   const ags = DB.load('agencies', []);
+  const gFee = platformFeeOf();
   const pendingAgs = ags.filter((a) => a.status === 'pending');
   const activeAgs = ags.filter((a) => a.status === 'active');
   const suspendedAgs = ags.filter((a) => a.status === 'suspended');
@@ -227,7 +202,7 @@ export function Agencies() {
         className="border-2 border-slate-100 rounded-3xl p-4 flex gap-3 cursor-pointer transition hover:border-sky-200 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-300">
         <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-sky-500 to-blue-700 text-white font-extrabold text-xl flex items-center justify-center shrink-0">{(a.name || '?')[0]}</div>
         <div className="flex-1 min-w-0"><div className="font-extrabold text-[14px]">{a.name}</div><div className="text-[12px] text-slate-500 font-medium">{a.address}</div>
-          <div className="text-[12px] font-bold mt-0.5">Fee: {a.feeType === 'flat' ? fmtRp(a.feeValue) : a.feeValue + '%'} • ★{a.rating}</div>
+          <div className="text-[12px] font-bold mt-0.5">Fee platform: {gFee.type === 'flat' ? fmtRp(gFee.value) : gFee.value + '%'} • ★{a.rating}</div>
           <div className="flex gap-1.5 mt-2 flex-wrap">
             <span className={'badge ' + st.cls}>{st.label}</span>
             {a.status === 'pending' ? <>
@@ -250,7 +225,7 @@ export function Agencies() {
               <button onClick={() => agSetStatus(a.id, 'suspended', toast, refresh)} className="badge bg-red-100 text-red-600 cursor-pointer">Suspend</button>
             </> : null}
             {a.status === 'suspended' ? <button onClick={() => agSetStatus(a.id, 'active', toast, refresh)} className="badge bg-sky-100 text-sky-700 cursor-pointer">Aktifkan</button> : null}
-            <button onClick={() => openModal(<FeeModal id={a.id} />)} className="badge bg-violet-100 text-violet-700 cursor-pointer ml-auto">Fee</button>
+            <span className="badge bg-violet-100 text-violet-700 ml-auto">Fee platform: {gFee.type === 'flat' ? fmtRp(gFee.value) : gFee.value + '%'}</span>
           </div></div>
       </div>
     );

@@ -37,7 +37,7 @@ function ManifestBody({ sid }) {
       <table className="data w-full mt-3"><thead><tr><th>#</th><th>Kursi</th><th>Nama</th><th>HP</th><th>Jemput</th><th>Status</th></tr></thead><tbody>
         {[...order, ...bookedExtra].map((st) => {
           const b = bk.find((x) => (x.seats || []).includes(st));
-          const p = b?.passengers.find((x) => x.seat === st);
+          const p = (b?.passengers || []).find((x) => x.seat === st);
           const vehOff = offSet.has(st);
           const blocked = (s.blockedSeats || []).includes(st);
           return (

@@ -1,6 +1,6 @@
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { agencyOf, routeById, schedById } from '@/lib/domain.js';
+import { agencyOf, routeById, schedById, platformFeeOf } from '@/lib/domain.js';
 import { fmtRp } from '@/lib/utils.js';
 import { StatCard, Icon } from '@/components/ui.jsx';
 
@@ -20,6 +20,7 @@ export default function Finance({ ag, st }) {
   const tiketTot = active.reduce((a, e) => a + (Number(e.ticket) || 0), 0);
   const routes = DB.load('routes', []);
   const bookings = DB.load('bookings', []);
+  const gFee = platformFeeOf();
   const byId = (id) => bookings.find((b) => b.id === id);
 
   const exportCSV = () => {
@@ -47,7 +48,7 @@ export default function Finance({ ag, st }) {
         <StatCard icon="hand-coins" label="Jasa Terkumpul" val={fmtRp(jasaTerkumpul)} sub={active.length + ' transaksi jasa'} color="bg-gradient-to-br from-sky-400 to-blue-600" />
         <StatCard icon="banknote" label="Sudah Dicairkan" val={fmtRp(sudahDicairkan)} sub="status dicairkan" color="bg-gradient-to-br from-green-400 to-emerald-600" />
         <StatCard icon="clock" label="Menunggu Cair" val={fmtRp(menungguCair)} sub="ditahan + layak" color="bg-gradient-to-br from-amber-400 to-orange-500" />
-        <StatCard icon="percent" label={'Fee Platform (' + (agency.feeType === 'flat' ? fmtRp(agency.feeValue) : agency.feeValue + '%') + ')'} val={fmtRp(feeTot)} sub={'info • tiket ' + fmtRp(tiketTot)} color="bg-gradient-to-br from-red-400 to-rose-600" />
+        <StatCard icon="percent" label={'Fee Platform (' + (gFee.type === 'flat' ? fmtRp(gFee.value) : gFee.value + '%') + ')'} val={fmtRp(feeTot)} sub={'info • tiket ' + fmtRp(tiketTot)} color="bg-gradient-to-br from-red-400 to-rose-600" />
       </div>
       <div className="bg-white rounded-3xl shadow-card p-5 mt-4"><div className="flex items-center gap-2"><h3 className="font-extrabold text-[15px]">Jasa per Rute</h3><div className="flex-1"></div>
         <button onClick={exportCSV} className="bg-green-500 text-white text-[12px] font-extrabold px-4 py-2 rounded-xl">Export Excel</button>

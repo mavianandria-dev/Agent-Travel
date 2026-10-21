@@ -94,7 +94,7 @@ export default function Refunds() {
           <div className="bg-sky-50 border border-sky-100 rounded-2xl px-3 py-2.5 text-sky-900"><b>Pelanggan / agen:</b> persentase tiket sesuai tabel di bawah. Booking belum dibayar = Rp0.</div>
           <div className="bg-amber-50 border border-amber-100 rounded-2xl px-3 py-2.5 text-amber-900"><b>Sopir / agen membatalkan sepihak:</b> refund 100% total pembayaran, wajib alasan, sebelum berangkat.</div>
         </div>
-        <p className="text-[11.5px] text-slate-400 font-medium mt-2">Tier 0 hari selalu ditambahkan otomatis sebagai batas bawah. Transaksi yang sudah diproses tidak berubah.</p>
+        <p className="text-[11.5px] text-slate-400 font-medium mt-2">Tier 0 hari selalu ditambahkan otomatis sebagai batas bawah. Kebijakan baru berlaku untuk pembatalan berikutnya.</p>
       </div>
 
       <div className="grid lg:grid-cols-2 gap-4">

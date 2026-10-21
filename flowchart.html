@@ -114,7 +114,8 @@
     <div>
       <h1>Alur Aplikasi TransAceh — Flowchart</h1>
       <p>Dokumentasi alur kerja platform: pendaftaran &amp; verifikasi → armada &amp; jadwal → pemesanan penumpang → hari-H &amp; arus uang.</p>
-      <div class="meta">Disusun dari kode aplikasi <b>transaceh-react</b> (simulasi localStorage) · 18 Oktober 2026 · opens offline, tanpa internet</div>
+      <div class="meta">Disusun dari kode aplikasi <b>transaceh-react</b> (simulasi localStorage) · <b>Revisi 2 — 21 Oktober 2026</b> · opens offline, tanpa internet</div>
+      <div class="meta">Revisi 2 menambah: <b>fee platform global</b> (bukan per agen) · <b>tiket online oleh pengemudi</b> · <b>delay &amp; jadwal terlewat</b> · <b>aturan refund saat bus tidak berangkat</b>.</div>
     </div>
     <div class="sp"></div>
     <button class="btnprint noprint" onclick="window.print()">🖨️ Cetak / Simpan PDF</button>
@@ -208,7 +209,9 @@
       <li class="em"><b>Persetujuan agen:</b> akun agen berstatus <i>pending</i> atau travel-nya <i>suspended</i> tidak bisa login — muncul pesan "menunggu persetujuan super admin".</li>
       <li class="am"><b>Akun Pengemudi</b> dibuat oleh Agen di halaman <i>Pengemudi</i>. Status driver menentukan login: <b>aktif</b> = boleh masuk halaman Tugas, selain itu akunnya dinonaktifkan.</li>
       <li class="sk"><b>Setelah login</b> tiap peran langsung diarahkan ke berandanya: Pelanggan → Beranda, Agen → Panel Agen, Pengemudi → Tugas, Superadmin → Panel Admin.</li>
-      <li><b>Superadmin</b> juga bisa mendaftarkan agen manual (halaman Agen) dengan status awal <i>pending</i>, lalu menyetujui/menolak/suspend, serta mengatur fee platform per agen.</li>
+      <li class="vi"><b>Superadmin</b> juga bisa mendaftarkan agen manual (halaman Agen) dengan status awal <i>pending</i>, lalu menyetujui/menolak/suspend.</li>
+      <li class="am"><b>Fee platform sekarang GLOBAL</b> — diatur sekali di <i>Admin → Master</i> (Persen % atau Flat Rp), berlaku untuk semua agen. Tombol fee per agen sudah dihapus.</li>
+      <li class="em"><b>KYC Agen:</b> sebelum disetujui, agen wajib melengkapi data diri, dokumen, dan S&amp;K. Identitas, alamat, rekening, dan data legal mengikuti KYC (tidak bisa diedit); brand tetap bisa diubah.</li>
     </ul>
   </section>
 
@@ -373,6 +376,7 @@
       <li class="am"><b>Bentrok ①:</b> armada atau pengemudi yang sama punya jadwal lain kurang dari 4 jam pada tanggal yang sama.</li>
       <li class="am"><b>Bentrok ② (jam kembar):</b> di koridor yang sama, jam keberangkatan harus berbeda antar rute milik agen yang sama — inilah pembeda rute kembar agar tidak membingungkan penumpang.</li>
       <li class="sl"><b>Tanggal yang bentrok otomatis dilewati</b> (tidak menggagalkan seluruh penyimpanan) dan muncul toast berisi tanggal mana yang terlewat.</li>
+      <li class="em"><b>Dua tab di halaman Jadwal:</b> <b>Akan Datang</b> (bisa diubah) dan <b>Riwayat</b> (read-only). Jadwal yang kosong tetap <b>ditampilkan di Riwayat</b> dengan label “Tidak ada pemesan” — sebagai bahan penilaian agen, tidak ada yang disembunyikan.</li>
     </ul>
   </section>
 
@@ -477,7 +481,9 @@
       <li class="sk"><b>Kursi mengikuti denah kabin</b> armada yang dipilih (kapasitas = jumlah kursi aktif kendaraan), dan satu kursi hanya untuk satu orang.</li>
       <li class="sl"><b>Penguncian 15 menit:</b> begitu menekan Bayar, kursi di-<i>hold</i> selama 15 menit; belum dibayar → kursi dilepas dan waiting list diberi tahu.</li>
       <li class="em"><b>Transfer bank</b> tidak instan: status <i>pending</i> sampai agen memverifikasi manual di halaman Pesanan (QRIS &amp; Virtual Account langsung lunas).</li>
-      <li class="rd"><b>Kebijakan refund</b> mengikuti travel masing-masing (mis. ≥72 jam 100%, ≥24 jam 50%, &lt;24 jam 0%) dan dana di ledger dibatalkan (<i>void</i>).</li>
+      <li class="rd"><b>Kebijakan refund</b> diatur Superadmin per agen dalam satuan <b>hari</b> (mis. ≥3 hari 100%, ≥1 hari 50%, &lt;1 hari 0%) dan hanya komponen <b>tiket</b> yang kembali — jasa agen &amp; fee platform hangus.</li>
+      <li class="am"><b>Booking yang belum dibayar = Rp0 refund</b> (status Menunggu). Pembatalan hanya bisa dilakukan dari halaman <b>Detail / E-Tiket</b>; tombol tetap terlihat tetapi nonaktif dengan alasan bila jadwal sudah berangkat/selesai/terlewat.</li>
+      <li class="vi"><b>Tidak ada refund otomatis.</b> Nominal refund masuk antrean admin: <b>Menunggu → Diproses → Selesai</b>, dan baru ditandai lunas setelah dana benar-benar dikirim.</li>
     </ul>
   </section>
 
@@ -525,8 +531,8 @@
 
       <g class="n sl"><rect x="660" y="150" width="250" height="62" rx="14"/>
         <circle class="nb sl" cx="680" cy="171" r="10"/><text class="num" x="680" y="175">7</text>
-        <text class="t1" x="698" y="176">H-1: kirim notif</text>
-        <text class="t2" x="678" y="199">pengingat berangkat</text></g>
+        <text class="t1" x="698" y="176">H-1: pengingat</text>
+        <text class="t2" x="678" y="199">belum ada di kode (rencana)</text></g>
       <g class="n sl"><rect x="660" y="280" width="250" height="76" rx="14"/>
         <circle class="nb sl" cx="680" cy="301" r="10"/><text class="num" x="680" y="305">8</text>
         <text class="t1" x="698" y="306">Booking lunas → DITAHAN</text>
@@ -574,9 +580,203 @@
     </svg>
     <ul class="notes">
       <li class="am"><b>Notifikasi otomatis</b> ke penumpang saat status berubah: "armada berangkat" dan "sudah tiba".</li>
-      <li class="sl"><b>Pembagian tarif</b> total tiket: <b>tiket Pengemudi</b> + <b>jasa Agen</b> (ditempatkan Superadmin per agen, per kursi) + <b>fee platform</b> (persen atau nominal).</li>
-      <li class="sl"><b>Status dana:</b> <i>ditahan</i> (saat bayar) → <i>layak</i> (perjalanan tiba) → <i>dicairkan</i> (Superadmin, minimal kliring 24 jam).</li>
+      <li class="sl"><b>Pembagian tarif</b> total tiket: <b>tiket Pengemudi</b> + <b>jasa Agen</b> (ditempatkan Superadmin per agen, per kursi) + <b>fee platform GLOBAL</b> (satu angka, Persen % atau Flat Rp, diatur di Admin → Master).</li>
+      <li class="sl"><b>Status dana:</b> <i>ditahan</i> (saat bayar) → <i>layak</i> (perjalanan tiba) → <i>dicairkan</i> (Superadmin, minimal kliring 24 jam). Pembatalan/refund membuat pos dana <i>void</i>.</li>
+      <li class="am"><b>Tiket yang dibuat pengemudi</b> (penumpang yang tidak memakai aplikasi) memakai <b>2 potong saja</b>: tiket pengemudi + fee platform. <b>Jasa agen = Rp0</b>, dan booking ditandai “Pengemudi” di daftar booking agen.</li>
+      <li class="rd"><b>Bus tidak berangkat = refund 100% TOTAL</b> (tiket + jasa agen + fee platform) — porcentasenya ditentukan admin karena kegagalan ada di operator, bukan pelanggan. Bandingkan dengan <b>pembatalan oleh pelanggan</b>: &lt;1 hari sebelum berangkat = 0%.</li>
       <li class="vi"><b>Agen &amp; Pengemudi</b> hanya melihat pos dananya (halaman Keuangan / Dompet) — pencairan tetap dilakukan Superadmin di halaman Settlement.</li>
+      <li class="am"><b>Belum ada pengingat otomatis H-1</b> di kode: notifikasi dikirim saat status Berangkat, Tiba, Delay, Terlewat, dan saat refund diproses.</li>
+    </ul>
+  </section>
+
+  <!-- ============ PANEL 6: DELAY, TERLEWAT, REFUND ============ -->
+  <section class="panel">
+    <h2><span class="num">6</span> Delay, Jadwal Terlewat &amp; Penyelesaian (Revisi 2)</h2>
+    <p class="desc">Bagian baru: delay menggeser estimasi keberangkatan, jadwal yang lewat tidak otomatis direfund, dan uang yang tidak berangkat dikembalikan penuh.</p>
+    <svg viewBox="0 0 1240 780" role="img" aria-label="Diagram alur delay, jadwal terlewat, dan penyelesaian">
+      <rect class="lane am" x="20" y="70" width="290" height="680" rx="20"/>
+      <rect class="lane sk" x="330" y="70" width="290" height="680" rx="20"/>
+      <rect class="lane sl" x="640" y="70" width="290" height="680" rx="20"/>
+      <rect class="lane vi" x="950" y="70" width="290" height="680" rx="20"/>
+      <rect class="chip am" x="34" y="40" width="160" height="26" rx="9"/><text class="ct" x="114" y="58">1 · Pengemudi</text>
+      <rect class="chip sk" x="344" y="40" width="150" height="26" rx="9"/><text class="ct" x="419" y="58">2 · Pelanggan</text>
+      <rect class="chip sl" x="654" y="40" width="160" height="26" rx="9"/><text class="ct" x="734" y="58">Sistem (otomatis)</text>
+      <rect class="chip vi" x="964" y="40" width="180" height="26" rx="9"/><text class="ct" x="1054" y="58">3 · Superadmin</text>
+
+      <g class="n am"><rect x="40" y="105" width="250" height="76" rx="14"/>
+        <circle class="nb am" cx="60" cy="126" r="10"/><text class="num" x="60" y="130">1</text>
+        <text class="t1" x="78" y="131">Delay Keberangkatan</text>
+        <text class="t2" x="58" y="154">durasi + alasan wajib</text>
+        <text class="t3" x="58" y="171">maks 180 menit</text></g>
+      <g class="n am"><rect x="40" y="225" width="250" height="76" rx="14"/>
+        <circle class="nb am" cx="60" cy="246" r="10"/><text class="num" x="60" y="250">2</text>
+        <text class="t1" x="78" y="251">Info Delay (di jalan)</text>
+        <text class="t2" x="58" y="274">hanya informasi</text>
+        <text class="t3" x="58" y="291">estimasi tiba tidak berubah</text></g>
+      <g class="n am"><rect x="40" y="345" width="250" height="62" rx="14"/>
+        <circle class="nb am" cx="60" cy="366" r="10"/><text class="num" x="60" y="370">3</text>
+        <text class="t1" x="78" y="371">Tandai Tiba</text>
+        <text class="t2" x="58" y="394">perjalanan benar-benar terjadi</text></g>
+      <g class="n am"><rect x="40" y="455" width="250" height="76" rx="14"/>
+        <circle class="nb am" cx="60" cy="476" r="10"/><text class="num" x="60" y="480">4</text>
+        <text class="t1" x="78" y="481">Batalkan Jadwal</text>
+        <text class="t2" x="58" y="504">alasan wajib</text>
+        <text class="t3" x="58" y="521">refund 100% total</text></g>
+
+      <g class="n sk"><rect x="350" y="105" width="250" height="76" rx="14"/>
+        <circle class="nb sk" cx="370" cy="126" r="10"/><text class="num" x="370" y="130">5</text>
+        <text class="t1" x="388" y="131">Notif: jadwal delay</text>
+        <text class="t2" x="368" y="154">estimasi baru</text>
+        <text class="t3" x="368" y="171">batas bayar ikut geser</text></g>
+      <g class="n sk"><rect x="350" y="225" width="250" height="96" rx="14"/>
+        <circle class="nb sk" cx="370" cy="246" r="10"/><text class="num" x="370" y="250">6</text>
+        <text class="t1" x="388" y="251">Notif: terlewat / refund</text>
+        <text class="t2" x="368" y="274">diberi tahu begitu jadwal lewat</text>
+        <text class="t3" x="368" y="291">nominal refund muncul</text>
+        <text class="t3" x="368" y="308">di antrean admin</text></g>
+
+      <g class="n sl"><rect x="660" y="105" width="250" height="76" rx="14"/>
+        <circle class="nb sl" cx="680" cy="126" r="10"/><text class="num" x="680" y="130">7</text>
+        <text class="t1" x="698" y="131">Waktu Efektif Bergeser</text>
+        <text class="t2" x="678" y="154">batas terlewat ikut geser</text>
+        <text class="t3" x="678" y="171">jadwal tetap bisa dibayar</text></g>
+      <g class="n sl"><rect x="660" y="225" width="250" height="96" rx="14"/>
+        <circle class="nb sl" cx="680" cy="246" r="10"/><text class="num" x="680" y="250">8</text>
+        <text class="t1" x="698" y="251">Lewat + 3 jam → Terlewat</text>
+        <text class="t2" x="678" y="274">booking lunas diberi tahu</text>
+        <text class="t3" x="678" y="291">tidak ada refund otomatis</text>
+        <text class="t3" x="678" y="308">masuk antrean penyelesaian</text></g>
+      <g class="n sl"><rect x="660" y="345" width="250" height="76" rx="14"/>
+        <circle class="nb sl" cx="680" cy="366" r="10"/><text class="num" x="680" y="370">9</text>
+        <text class="t1" x="698" y="371">Jadwal Kosong → Tutup</text>
+        <text class="t2" x="678" y="394">tanpa pemesan: auto-tutup</text>
+        <text class="t3" x="678" y="411">tidak masuk antrean</text></g>
+      <g class="n sl"><rect x="660" y="455" width="250" height="76" rx="14"/>
+        <circle class="nb sl" cx="680" cy="476" r="10"/><text class="num" x="680" y="480">10</text>
+        <text class="t1" x="698" y="481">Pos Dana Diperbarui</text>
+        <text class="t2" x="678" y="504">tiba → layak • batal → void</text>
+        <text class="t3" x="678" y="521">tidak ada dana menggantung</text></g>
+
+      <g class="n vi"><rect x="970" y="225" width="250" height="96" rx="14"/>
+        <circle class="nb vi" cx="990" cy="246" r="10"/><text class="num" x="990" y="250">11</text>
+        <text class="t1" x="1008" y="251">Antrean Penyelesaian</text>
+        <text class="t2" x="988" y="274">Tiba (tanpa refund)</text>
+        <text class="t3" x="988" y="291">atau Tidak Berangkat</text>
+        <text class="t3" x="988" y="308">(persentase refund)</text></g>
+      <g class="n vi"><rect x="970" y="345" width="250" height="96" rx="14"/>
+        <circle class="nb vi" cx="990" cy="366" r="10"/><text class="num" x="990" y="370">12</text>
+        <text class="t1" x="1008" y="371">Refund % dari TOTAL</text>
+        <text class="t2" x="988" y="394">tiket + jasa agen + fee</text>
+        <text class="t3" x="988" y="411">manual: Menunggu →</text>
+        <text class="t3" x="988" y="428">Diproses → Selesai</text></g>
+      <g class="n vi"><rect x="970" y="475" width="250" height="62" rx="14"/>
+        <circle class="nb vi" cx="990" cy="496" r="10"/><text class="num" x="990" y="500">13</text>
+        <text class="t1" x="1008" y="501">Dana Dikirim</text>
+        <text class="t2" x="988" y="524">refund ditandai selesai</text></g>
+
+      <path class="e am" d="M165 181 V225" marker-end="url(#ar-am)"/>
+      <path class="e am" d="M165 301 V345" marker-end="url(#ar-am)"/>
+      <path class="e am" d="M165 407 V455" marker-end="url(#ar-am)"/>
+      <path class="e sk" d="M290 143 H350" marker-end="url(#ar-sk)"/>
+      <path class="e sl" d="M475 181 V225" marker-end="url(#ar)"/>
+      <path class="e sk" d="M290 273 H350" marker-end="url(#ar-sk)"/>
+      <path class="e sl" d="M600 273 H660" marker-end="url(#ar)"/>
+      <path class="e sl" d="M785 321 V345" marker-end="url(#ar)"/>
+      <path class="e vi" d="M910 273 H970" marker-end="url(#ar-vi)"/>
+      <path class="e vi" d="M1095 321 V345" marker-end="url(#ar-vi)"/>
+      <path class="e vi" d="M1095 441 V475" marker-end="url(#ar-vi)"/>
+      <path class="e sl" d="M600 493 H660" marker-end="url(#ar)"/>
+      <path class="e am" d="M165 493 H180 V560 H660 V493" marker-end="url(#ar-am)"/>
+      <text class="el" x="330" y="552">pembatalan operator → refund 100% total, pos dana void</text>
+    </svg>
+    <ul class="notes">
+      <li class="am"><b>Delay wajib beralasan:</b> durasi + alasan, maksimal 180 menit, dan bisa ditumpuk. Batas “terlewat”, batas bayar, dan hasil pencarian ikut mengikuti estimasi baru.</li>
+      <li class="am"><b>Info delay di jalan tidak mengubah apa pun:</b> estimasi tiba, status jadwal, pembayaran, dan aturan refund tetap sama — hanya informasinya yang dikirim ke pelanggan &amp; admin.</li>
+      <li class="sl"><b>Terlewat = belum refunded.</b> Jadwal yang lewat otomatis masuk antrean; baru setelah diputuskan (Tiba / Tidak Berangkat) uangnya bergerak.</li>
+      <li class="rd"><b>Jadwal tanpa pemesan otomatis ditutup</b> (tidak masuk antrean) — supaya tidak menggantung. Jadwal kosong tetap <b>terlihat di Riwayat</b> sebagai bahan penilaian agen.</li>
+      <li class="vi"><b>Uang yang tidak berangkat balik penuh:</b> refund dihitung dari <b>total pembayaran</b> (tiket + jasa agen + fee platform), unlike pembatalan pelanggan yang hanya mengembalikan komponen tiket.</li>
+    </ul>
+  </section>
+
+  <!-- ============ PANEL 7: TIKET ONLINE OLEH PENGEMUDI ============ -->
+  <section class="panel">
+    <h2><span class="num">7</span> Tiket Online oleh Pengemudi (Revisi 2)</h2>
+    <p class="desc">Pengemudi dapat membuat tiket untuk penumpang yang tidak memakai aplikasi: dibayar online, tercatat di sistem, dan jasanya tidak ke agen.</p>
+    <svg viewBox="0 0 1240 600" role="img" aria-label="Diagram alur tiket online oleh pengemudi">
+      <rect class="lane am" x="20" y="70" width="290" height="500" rx="20"/>
+      <rect class="lane sl" x="330" y="70" width="380" height="500" rx="20"/>
+      <rect class="lane vi" x="730" y="70" width="490" height="500" rx="20"/>
+      <rect class="chip am" x="34" y="40" width="160" height="26" rx="9"/><text class="ct" x="114" y="58">1 · Pengemudi</text>
+      <rect class="chip sl" x="344" y="40" width="160" height="26" rx="9"/><text class="ct" x="424" y="58">Sistem (otomatis)</text>
+      <rect class="chip vi" x="744" y="40" width="180" height="26" rx="9"/><text class="ct" x="834" y="58">Platform &amp; Agen</text>
+
+      <g class="n am"><rect x="40" y="105" width="250" height="96" rx="14"/>
+        <circle class="nb am" cx="60" cy="126" r="10"/><text class="num" x="60" y="130">1</text>
+        <text class="t1" x="78" y="131">Pesan Tiket</text>
+        <text class="t2" x="58" y="154">nama + HP penumpang</text>
+        <text class="t3" x="58" y="171">jumlah kursi + titik jemput</text>
+        <text class="t3" x="58" y="188">kursi terisi otomatis</text></g>
+      <g class="n am"><rect x="40" y="255" width="250" height="76" rx="14"/>
+        <circle class="nb am" cx="60" cy="276" r="10"/><text class="num" x="60" y="280">2</text>
+        <text class="t1" x="78" y="281">Bayar Online</text>
+        <text class="t2" x="58" y="304">QRIS • VA • E-Wallet</text>
+        <text class="t3" x="58" y="321">kode TA-xxxxx untuk penumpang</text></g>
+      <g class="n am"><rect x="40" y="385" width="250" height="76" rx="14"/>
+        <circle class="nb am" cx="60" cy="406" r="10"/><text class="num" x="60" y="410">3</text>
+        <text class="t1" x="78" y="411">Scan QR / Manifest</text>
+        <text class="t2" x="58" y="434">penumpang naik &amp; dicatat</text>
+        <text class="t3" x="58" y="451">berlaku sampai jadwal Tiba</text></g>
+
+      <g class="n sl"><rect x="350" y="105" width="340" height="96" rx="14"/>
+        <circle class="nb sl" cx="370" cy="126" r="10"/><text class="num" x="370" y="130">4</text>
+        <text class="t1" x="388" y="131">Booking Menunggu Bayar</text>
+        <text class="t2" x="368" y="154">kursi di-hold 15 menit</text>
+        <text class="t3" x="368" y="171">tidak boleh bayar lewat</text>
+        <text class="t3" x="368" y="188">setelah jadwal berangkat</text></g>
+      <g class="n sl"><rect x="350" y="255" width="340" height="76" rx="14"/>
+        <circle class="nb sl" cx="370" cy="276" r="10"/><text class="num" x="370" y="280">5</text>
+        <text class="t1" x="388" y="281">Hold Hangus</text>
+        <text class="t2" x="368" y="304">booking batal • kursi dilepas</text>
+        <text class="t3" x="368" y="321">tidak ada refund (belum bayar)</text></g>
+      <g class="n sl"><rect x="350" y="385" width="340" height="76" rx="14"/>
+        <circle class="nb sl" cx="370" cy="406" r="10"/><text class="num" x="370" y="410">6</text>
+        <text class="t1" x="388" y="411">Lunas → E-Tiket</text>
+        <text class="t2" x="368" y="434">kursi terkunci + pos dana ditahan</text>
+        <text class="t3" x="368" y="451">terhitung di manifest</text></g>
+
+      <g class="n vi"><rect x="750" y="105" width="450" height="96" rx="14"/>
+        <circle class="nb vi" cx="770" cy="126" r="10"/><text class="num" x="770" y="130">7</text>
+        <text class="t1" x="788" y="131">Pembagian: 2 Potong</text>
+        <text class="t2" x="768" y="154">tiket Pengemudi + fee platform (global)</text>
+        <text class="t3" x="768" y="171">jasa agen = Rp0</text>
+        <text class="t3" x="768" y="188">fee platform tetap dipotong, mis. 8%</text></g>
+      <g class="n vi"><rect x="750" y="255" width="450" height="76" rx="14"/>
+        <circle class="nb vi" cx="770" cy="276" r="10"/><text class="num" x="770" y="280">8</text>
+        <text class="t1" x="788" y="281">Pos Dana</text>
+        <text class="t2" x="768" y="304">ditahan → layak (Tiba) → dicairkan</text>
+        <text class="t3" x="768" y="321">dibatalkan → void</text></g>
+      <g class="n vi"><rect x="750" y="385" width="450" height="76" rx="14"/>
+        <circle class="nb vi" cx="770" cy="406" r="10"/><text class="num" x="770" y="410">9</text>
+        <text class="t1" x="788" y="411">Terlihat oleh Agen</text>
+        <text class="t2" x="768" y="434">di daftar booking dengan label “Pengemudi”</text>
+        <text class="t3" x="768" y="451">jasa agen yang tercatat Rp0</text></g>
+
+      <path class="e am" d="M165 201 V255" marker-end="url(#ar-am)"/>
+      <path class="e am" d="M165 331 V385" marker-end="url(#ar-am)"/>
+      <path class="e sl" d="M290 153 H350" marker-end="url(#ar)"/>
+      <path class="e sl" d="M520 201 V255" marker-end="url(#ar)"/>
+      <path class="e vi" d="M690 153 H750" marker-end="url(#ar-vi)"/>
+      <path class="e sl" d="M350 293 H310 V420 H350" marker-end="url(#ar)"/>
+      <text class="el" x="240" y="412">hold habis → batal</text>
+      <path class="e sl" d="M350 423 H310 V470 H750 V461" marker-end="url(#ar)"/>
+      <text class="el" x="520" y="462">dibayar → lunas</text>
+    </svg>
+    <ul class="notes">
+      <li class="am"><b>Kenapa ada fitur ini?</b> banyak penumpang daerah masih tidak memakai aplikasi; pengemudi bisa menjual tiket di tempat, lalu mencatatnya di sistem agar tetap tercatat sebagai pemesan.</li>
+      <li class="am"><b>Kenapa jasanya nol?</b> penumpang datang sendiri lewat pengemudi, bukan lewat agen — jadi agen tidak ikut. Fee platform tetap diambil karena platform tetap melayani pembayaran &amp; administrasi.</li>
+      <li class="sl"><b>Aturannya sama dengan pelanggan:</b> kursi di-hold 15 menit, belum bayar → booking batal otomatis, tidak ada refund karena belum ada uang masuk.</li>
+      <li class="sl"><b>Terhitung sebagai pemesan:</b> jadwal yang sudah ada tiket made by driver tidak lagi berlabel “Tidak ada pemesan”, dan penumpang muncul di manifest serta bisa discan.</li>
+      <li class="vi"><b>Cash menyusul:</b> versi berikutnya akan menambah metode tunai (bayar di tempat ke pengemudi) dengan pencatatan terpisah — fee platform tetap tercatat.</li>
     </ul>
   </section>
 
@@ -591,6 +791,10 @@
       <div class="card"><h3><span class="dot" style="background:#b45309"></span>Jam tidak boleh sama</h3><p>Koridor (DARI→KE) yang sama, tiap rute milik agen yang sama wajib punya jam keberangkatan berbeda pada tanggal yang sama — tanggal yang bentrok otomatis dilewati.</p></div>
       <div class="card"><h3><span class="dot" style="background:#dc2626"></span>Kursi terkunci 15 menit</h3><p>Setelah menekan Bayar, kursi di-hold 15 menit. Belum bayar → kursi dilepas dan waiting list diberi tahu lewat notifikasi.</p></div>
       <div class="card"><h3><span class="dot" style="background:#334155"></span>Uang: 3 potong</h3><p>Total tiket dibagi: tiket Pengemudi + jasa Agen (per kursi, diatur admin) + fee platform. Dana: ditahan → layak (tiba + kliring 24 jam) → dicairkan admin.</p></div>
+      <div class="card"><h3><span class="dot" style="background:#7c3aed"></span>Fee platform GLOBAL</h3><p>Fee platform bukan per agen, tapi satu angka di Admin → Master (Persen % atau Flat Rp). Berlaku untuk semua agen dan semua transaksi baru.</p></div>
+      <div class="card"><h3><span class="dot" style="background:#b45309"></span>Bus tidak berangkat</h3><p>Jadwal yang tidak berangkat direfund 100% dari total (tiket + jasa agen + fee platform) karena kegagalan ada di operator. Berbeda dengan pembatalan pelanggan &lt;1 hari = 0%.</p></div>
+      <div class="card"><h3><span class="dot" style="background:#059669"></span>Tiket oleh Pengemudi</h3><p>Pengemudi bisa membuat tiket untuk penumpang yang tidak memakai aplikasi. Dibayar online, jasanya 0, fee platform tetap, dan tercatat di manifest.</p></div>
+      <div class="card"><h3><span class="dot" style="background:#0284c7"></span>Tidak ada refund otomatis</h3><p>Refund selalu diproses manual admin: Menunggu → Diproses → Selesai. Pencairan juga manual di halaman Settlement.</p></div>
     </div>
   </section>
 
@@ -602,11 +806,11 @@
       <div class="card"><span class="tag" style="background:#0284c7">Pelanggan</span>
         <ul class="menu"><li>Beranda — cari perjalanan cepat</li><li>Cari Perjalanan — 4 langkah pemesanan</li><li>Tiket Saya — bayar lanjut / batal</li><li>Riwayat perjalanan</li><li>Profil &amp; notifikasi</li></ul></div>
       <div class="card"><span class="tag" style="background:#059669">Agen Travel</span>
-        <ul class="menu"><li>Dashboard — ringkasan</li><li>Pesanan — verifikasi, manifest, CSV</li><li>Jadwal — tambah jadwal</li><li>Rute — usulan &amp; Rute Saya</li><li>Armada — armada &amp; layout kursi</li><li>Pengemudi — daftar &amp; status</li><li>Keuangan — pos dana</li><li>Setting</li></ul></div>
+        <ul class="menu"><li>Dashboard — ringkasan</li><li>Pesanan — verifikasi, manifest, CSV, label “Pengemudi”</li><li>Jadwal — tambah jadwal, tab Akan Datang / Riwayat</li><li>Rute — usulan &amp; Rute Saya</li><li>Armada — armada &amp; layout kursi</li><li>Pengemudi — daftar &amp; status</li><li>Keuangan — pos dana</li><li>Setting</li></ul></div>
       <div class="card"><span class="tag" style="background:#b45309">Pengemudi</span>
-        <ul class="menu"><li>Tugas harian + manifest</li><li>Update status perjalanan</li><li>Riwayat trip</li><li>Dompet — posisi dana</li></ul></div>
+        <ul class="menu"><li>Tugas harian + manifest</li><li>Pesan Tiket (online, untuk penumpang non-app)</li><li>Scan QR boarding</li><li>Update status perjalanan</li><li>Delay keberangkatan &amp; info keterlambatan</li><li>Riwayat trip</li><li>Dompet — posisi dana</li></ul></div>
       <div class="card"><span class="tag" style="background:#7c3aed">Superadmin</span>
-        <ul class="menu"><li>Overview — monitoring</li><li>Transaksi — semua booking &amp; bayar</li><li>Agen — approve / suspend / fee</li><li>Rute — approve usulan / suspend rute</li><li>Settlement — cairkan dana</li><li>Master — jasa agen, banner, audit</li></ul></div>
+        <ul class="menu"><li>Overview — monitoring + fee masuk</li><li>Transaksi — semua booking &amp; bayar</li><li>Agen — approve / suspend</li><li>Rute — approve usulan / suspend rute</li><li>Settlement — cairkan dana &amp; antrean refund</li><li>Refund — kebijakan per agen (hari)</li><li>Master — fee platform global, jasa agen, banner, audit</li></ul></div>
     </div>
   </section>
 

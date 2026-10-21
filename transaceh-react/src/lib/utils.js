@@ -2,6 +2,13 @@
 
 export const fmtRp = (n) => 'Rp ' + Number(n || 0).toLocaleString('id-ID');
 
+export const fmtClock = (v) => {
+  const d = v instanceof Date ? v : new Date(v);
+  return Number.isFinite(d.getTime())
+    ? d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+    : '-';
+};
+
 export const todayStr = (off = 0) => {
   const d = new Date();
   d.setDate(d.getDate() + off);

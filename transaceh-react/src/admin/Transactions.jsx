@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { schedById, routeById, agencyById, feeFor } from '@/lib/domain.js';
+import { schedById, routeById, agencyById, splitFare } from '@/lib/domain.js';
 import { fmtRp } from '@/lib/utils.js';
 import { BadgeStatus } from '@/components/ui.jsx';
 
@@ -28,10 +28,11 @@ export function Transactions() {
         {f.slice(0, 60).map((b) => {
           const s = schedById(b.scheduleId); if (!s) return null;
           const r = routeById(s.routeId); const ag = agencyById(s.agencyId);
+          const fee = b.refundScope === 'total' ? 0 : (b.fare || splitFare(s, (b.seats || []).length, b.discount || 0)).fee;
           return (
             <tr key={b.id}><td className="font-mono font-extrabold">{b.code}</td><td className="text-[12.5px] font-semibold">{b.userEmail}</td>
               <td className="text-[12.5px]">{r.from}→{r.to} {s.date}<br /><span className="text-slate-400">{ag?.name} • {b.payMethod}</span></td>
-              <td className="font-extrabold">{fmtRp(b.total)}<br /><span className="text-[11px] text-violet-600 font-bold">fee {fmtRp(feeFor(s.agencyId, b.total))}</span></td><td><BadgeStatus st={b.status} /></td></tr>
+              <td className="font-extrabold">{fmtRp(b.total)}<br /><span className="text-[11px] text-violet-600 font-bold">fee {fmtRp(fee)}</span></td><td><BadgeStatus st={b.status} /></td></tr>
           );
         })}
       </tbody></table></div>

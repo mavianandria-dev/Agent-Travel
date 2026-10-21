@@ -1,15 +1,16 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { schedById, routeById, vehicleById, driverById, agencyById, audit, vehName, splitFare, cancelBooking as cancelBookingDomain, canCancelBooking, refundRuleFor, refundPolicyText } from '@/lib/domain.js';
-import { fmtRp, todayStr, uid } from '@/lib/utils.js';
+import { schedById, routeById, vehicleById, driverById, agencyById, audit, vehName, splitFare, cancelBooking as cancelBookingDomain, canCancelBooking, canPayBooking, refundRuleFor, refundPolicyOf, refundPolicyText, scheduleIsPast } from '@/lib/domain.js';
+import { fmtRp, todayStr, uid, fmtClock } from '@/lib/utils.js';
 import { Icon, Empty, BadgeStatus, fmtDate } from '@/components/ui.jsx';
 import { PaymentModal } from './Search.jsx';
 
 function TripTimeline({ st }) {
   const steps = [['scheduled', 'check', 'Dijadwalkan'], ['ontrip', 'car', 'Dalam Perjalanan'], ['arrived', 'flag', 'Tiba di Tujuan']];
   const order = { scheduled: 0, ontrip: 1, arrived: 2 };
-  const cur = order[st] ?? 0;
+  const abnormal = st === 'missed' || st === 'cancelled';
+  const cur = abnormal ? -1 : order[st] ?? 0;
   return (
     <div className="flex items-center mt-3">{steps.map((x, i) => (
       <span key={x[0]} className="contents">
@@ -36,6 +37,9 @@ export default function TicketDetail({ bid }) {
   const dr = driverById(s.driverId);
   const ag = agencyById(s.agencyId);
   const _fare = b.fare || splitFare(s, (b.seats || []).length, b.discount || 0);
+  const tripStatus = s.tripStatus && s.tripStatus !== 'scheduled' ? s.tripStatus : (b.tripStatus || 'scheduled');
+  const delayActive = s.tripStatus === 'scheduled' && s.delayUntil && new Date(s.delayUntil).getTime() > Date.now();
+  const tripDelayInfo = s.tripStatus === 'ontrip' && Array.isArray(s.tripDelayInfo) ? s.tripDelayInfo[0] : null;
 
   const submitReview = () => {
     const arr = DB.load('bookings', []);
@@ -54,6 +58,11 @@ export default function TicketDetail({ bid }) {
   };
 
   const repay = () => {
+    if (!canPayBooking(b, s)) {
+      toast('Pembayaran ditutup — jadwal sudah berjalan/dibatalkan atau hold kedaluwarsa.', 'err');
+      refresh();
+      return;
+    }
     const nb = { ...b, holdExpiry: new Date(Date.now() + 15 * 60 * 1000).toISOString() };
     DB.save('bookings', DB.load('bookings', []).map((x) => (x.id === b.id ? nb : x)));
     refresh();
@@ -62,7 +71,18 @@ export default function TicketDetail({ bid }) {
 
   const cancelRule = refundRuleFor(s.agencyId, s);
   const cancelable = canCancelBooking(b, s);
-  const policyText = refundPolicyText((ag && ag.refundPolicy) || []);
+  const policyText = refundPolicyText(refundPolicyOf(s.agencyId));
+  const cancelBlockReason = (() => {
+    if (b.status === 'done') return 'Perjalanan sudah selesai.';
+    if (b.status === 'cancelled') return 'Booking sudah dibatalkan.';
+    if (b.boarded) return 'Penumpang sudah boarding.';
+    if (s.status === 'cancelled' || s.tripStatus === 'cancelled') return 'Jadwal dibatalkan oleh operator.';
+    if (s.tripStatus === 'ontrip') return 'Perjalanan sedang berjalan.';
+    if (s.tripStatus === 'arrived') return 'Perjalanan sudah tiba di tujuan.';
+    if (s.tripStatus === 'missed') return 'Jadwal sudah terlewat.';
+    if (scheduleIsPast(s, 0)) return 'Jadwal sudah melewati jam keberangkatan.';
+    return 'Pembatalan tidak tersedia untuk tiket ini.';
+  })();
 
   const cancelBooking = () => {
     const paid = b.status === 'paid';
@@ -89,7 +109,7 @@ export default function TicketDetail({ bid }) {
     <div className="anim grid md:grid-cols-2 gap-4">
       <div className="bg-white rounded-3xl shadow-card overflow-hidden print-only-off">
         <div className="bg-gradient-to-r from-[#0b2447] to-sky-700 text-white p-5">
-          <div className="flex items-center justify-between"><span className="font-extrabold text-[15px]">TransAceh • E-Tiket</span><BadgeStatus st={b.status} /></div>
+          <div className="flex items-center justify-between"><span className="font-extrabold text-[15px]">TransAceh • E-Tiket</span><div className="flex items-center gap-1.5"><BadgeStatus st={b.status} />{tripStatus === 'missed' && b.status !== 'cancelled' ? <BadgeStatus st="missed" /> : null}</div></div>
           <div className="font-mono font-extrabold text-[26px] tracking-widest mt-2">{b.code}</div>
           <div className="text-[13px] font-bold opacity-90">{r.from} → {r.to}</div>
         </div>
@@ -113,15 +133,24 @@ export default function TicketDetail({ bid }) {
             <button onClick={() => window.print()} className="flex-1 bg-slate-100 font-extrabold text-[13px] py-2.5 rounded-xl flex items-center justify-center gap-2"><Icon name="printer" className="w-4 h-4" />Cetak / PDF</button>
             <button onClick={() => toast('Tiket dikirim via WhatsApp ke ' + ((b.passengers[0] && b.passengers[0].phone) || 'penumpang'), 'ok')} className="flex-1 bg-green-500 text-white font-extrabold text-[13px] py-2.5 rounded-xl flex items-center justify-center gap-2"><Icon name="message-circle" className="w-4 h-4" />Kirim WA</button>
           </div>
-          {b.status === 'pending' ? <button onClick={repay} className="no-print w-full mt-2 bg-green-500 text-white font-extrabold text-[13px] py-2.5 rounded-xl">Bayar Sekarang</button> : null}
-          {cancelable ? <button onClick={cancelBooking} className="no-print w-full mt-2 bg-red-50 text-red-600 font-extrabold text-[13px] py-2.5 rounded-xl">Batalkan Booking</button> : null}
+          {b.status === 'pending' ? (canPayBooking(b, s)
+            ? <button onClick={repay} className="no-print w-full mt-2 bg-green-500 text-white font-extrabold text-[13px] py-2.5 rounded-xl">Bayar Sekarang</button>
+            : <button disabled className="no-print w-full mt-2 bg-slate-100 text-slate-400 font-extrabold text-[13px] py-2.5 rounded-xl cursor-not-allowed">Pembayaran Ditutup</button>) : null}
+          {cancelable
+            ? <button onClick={cancelBooking} className="no-print w-full mt-2 bg-red-50 text-red-600 font-extrabold text-[13px] py-2.5 rounded-xl">Batalkan Booking</button>
+            : <div className="no-print mt-2"><button disabled className="w-full bg-slate-100 text-slate-400 font-extrabold text-[13px] py-2.5 rounded-xl cursor-not-allowed">Batalkan Booking</button><div className="mt-1.5 text-[11.5px] font-semibold text-slate-400 text-center">{cancelBlockReason}</div></div>}
           <button onClick={() => go('tickets')} className="no-print w-full mt-2 text-[12px] font-bold text-slate-400">← Kembali ke tiket saya</button>
         </div>
       </div>
       <div className="space-y-4">
         <div className="bg-white rounded-3xl shadow-card p-5">
           <h3 className="font-extrabold text-[15px] flex items-center gap-2"><Icon name="navigation" className="w-5 h-5 text-sky-600" />Status Perjalanan</h3>
-          <TripTimeline st={b.tripStatus || 'scheduled'} />
+          <TripTimeline st={tripStatus} />
+          {delayActive ? <div className="mt-3 bg-amber-50 border border-amber-200 rounded-2xl p-3 text-[12.5px] font-semibold text-amber-900">Jadwal delay {s.delayMinutes} menit. Estimasi keberangkatan {fmtClock(s.delayUntil)}. {s.delayReason ? 'Alasan: ' + s.delayReason + '.' : ''}</div> : null}
+          {tripDelayInfo ? <div className="mt-3 bg-sky-50 border border-sky-200 rounded-2xl p-3 text-[12.5px] font-semibold text-sky-900">Info keterlambatan: {tripDelayInfo.reason}{tripDelayInfo.note ? ' • ' + tripDelayInfo.note : ''} ({fmtClock(tripDelayInfo.at)}). Estimasi tiba tidak berubah.</div> : null}
+          {tripStatus === 'missed' ? <div className="mt-3 bg-amber-50 border border-amber-200 rounded-2xl p-3 text-[12.5px] font-semibold text-amber-900">Jadwal ini terlewat. Admin akan menindaklanjuti refund sesuai kebijakan travel.</div> : null}
+          {tripStatus === 'cancelled' ? <div className="mt-3 bg-red-50 border border-red-200 rounded-2xl p-3 text-[12.5px] font-semibold text-red-800">Perjalanan dibatalkan. Refund, bila ada, diproses sesuai kebijakan travel.</div> : null}
+          {b.status === 'cancelled' && Number(b.refundAmount) > 0 ? <div className="mt-3 bg-green-50 border border-green-200 rounded-2xl p-3 text-[12.5px] font-semibold text-green-900">Refund {fmtRp(b.refundAmount)} • {b.refundStatus === 'done' ? 'Selesai' : b.refundStatus === 'diproses' ? 'Sedang diproses' : 'Menunggu diproses'}</div> : null}
           <div className="mt-3 bg-sky-50 rounded-2xl p-3 text-[12.5px] font-semibold text-sky-900">Titik jemput: <b>{((b.passengers[0] && b.passengers[0].pickup) || '-') + ((b.passengers[0] && b.passengers[0].pickupCoords) ? ' • ' + b.passengers[0].pickupCoords : '')}</b> — harap standby 15 menit sebelum berangkat.</div>
         </div>
         {b.status === 'done' && !b.rating ? (

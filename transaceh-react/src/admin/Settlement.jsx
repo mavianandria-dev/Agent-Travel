@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { settleLedger, ledgerEligible, driverById, schedById, routeById, agencyById, scheduleNeedsReview, setScheduleTripStatus, resolveScheduleNoShow, splitFare } from '@/lib/domain.js';
+import { settleLedger, ledgerEligible, driverById, schedById, routeById, agencyById, scheduleNeedsReview, setScheduleTripStatus, resolveScheduleNoShow, splitFare, markRefundPaid, startRefundProcessing } from '@/lib/domain.js';
 import { fmtRp } from '@/lib/utils.js';
 import { Icon, Empty } from '@/components/ui.jsx';
 
@@ -11,8 +11,8 @@ function NoShowModal({ sid }) {
   const s = schedById(sid);
   if (!s) return <div className="p-6 font-bold text-slate-500">Jadwal tidak ditemukan</div>;
   const paid = DB.load('bookings', []).filter((b) => b.scheduleId === sid && b.status === 'paid');
-  const ticketTotal = paid.reduce((a, b) => a + (Number((b.fare || splitFare(s, (b.seats || []).length, b.discount || 0)).ticket) || 0), 0);
-  const refund = Math.round(ticketTotal * (Number(pct) || 0) / 100);
+  const totalPay = paid.reduce((a, b) => a + (Number(b.total) || Number((b.fare || splitFare(s, (b.seats || []).length, b.discount || 0)).total) || 0), 0);
+  const refund = Math.round(totalPay * (Number(pct) || 0) / 100);
   const submit = () => {
     const res = resolveScheduleNoShow(sid, pct);
     if (!res.ok) { toast(res.msg, 'err'); return; }
@@ -23,13 +23,13 @@ function NoShowModal({ sid }) {
   return (
     <div className="p-6">
       <h3 className="font-extrabold text-[17px]">Tandai Tidak Berangkat?</h3>
-      <p className="text-[13px] text-slate-500 font-medium mt-1">Jadwal akan ditutup. Refund hanya dihitung dari komponen tiket; jasa agen dan fee platform tidak dikembalikan.</p>
+      <p className="text-[13px] text-slate-500 font-medium mt-1">Jadwal akan ditutup. Karena bus tidak berangkat, refund dihitung dari <b>total pembayaran</b> (tiket + jasa agen + fee platform). Admin yang menentukan besarnya.</p>
       <div className="mt-3 bg-slate-50 rounded-2xl p-3 text-[12.5px] font-semibold">
         <div>Jadwal: <b>{s.date} {s.time}</b></div>
         <div>Booking lunas: <b>{paid.length}</b></div>
-        <div>Total tiket: <b>{fmtRp(ticketTotal)}</b></div>
+        <div>Total pembayaran: <b>{fmtRp(totalPay)}</b></div>
       </div>
-      <label className="block mt-3 text-[11px] font-extrabold text-slate-500">PERSENTASE REFUND TIKET</label>
+      <label className="block mt-3 text-[11px] font-extrabold text-slate-500">PERSENTASE REFUND DARI TOTAL</label>
       <input type="number" min="0" max="100" value={pct} onChange={(e) => setPct(Math.max(0, Math.min(100, Number(e.target.value) || 0)))} className="mt-1 w-full text-[14px] font-bold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" />
       <div className="mt-2 text-[12.5px] font-semibold text-slate-600">Estimasi refund: <b className="text-green-700">{fmtRp(refund)}</b></div>
       <div className="flex gap-2 mt-4">
@@ -80,6 +80,15 @@ export default function Settlement() {
     .filter((s) => scheduleNeedsReview(s) && (!agFilter || s.agencyId === agFilter))
     .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
 
+  const refunds = bookings
+    .filter((b) => Number(b.refundAmount) > 0 && b.refundStatus !== 'done')
+    .filter((b) => {
+      if (!agFilter) return true;
+      const s = schedById(b.scheduleId);
+      return s && s.agencyId === agFilter;
+    })
+    .sort((a, b) => String(b.cancelledAt || '').localeCompare(String(a.cancelledAt || '')));
+
   const rowInfo = (e) => {
     const s = schedById(e.scheduleId);
     const r = s ? routeById(s.routeId) : null;
@@ -124,6 +133,43 @@ export default function Settlement() {
           })}
         </tbody></table></div>
       </div> : null}
+
+      <div className="bg-white rounded-3xl shadow-card p-5">
+        <h3 className="font-extrabold text-[16px] flex items-center gap-2"><Icon name="wallet" className="w-5 h-5 text-sky-600" />Refund Perlu Diproses ({refunds.length})</h3>
+        <p className="text-[12px] text-slate-500 font-medium mt-1">Dana refund dicatat otomatis saat pembatalan. Tandai selesai setelah dana benar-benar dikembalikan ke pelanggan.</p>
+        <div className="table-wrap mt-3"><table className="data w-full min-w-[900px]"><thead><tr>
+          <th>Kode / Pelanggan</th><th>Rute / Jadwal</th><th>Alasan</th><th>Nominal</th><th>Status</th><th>Aksi</th>
+        </tr></thead><tbody>
+          {refunds.map((b) => {
+            const s = schedById(b.scheduleId);
+            const r = s ? routeById(s.routeId) : null;
+            const processing = b.refundStatus === 'diproses';
+            return (
+              <tr key={b.id}>
+                <td className="font-mono font-extrabold">{b.code}<br /><span className="text-[11px] text-slate-400 font-semibold">{b.userEmail}</span></td>
+                <td className="text-[12.5px] font-semibold">{r ? `${r.from} → ${r.to}` : '-'}<br /><span className="text-slate-400">{s ? `${s.date} ${s.time}` : '-'}</span></td>
+                <td className="text-[12px] font-semibold">{b.cancelReason || '-'}<br /><span className="text-slate-400">{b.cancelledBy || '-'} • {b.refundScope === 'total' ? '100% total' : b.refundScope === 'partial' ? (b.refundPct || 0) + '% dari total' : 'komponen tiket'}</span></td>
+                <td className="font-extrabold text-green-700">{fmtRp(b.refundAmount)}</td>
+                <td>{processing ? <span className="badge bg-sky-100 text-sky-700">Diproses</span> : <span className="badge bg-amber-100 text-amber-700">Menunggu</span>}</td>
+                <td>{processing
+                  ? <button onClick={() => {
+                    const res = markRefundPaid(b.id);
+                    if (!res.ok) { toast(res.msg, 'err'); return; }
+                    refresh();
+                    toast('Refund ' + b.code + ' ditandai selesai');
+                  }} className="bg-green-500 text-white text-[11.5px] font-extrabold px-3 py-2 rounded-lg">Tandai Selesai</button>
+                  : <button onClick={() => {
+                    const res = startRefundProcessing(b.id);
+                    if (!res.ok) { toast(res.msg, 'err'); return; }
+                    refresh();
+                    toast('Refund ' + b.code + ' mulai diproses');
+                  }} className="bg-sky-600 text-white text-[11.5px] font-extrabold px-3 py-2 rounded-lg">Proses Refund</button>}</td>
+              </tr>
+            );
+          })}
+        </tbody></table></div>
+        {refunds.length === 0 ? <Empty icon="wallet" msg="Tidak ada refund yang menunggu diproses." /> : null}
+      </div>
 
       <div className="bg-white rounded-3xl shadow-card p-5">
         <div className="flex items-center gap-2 flex-wrap">

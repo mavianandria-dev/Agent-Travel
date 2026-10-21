@@ -1,6 +1,6 @@
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { agencyOf, routeById, vehicleById, vehName, driverById, schedById, bookingsOf, agencyById, audit, splitFare, createLedger, canCancelBooking, cancelBooking as cancelBookingDomain, refundRuleFor, refundPolicyText } from '@/lib/domain.js';
+import { agencyOf, routeById, vehicleById, vehName, driverById, schedById, bookingsOf, agencyById, audit, splitFare, createLedger, canCancelBooking, canPayBooking, cancelBooking as cancelBookingDomain, refundRuleFor, refundPolicyText } from '@/lib/domain.js';
 import { fmtRp, todayStr } from '@/lib/utils.js';
 import { Icon, BadgeStatus, fmtDate } from '@/components/ui.jsx';
 
@@ -24,7 +24,7 @@ export function ManifestModal({ sid }) {
       <table className="data w-full mt-3"><thead><tr><th>#</th><th>Kursi</th><th>Nama</th><th>HP</th><th>Jemput</th><th>Status</th></tr></thead><tbody>
         {[...order, ...bookedExtra].map((st) => {
           const b = bk.find((x) => (x.seats || []).includes(st));
-          const p = b?.passengers.find((x) => x.seat === st);
+          const p = (b?.passengers || []).find((x) => x.seat === st);
           const vehOff = offSet.has(st);
           const blocked = (s.blockedSeats || []).includes(st);
           return (
@@ -85,11 +85,21 @@ export default function Bookings({ ag }) {
     const arr = DB.load('bookings', []);
     const b = arr.find((x) => x.id === bid);
     if (!b) return;
+    const s = schedById(b.scheduleId);
+    if (!canPayBooking(b, s, { ignoreHold: true })) {
+      toast('Pembayaran tidak bisa diverifikasi — jadwal sudah berjalan/dibatalkan.', 'err');
+      refresh();
+      return;
+    }
     b.status = 'paid';
     b.paidAt = new Date().toISOString();
-    b.fare = splitFare(schedById(b.scheduleId), (b.seats || []).length, b.discount || 0);
+    b.fare = splitFare(s, (b.seats || []).length, b.discount || 0);
     DB.save('bookings', arr); refresh();
-    createLedger(b); refresh();
+    createLedger(b);
+    const pays = DB.load('payments', []);
+    const p = pays.find((x) => x.bookingId === b.id);
+    if (p) { p.status = 'paid'; p.fee = b.fare.fee; DB.save('payments', pays); }
+    refresh();
     audit('verify_manual', b.code);
     toast('Pembayaran ' + b.code + ' diverifikasi manual (transfer)');
     refresh();
@@ -126,8 +136,8 @@ export default function Bookings({ ag }) {
             if (!s) return null;
             const r = routeById(s.routeId);
             return (
-              <tr key={b.id}><td className="font-mono font-extrabold">{b.code}</td><td className="font-semibold">{b.passengers[0]?.name} <span className="text-slate-400">+{(b.seats || []).length - 1}</span><br /><span className="text-[12px] text-slate-400">{(b.seats || []).join(', ')}</span></td>
-                <td className="font-medium">{r.from}→{r.to}<br /><span className="text-slate-400 text-[12px]">{fmtDate(s.date)} {s.time}</span></td><td className="font-extrabold">{fmtRp(b.total)}</td><td><BadgeStatus st={b.status} /></td>
+              <tr key={b.id}><td className="font-mono font-extrabold">{b.code}</td><td className="font-semibold">{(b.passengers || [])[0]?.name} <span className="text-slate-400">+{(b.seats || []).length - 1}</span><br /><span className="text-[12px] text-slate-400">{(b.seats || []).join(', ')}</span></td>
+                <td className="font-medium">{r.from}→{r.to}<br /><span className="text-slate-400 text-[12px]">{fmtDate(s.date)} {s.time}</span></td><td className="font-extrabold">{fmtRp(b.total)}</td><td><div className="flex items-center gap-1.5 flex-wrap"><BadgeStatus st={b.status} />{b.source === 'driver' ? <span className="badge bg-sky-100 text-sky-700">Pengemudi</span> : null}{b.tripStatus === 'missed' && b.status !== 'cancelled' ? <BadgeStatus st="missed" /> : null}</div></td>
                 <td className="whitespace-nowrap"><div className="flex gap-1.5">
                   {b.status === 'pending' ? <button onClick={() => verifyPay(b.id)} title="Verifikasi manual" className="bg-green-100 text-green-700 p-2 rounded-lg"><Icon name="check-check" className="w-4 h-4" /></button> : null}
                   <button onClick={() => manifest(s.id)} title="Manifest" className="bg-sky-100 text-sky-700 p-2 rounded-lg"><Icon name="printer" className="w-4 h-4" /></button>

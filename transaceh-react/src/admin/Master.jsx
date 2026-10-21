@@ -1,8 +1,39 @@
+import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { audit, DEFAULT_SERVICE } from '@/lib/domain.js';
+import { audit, DEFAULT_SERVICE, platformFeeOf, savePlatformFee } from '@/lib/domain.js';
 import { fmtRp } from '@/lib/utils.js';
 import { Icon } from '@/components/ui.jsx';
+
+function PlatformFeeCard() {
+  const { refresh, toast } = useApp();
+  const [cfg, setCfg] = useState(platformFeeOf());
+  const [type, setType] = useState(cfg.type);
+  const [value, setValue] = useState(cfg.value);
+  const save = () => {
+    const v = Math.max(0, Number(value) || 0);
+    const next = { type: type === 'flat' ? 'flat' : 'percent', value: v };
+    savePlatformFee(next);
+    setCfg(next);
+    refresh();
+    toast('Fee platform global diperbarui • ' + (next.type === 'flat' ? fmtRp(next.value) : next.value + '%'));
+  };
+  return (
+    <div className="bg-white rounded-3xl shadow-card p-5">
+      <h3 className="font-extrabold text-[15px] flex items-center gap-2"><Icon name="percent" className="w-5 h-5 text-violet-600" />FEE PLATFORM GLOBAL</h3>
+      <div className="text-[11.5px] text-slate-400 font-medium mt-1">Berlaku untuk semua agen dan semua transaksi baru. Transaksi yang sudah diproses tidak berubah. Booking yang dibuat pengemudi tetap kena fee ini (jasa agen Rp0).</div>
+      <div className="grid grid-cols-2 gap-2.5 mt-3">
+        <select value={type} onChange={(e) => setType(e.target.value)} className="text-[13px] font-bold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">
+          <option value="percent">Persen %</option>
+          <option value="flat">Flat Rp</option>
+        </select>
+        <input type="number" min="0" value={value} onChange={(e) => setValue(e.target.value)} className="text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" />
+      </div>
+      <div className="text-[11.5px] text-slate-500 font-semibold mt-2">Fee platform sekarang: <b className="text-violet-700">{cfg.type === 'flat' ? fmtRp(cfg.value) : cfg.value + '%'}</b></div>
+      <button onClick={save} className="mt-3 w-full bg-violet-600 text-white font-extrabold text-[13px] py-2.5 rounded-2xl">Simpan Fee Platform</button>
+    </div>
+  );
+}
 
 export function Master() {
   const { refresh, toast } = useApp();
@@ -24,6 +55,7 @@ export function Master() {
   };
   return (
     <div className="grid lg:grid-cols-2 gap-4">
+      <PlatformFeeCard />
       <div className="bg-white rounded-3xl shadow-card p-5">
         <h3 className="font-extrabold text-[15px] flex items-center gap-2"><Icon name="banknote" className="w-5 h-5 text-sky-600" />JASA AGEN / KURSI</h3>
         <div className="text-[11.5px] text-slate-400 font-medium mt-1">Ditentukan admin per agen — berlaku untuk semua rute agen tersebut. Transaksi yang sudah terproses tidak berubah.</div>

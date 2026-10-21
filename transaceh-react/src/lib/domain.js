@@ -1,6 +1,7 @@
 import { DB } from './db.js';
-import { uid, todayStr, SIM_TYPES } from './utils.js';
+import { uid, todayStr, SIM_TYPES, fmtRp } from './utils.js';
 import { estimateRoute } from './geo.js';
+import { PICKUP_ORIGIN } from './pickups.js';
 export { uid, todayStr };
 
 /* Diekstrak dari index.html — pure domain logic, tanpa DOM. */
@@ -98,7 +99,13 @@ export function vehSeatCount(v){ return vehLayout(v).filter(c=>c.type==='seat').
 
 export function schedSeatCap(schedId){ const s=schedById(schedId); if(!s) return 6; return Math.max(1,vehSeatCount(vehicleById(s.vehicleId))); }
 
-export function schedReady(s){ if(!s||s.status!=='open') return false; const v=s.vehicleId?vehicleById(s.vehicleId):null, d=s.driverId?driverById(s.driverId):null; return (!v||v.status==='aktif')&&(!d||d.status==='aktif'); }
+export function schedReady(s){
+  if(!s||s.status!=='open') return false;
+  if(['ontrip','arrived','missed','cancelled'].includes(s.tripStatus)) return false;
+  if(scheduleIsPast(s,0)) return false;
+  const v=s.vehicleId?vehicleById(s.vehicleId):null, d=s.driverId?driverById(s.driverId):null;
+  return (!v||v.status==='aktif')&&(!d||d.status==='aktif');
+}
 
 /* Pemetaan nama pengemudi dari data armada → data pengemudi agen (penjadwalan otomatis). */
 export function driverByName(agencyId, name){
@@ -137,6 +144,7 @@ export function drvBlocks(L){ let n=0; for(let r=0;r<7;r++){ const a=L[r*4+2],b=
 
 /* ---------- Siklus hidup jadwal ---------- */
 export const SCHEDULE_GRACE_HOURS = 3;
+export const MAX_DEPARTURE_DELAY_MINUTES = 180;
 
 /** Waktu keberangkatan jadwal dalam milidetik (zona waktu lokal). */
 export function scheduleDepartureMs(s) {
@@ -144,27 +152,37 @@ export function scheduleDepartureMs(s) {
   return new Date(s.date + 'T' + (s.time || '00:00') + ':00').getTime();
 }
 
-/** True bila jadwal sudah melewati jam keberangkatan + masa tenggang. */
+/** Waktu keberangkatan efektif: jadwal asli atau estimasi delay bila lebih lambat. */
+export function scheduleEffectiveDepartureMs(s) {
+  const base = scheduleDepartureMs(s);
+  const delayed = s && s.delayUntil ? new Date(s.delayUntil).getTime() : NaN;
+  return Number.isFinite(delayed) && (!Number.isFinite(base) || delayed > base) ? delayed : base;
+}
+
+/** True bila jadwal sudah melewati jam keberangkatan efektif + masa tenggang. */
 export function scheduleIsPast(s, graceHours = 0, now = Date.now()) {
-  const t = scheduleDepartureMs(s);
+  const t = scheduleEffectiveDepartureMs(s);
   return Number.isFinite(t) && now > t + Number(graceHours || 0) * 3600000;
 }
 
 /** Jadwal yang sudah selesai/tidak lagi berjalan masuk ke tab Riwayat. */
 export function scheduleInHistory(s) {
   if (!s) return false;
-  return String(s.date || '') < todayStr(0)
-    || ['arrived', 'missed'].includes(s.tripStatus)
-    || s.status === 'cancelled';
+  if (['arrived', 'missed'].includes(s.tripStatus) || s.status === 'cancelled') return true;
+  const delayActive = s.delayUntil && new Date(s.delayUntil).getTime() > Date.now();
+  return !delayActive && String(s.date || '') < todayStr(0);
 }
 
 /** Jadwal lampau yang belum ditutup dan perlu keputusan pengemudi/admin. */
 export function scheduleNeedsReview(s) {
   if (!s || s.reviewedAt || s.tripStatus === 'arrived' || s.status === 'cancelled') return false;
-  const datePassed = !!s.date && String(s.date) < todayStr(0);
-  if (s.tripStatus === 'ontrip') return datePassed;
-  return s.tripStatus === 'missed'
-    || ((!s.tripStatus || s.tripStatus === 'scheduled') && (datePassed || scheduleIsPast(s, SCHEDULE_GRACE_HOURS)));
+  if (s.tripStatus === 'ontrip') return !!s.date && String(s.date) < todayStr(0);
+  if (s.tripStatus === 'missed') return true;
+  if (!s.tripStatus || s.tripStatus === 'scheduled') {
+    const delayActive = s.delayUntil && new Date(s.delayUntil).getTime() > Date.now();
+    return scheduleIsPast(s, SCHEDULE_GRACE_HOURS) || (!delayActive && !!s.date && String(s.date) < todayStr(0));
+  }
+  return false;
 }
 
 /** Tandai jadwal terlambat sebagai Terlewat dan tutup dari pencarian.
@@ -174,26 +192,173 @@ export function syncScheduleLifecycle() {
   const bookings = DB.load('bookings', []);
   const active = new Set(bookings.filter((b) => ['paid', 'pending'].includes(b.status)).map((b) => b.scheduleId));
   let changed = false;
+  let bookingsChanged = false;
   const now = Date.now();
+  const nowIso = new Date(now).toISOString();
   arr.forEach((s) => {
     if (!s.tripStatus) { s.tripStatus = 'scheduled'; changed = true; }
     const datePassed = !!s.date && String(s.date) < todayStr(0);
-    if (s.tripStatus === 'scheduled' && (datePassed || scheduleIsPast(s, SCHEDULE_GRACE_HOURS, now))) {
-      s.tripStatus = 'missed';
-      s.missedAt = new Date(now).toISOString();
-      s.status = 'closed';
-      if (!active.has(s.id) && !s.reviewedAt) {
-        s.reviewedAt = s.missedAt;
-        s.reviewResult = 'empty';
+    const delayActive = s.delayUntil && new Date(s.delayUntil).getTime() > now;
+    if (s.tripStatus === 'scheduled' && (scheduleIsPast(s, SCHEDULE_GRACE_HOURS, now) || (!delayActive && datePassed))) {
+      const boarded = bookings.some((b) => b.scheduleId === s.id && b.boarded
+        && ['paid', 'pending'].includes(b.status) && b.tripStatus !== 'cancelled');
+      if (boarded) {
+        /* Penumpang sudah naik: jangan tampilkan pesan terlewat/refund; minta pengemudi menutup trip. */
+        s.tripStatus = 'ontrip';
+        s.startedAt = s.startedAt || nowIso;
+        changed = true;
+        bookings.forEach((b) => {
+          if (b.scheduleId !== s.id || !b.boarded || !['paid', 'pending'].includes(b.status) || b.tripStatus === 'cancelled') return;
+          b.tripStatus = 'ontrip';
+          bookingsChanged = true;
+        });
+      } else {
+        s.tripStatus = 'missed';
+        s.missedAt = nowIso;
+        s.status = 'closed';
+        changed = true;
+        bookings.forEach((b) => {
+          if (b.scheduleId !== s.id || !['paid', 'pending'].includes(b.status) || b.tripStatus === 'cancelled') return;
+          b.tripStatus = 'missed';
+          bookingsChanged = true;
+          notify(
+            b.userEmail,
+            'Jadwal terlewat - ' + b.code,
+            b.status === 'paid'
+              ? 'Jadwal ' + s.date + ' ' + s.time + ' terlewat. Admin akan menindaklanjuti refund sesuai kebijakan.'
+              : 'Jadwal ' + s.date + ' ' + s.time + ' terlewat. Booking belum dibayar; tidak ada refund.',
+            'WA'
+          );
+        });
       }
+    }
+    /* Data lama yang sudah missed tetapi belum reviewed juga harus auto-close bila kosong. */
+    if (s.tripStatus === 'missed' && !s.reviewedAt && !active.has(s.id)) {
+      s.reviewedAt = nowIso;
+      s.reviewResult = 'empty';
       changed = true;
-    } else if (['ontrip', 'arrived', 'missed'].includes(s.tripStatus) && s.status !== 'closed' && s.status !== 'cancelled') {
+    }
+    if (['ontrip', 'arrived', 'missed'].includes(s.tripStatus) && s.status !== 'closed' && s.status !== 'cancelled') {
       s.status = 'closed';
       changed = true;
     }
   });
   if (changed) DB.save('schedules', arr);
-  return changed;
+  if (bookingsChanged) DB.save('bookings', bookings);
+  return changed || bookingsChanged;
+}
+
+function delayTimeLabel(iso) {
+  return new Date(iso).toLocaleString('id-ID', {
+    day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+  });
+}
+
+function notifyScheduleCustomers(sid, statuses, build) {
+  DB.load('bookings', [])
+    .filter((b) => b.scheduleId === sid && statuses.includes(b.status) && b.tripStatus !== 'cancelled')
+    .forEach((b) => {
+      const n = build(b);
+      notify(b.userEmail, n.title, n.msg, 'WA');
+    });
+}
+
+function notifyScheduleStakeholders(s, title, msg) {
+  DB.load('users', [])
+    .filter((u) => u.role === 'superadmin' || (u.role === 'agen' && u.agencyId === s.agencyId))
+    .forEach((u) => notify(u.email, title, msg, 'app'));
+}
+
+/** Delay sebelum berangkat: menggeser batas jadwal dianggap terlewat. */
+export function setScheduleDelay(sid, minutes, reason, note, by = 'pengemudi') {
+  const schedules = DB.load('schedules', []);
+  const s = schedules.find((x) => x.id === sid);
+  if (!s) return { ok: false, msg: 'Jadwal tidak ditemukan' };
+  if (s.status !== 'open' || s.reviewedAt) return { ok: false, msg: 'Jadwal tidak aktif untuk delay' };
+  if (s.tripStatus && s.tripStatus !== 'scheduled') return { ok: false, msg: 'Delay hanya bisa dicatat sebelum berangkat' };
+
+  const mins = Math.round(Number(minutes));
+  if (!Number.isFinite(mins) || mins < 1) return { ok: false, msg: 'Durasi delay minimal 1 menit' };
+  if (mins > MAX_DEPARTURE_DELAY_MINUTES) {
+    return { ok: false, msg: 'Tambahan delay maksimal ' + MAX_DEPARTURE_DELAY_MINUTES + ' menit' };
+  }
+
+  const why = String(reason || '').trim();
+  if (!why) return { ok: false, msg: 'Alasan delay wajib diisi' };
+
+  const nowMs = Date.now();
+  const nowIso = new Date(nowMs).toISOString();
+  const original = scheduleDepartureMs(s);
+  const currentUntil = s.delayUntil ? new Date(s.delayUntil).getTime() : NaN;
+  const base = Math.max(
+    nowMs,
+    Number.isFinite(original) ? original : 0,
+    Number.isFinite(currentUntil) ? currentUntil : 0
+  );
+  const until = base + mins * 60000;
+  const total = Number.isFinite(original) ? Math.max(0, Math.round((until - original) / 60000)) : mins;
+  if (total > MAX_DEPARTURE_DELAY_MINUTES) {
+    return { ok: false, msg: 'Total delay maksimal ' + MAX_DEPARTURE_DELAY_MINUTES + ' menit. Hubungi admin untuk penundaan lebih lama.' };
+  }
+
+  const delayNote = String(note || '').trim().slice(0, 200);
+  s.tripStatus = s.tripStatus || 'scheduled';
+  s.delayUntil = new Date(until).toISOString();
+  s.delayMinutes = total;
+  s.delayAddedMinutes = mins;
+  s.delayReason = why;
+  s.delayNote = delayNote;
+  s.delayedAt = nowIso;
+  s.delayedBy = by;
+  s.delayHistory = [{
+    type: 'departure', at: nowIso, minutes: mins, until: s.delayUntil, reason: why, note: delayNote, by,
+  }, ...(Array.isArray(s.delayHistory) ? s.delayHistory : [])].slice(0, 20);
+  DB.save('schedules', schedules);
+
+  const label = delayTimeLabel(s.delayUntil);
+  notifyScheduleCustomers(sid, ['paid', 'pending'], (b) => ({
+    title: 'Jadwal delay — ' + b.code,
+    msg: 'Jadwal ' + s.date + ' ' + s.time + ' delay ' + total + ' menit. Estimasi keberangkatan ' + label + '. Alasan: ' + why + '.'
+      + (b.status === 'paid' ? ' Mohon menunggu.' : ' Pembayaran masih dapat dilakukan sampai estimasi baru.'),
+  }));
+  notifyScheduleStakeholders(
+    s,
+    'Jadwal delay — ' + s.date + ' ' + s.time,
+    'Pengemudi mencatat delay ' + total + ' menit (est. ' + label + '). Alasan: ' + why
+  );
+  audit('schedule_delay', sid + ' • +' + mins + ' mnt • ' + why + ' • est ' + label);
+  return { ok: true, until: s.delayUntil, total, added: mins };
+}
+
+/** Info keterlambatan saat perjalanan; tidak mengubah estimasi tiba maupun status. */
+export function reportTripDelay(sid, reason, note, by = 'pengemudi') {
+  const schedules = DB.load('schedules', []);
+  const s = schedules.find((x) => x.id === sid);
+  if (!s) return { ok: false, msg: 'Jadwal tidak ditemukan' };
+  if (s.tripStatus !== 'ontrip') return { ok: false, msg: 'Info delay hanya bisa dikirim saat perjalanan berlangsung' };
+
+  const why = String(reason || '').trim();
+  if (!why) return { ok: false, msg: 'Alasan keterlambatan wajib diisi' };
+
+  const nowIso = new Date().toISOString();
+  const delayNote = String(note || '').trim().slice(0, 200);
+  s.tripDelayInfo = [{
+    type: 'ontrip', at: nowIso, reason: why, note: delayNote, by,
+  }, ...(Array.isArray(s.tripDelayInfo) ? s.tripDelayInfo : [])].slice(0, 20);
+  s.tripDelayUpdatedAt = nowIso;
+  DB.save('schedules', schedules);
+
+  notifyScheduleCustomers(sid, ['paid'], (b) => ({
+    title: 'Info keterlambatan — ' + b.code,
+    msg: 'Pengemudi melaporkan keterlambatan: ' + why + (delayNote ? ' • ' + delayNote : '') + '. Estimasi tiba tidak berubah; mohon menunggu informasi berikutnya.',
+  }));
+  notifyScheduleStakeholders(
+    s,
+    'Info keterlambatan — ' + s.date + ' ' + s.time,
+    'Pengemudi melaporkan: ' + why + (delayNote ? ' • ' + delayNote : '') + '. Estimasi tiba tidak diubah.'
+  );
+  audit('trip_delay_info', sid + ' • ' + why + (delayNote ? ' • ' + delayNote : ''));
+  return { ok: true };
 }
 
 /** True bila jadwal punya riwayat booking/ledger yang tidak boleh dihapus. */
@@ -207,10 +372,34 @@ export function seatBookedFuture(vid,sid){
 }
 
 export function cleanupHolds(){
-  let arr=DB.load('bookings',[]); let changed=false;
+  const arr=DB.load('bookings',[]);
+  const expired=[];
+  const released=new Set();
   const now=Date.now();
-  arr.forEach(b=>{ if(b.status==='pending'&&b.holdExpiry&&now>new Date(b.holdExpiry).getTime()){ b.status='cancelled'; b.cancelReason='Hold kedaluwarsa (15 mnt)'; changed=true; processWaiting(b.scheduleId);} });
-  if(changed) DB.save('bookings',arr);
+  const nowIso=new Date(now).toISOString();
+  arr.forEach((b)=>{
+    if(b.status!=='pending'||!b.holdExpiry||now<=new Date(b.holdExpiry).getTime()) return;
+    b.status='cancelled';
+    b.tripStatus='cancelled';
+    b.refundPct=0;
+    b.refundAmount=0;
+    b.refundScope='ticket';
+    b.refundStatus='none';
+    b.refundPaidAt=null;
+    b.cancelReason='Hold kedaluwarsa (15 mnt)';
+    b.cancelledBy='sistem';
+    b.cancelledAt=nowIso;
+    restoreVoucher(b);
+    expired.push(b);
+    released.add(b.scheduleId);
+  });
+  if(!expired.length) return;
+  DB.save('bookings',arr);
+  const pays=DB.load('payments',[]);
+  let payChanged=false;
+  expired.forEach((b)=>{ if(updatePaymentRefund(pays,b,{refund:0,pct:0,scope:'ticket',status:'cancelled'})) payChanged=true; });
+  if(payChanged) DB.save('payments',pays);
+  released.forEach(processWaiting);
 }
 
 export function processWaiting(schedId){
@@ -233,18 +422,39 @@ export const hm=t=>{const[a,b]=t.split(':').map(Number);return a*60+b;};
 /* Split settlement: tiket (pengemudi) + jasa (agen) + fee (platform).
    schedule.price = TOTAL all-in per kursi yg dilihat pelanggan. */
 export const DEFAULT_SERVICE=10000;
+export const DEFAULT_PLATFORM_FEE = { type: 'percent', value: 8 };
+
 export function priceForAgency(route,agencyId){ return Number(route?.prices?.[agencyId]??route?.basePrice??0)||0; }
 export function servicePerSeat(s){ const a=s?agencyById(s.agencyId):null; return Number(a?.serviceFee??DEFAULT_SERVICE)||0; }
-export function splitFare(s,nSeats=1,discount=0){
+
+/* Fee platform GLOBAL — diatur oleh admin, tidak per agen. */
+export function platformFeeOf(){
+  const s = DB.load('settings', []);
+  const f = s.find((x) => x.key === 'platformFee');
+  return f && f.value ? f.value : { ...DEFAULT_PLATFORM_FEE };
+}
+export function savePlatformFee(fee){
+  const arr = DB.load('settings', []);
+  const i = arr.findIndex((x) => x.key === 'platformFee');
+  const entry = { key: 'platformFee', value: fee };
+  if (i >= 0) arr[i] = entry; else arr.push(entry);
+  DB.save('settings', arr);
+  audit('platform_fee', JSON.stringify(fee));
+  return fee;
+}
+
+export function splitFare(s,nSeats=1,discount=0, source='pelanggan'){
   if(!s) return {ticket:0,service:0,fee:0,total:0};
   const n=Math.max(1,Number(nSeats)||1);
-  const S=servicePerSeat(s);
   const paid=Math.max(0,(Number(s.price)||0)*n-(Number(discount)||0));
-  const a=agencyById(s.agencyId);
-  const base=a&&a.feeType==='flat'?Math.max(0,paid-(Number(a.feeValue)||0)):paid/(1+((a?Number(a.feeValue):8)||0)/100);
-  const service=Math.min(S*n,Math.round(base));
-  const ticket=Math.max(0,Math.round(base)-service);
-  const fee=Math.max(0,paid-ticket-service);
+  const pf = platformFeeOf();
+  const base = pf.type === 'flat'
+    ? Math.max(0, paid - Number(pf.value || 0))
+    : paid / (1 + (Number(pf.value) || 8) / 100);
+  const S = servicePerSeat(s);
+  const service = source === 'driver' ? 0 : Math.min(S * n, Math.round(base));
+  const ticket = Math.max(0, Math.round(base) - service);
+  const fee = Math.max(0, paid - ticket - service);
   return {ticket,service,fee,total:paid};
 }
 
@@ -292,7 +502,7 @@ export function refundRuleFor(agencyId, s, now = Date.now()) {
 
 /** Teks ringkas kebijakan untuk pelanggan/agen, mis. "≥3 hari: 100% • ≥1 hari: 50% • <1 hari: 0%". */
 export function refundPolicyText(policy) {
-  const pol = normalizeRefundPolicy(Array.isArray(policy) ? policy : DEFAULT_REFUND_POLICY);
+  const pol = normalizeRefundPolicy(Array.isArray(policy) && policy.length ? policy : DEFAULT_REFUND_POLICY);
   const days = (minH) => String(Math.round(((Number(minH) || 0) / 24) * 10) / 10).replace('.', ',');
   return pol
     .map((p, i) => (p.minH <= 0
@@ -310,7 +520,7 @@ export function saveRefundPolicy(agencyId, list) {
   const seen = new Set();
   for (const t of raw) {
     const minH = Math.max(0, Math.round(Number(t && t.minH) || 0));
-    if (seen.has(minH)) return { ok: false, msg: 'Ambang jam tidak boleh sama' };
+    if (seen.has(minH)) return { ok: false, msg: 'Ambang minimal tidak boleh sama' };
     seen.add(minH);
   }
   const policy = normalizeRefundPolicy(raw);
@@ -324,7 +534,7 @@ export function createLedger(booking){
   if(!booking||booking.status!=='paid') return null;
   if(DB.load('ledger',[]).some(x=>x.bookingId===booking.id)) return null;
   const s=schedById(booking.scheduleId); if(!s) return null;
-  const f=splitFare(s,(booking.seats||[]).length,booking.discount||0);
+  const f=splitFare(s,(booking.seats||[]).length,booking.discount||0, booking.source);
   const e={id:uid('LG'),bookingId:booking.id,scheduleId:s.id,agencyId:s.agencyId,driverId:s.driverId||null,userEmail:booking.userEmail,seats:[...(booking.seats||[])],ticket:f.ticket,service:f.service,fee:f.fee,total:f.total,status:'ditahan',createdAt:new Date().toISOString(),releasedAt:null,paidOutAt:null};
   const arr=DB.load('ledger',[]); arr.unshift(e); DB.save('ledger',arr);
   audit('ledger_hold',booking.code+' • T'+f.ticket+' J'+f.service+' F'+f.fee);
@@ -341,6 +551,42 @@ export function voidLedger(bookingId){
   arr.forEach(e=>{ if(e.bookingId===bookingId&&e.status!=='dicairkan'){ e.status='void'; ch=true; } });
   if(ch){ DB.save('ledger',arr); audit('ledger_void',bookingId); }
   return ch;
+}
+
+/** Kembalikan kuota voucher yang terpakai saat booking dibatalkan/kedaluwarsa. */
+function restoreVoucher(b) {
+  const code = b && (b.voucher || b.voucherCode);
+  if (!code || !(Number(b.discount) > 0)) return;
+  const vs = DB.load('vouchers', []);
+  const v = vs.find((x) => x.code === String(code).toUpperCase());
+  if (v && Number(v.used) > 0) {
+    v.used = Number(v.used) - 1;
+    DB.save('vouchers', vs);
+  }
+}
+
+/** Catat status refund pada data pembayaran agar laporan dan antrean admin sinkron. */
+function updatePaymentRefund(pays, b, { refund, pct, scope, status }) {
+  const p = pays.find((x) => x.bookingId === b.id);
+  if (!p) return false;
+  const at = new Date().toISOString();
+  p.refundAmount = refund;
+  p.refundPct = pct;
+  p.refundScope = scope;
+  p.refundStatus = refund > 0 ? 'pending' : 'none';
+  p.refundedAt = at;
+  p.refundPaidAt = null;
+  if (status) p.status = status;
+  return true;
+}
+
+/** Booking pending masih bisa dibayar: hold aktif, jadwal masih terbuka dan belum berangkat. */
+export function canPayBooking(b, s, { ignoreHold = false, now = Date.now() } = {}) {
+  if (!b || !s || b.status !== 'pending') return false;
+  if (!ignoreHold && b.holdExpiry && new Date(b.holdExpiry).getTime() <= now) return false;
+  if (s.status !== 'open') return false;
+  if (['ontrip', 'arrived', 'missed', 'cancelled'].includes(s.tripStatus)) return false;
+  return !scheduleIsPast(s, 0, now);
 }
 
 /** Booking masih boleh dibatalkan: belum jalan/terlewat, belum boarding. */
@@ -374,14 +620,23 @@ export function cancelBooking(bookingId, { reason = '', by = 'pelanggan' } = {})
   const why = String(reason || '').trim() || (by === 'agen' ? 'Dibatalkan oleh agen' : 'Dibatalkan oleh pelanggan');
 
   b.status = 'cancelled';
+  b.tripStatus = 'cancelled';
   b.refundPct = rule.pct;
   b.refundAmount = refund;
   b.refundScope = 'ticket';
+  b.refundStatus = refund > 0 ? 'pending' : 'none';
+  b.refundPaidAt = null;
   b.cancelReason = why;
   b.cancelledBy = by;
   b.cancelledAt = now;
   DB.save('bookings', bookings);
+  restoreVoucher(b);
   voidLedger(b.id);
+
+  const pays = DB.load('payments', []);
+  if (updatePaymentRefund(pays, b, { refund, pct: rule.pct, scope: 'ticket', status: wasPaid ? undefined : 'cancelled' })) {
+    DB.save('payments', pays);
+  }
 
   notify(
     b.userEmail,
@@ -394,6 +649,68 @@ export function cancelBooking(bookingId, { reason = '', by = 'pelanggan' } = {})
   audit('booking_cancel', b.code + ' • ' + by + ' • refund ' + rule.pct + '%');
   processWaiting(b.scheduleId);
   return { ok: true, refund, pct: rule.pct, pending: !wasPaid };
+}
+
+/** Admin mulai memproses refund (pending → diproses). */
+export function startRefundProcessing(bookingId, by = 'admin') {
+  const bookings = DB.load('bookings', []);
+  const b = bookings.find((x) => x.id === bookingId);
+  if (!b) return { ok: false, msg: 'Booking tidak ditemukan' };
+  const amount = Number(b.refundAmount) || 0;
+  if (amount <= 0) return { ok: false, msg: 'Tidak ada nominal refund untuk booking ini' };
+  if (b.refundStatus === 'done') return { ok: false, msg: 'Refund sudah selesai' };
+  if (b.refundStatus === 'diproses') return { ok: false, msg: 'Refund sedang diproses' };
+
+  const now = new Date().toISOString();
+  b.refundStatus = 'diproses';
+  b.refundProcessedAt = now;
+  b.refundProcessedBy = by;
+  DB.save('bookings', bookings);
+
+  const pays = DB.load('payments', []);
+  const p = pays.find((x) => x.bookingId === b.id);
+  if (p) {
+    p.refundStatus = 'diproses';
+    p.refundProcessedAt = now;
+    DB.save('payments', pays);
+  }
+
+  notify(b.userEmail, 'Refund sedang diproses — ' + b.code, 'Refund ' + new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(amount) + ' sedang diproses admin.', 'WA');
+  audit('refund_process', b.code + ' • ' + by + ' • ' + amount);
+  return { ok: true, amount };
+}
+
+/** Admin menandai dana refund sudah benar-benar dikembalikan ke pelanggan. */
+export function markRefundPaid(bookingId, by = 'admin') {
+  const bookings = DB.load('bookings', []);
+  const b = bookings.find((x) => x.id === bookingId);
+  if (!b) return { ok: false, msg: 'Booking tidak ditemukan' };
+  const amount = Number(b.refundAmount) || 0;
+  if (amount <= 0) return { ok: false, msg: 'Tidak ada nominal refund untuk booking ini' };
+  if (b.refundStatus === 'done') return { ok: false, msg: 'Refund sudah ditandai selesai' };
+
+  const now = new Date().toISOString();
+  b.refundStatus = 'done';
+  b.refundPaidAt = now;
+  b.refundProcessedBy = by;
+  DB.save('bookings', bookings);
+
+  const pays = DB.load('payments', []);
+  const p = pays.find((x) => x.bookingId === b.id);
+  if (p) {
+    p.refundStatus = 'done';
+    p.refundPaidAt = now;
+    DB.save('payments', pays);
+  }
+
+  notify(
+    b.userEmail,
+    'Refund telah diproses — ' + b.code,
+    'Refund ' + new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(amount) + ' telah dikembalikan ke metode pembayaran awal.',
+    'WA'
+  );
+  audit('refund_paid', b.code + ' • ' + by + ' • ' + amount);
+  return { ok: true, amount };
 }
 
 /**
@@ -419,11 +736,13 @@ export function cancelScheduleByOperator(sid, reason, by = 'pengemudi') {
   }
 
   const bookings = DB.load('bookings', []);
+  const payments = DB.load('payments', []);
   const now = new Date().toISOString();
   const rp = (n) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n);
   let count = 0;
   let pending = 0;
   let total = 0;
+  let payChanged = false;
 
   bookings.forEach((b) => {
     if (b.scheduleId !== sid) return;
@@ -431,14 +750,19 @@ export function cancelScheduleByOperator(sid, reason, by = 'pengemudi') {
       const fare = b.fare || splitFare(s, (b.seats || []).length, b.discount || 0);
       const refund = Math.max(0, Number(b.total) || Number(fare.total) || 0);
       b.status = 'cancelled';
+      b.tripStatus = 'cancelled';
       b.refundPct = 100;
       b.refundAmount = refund;
       b.refundScope = 'total';
+      b.refundStatus = refund > 0 ? 'pending' : 'none';
+      b.refundPaidAt = null;
       b.cancelReason = why;
       b.cancelledBy = by;
       b.cancelledAt = now;
       count += 1;
       total += refund;
+      if (updatePaymentRefund(payments, b, { refund, pct: 100, scope: 'total', status: 'refunded' })) payChanged = true;
+      restoreVoucher(b);
       notify(
         b.userEmail,
         'Jadwal dibatalkan — ' + b.code,
@@ -447,13 +771,18 @@ export function cancelScheduleByOperator(sid, reason, by = 'pengemudi') {
       );
     } else if (b.status === 'pending') {
       b.status = 'cancelled';
+      b.tripStatus = 'cancelled';
       b.refundPct = 0;
       b.refundAmount = 0;
       b.refundScope = 'total';
+      b.refundStatus = 'none';
+      b.refundPaidAt = null;
       b.cancelReason = 'Jadwal dibatalkan operator: ' + why;
       b.cancelledBy = by;
       b.cancelledAt = now;
       pending += 1;
+      if (updatePaymentRefund(payments, b, { refund: 0, pct: 0, scope: 'total', status: 'cancelled' })) payChanged = true;
+      restoreVoucher(b);
       notify(
         b.userEmail,
         'Jadwal dibatalkan — ' + b.code,
@@ -477,10 +806,12 @@ export function cancelScheduleByOperator(sid, reason, by = 'pengemudi') {
   s.cancelledAt = now;
   s.reviewedAt = now;
   s.reviewResult = 'operator_cancel';
+  s.refundPct = 100;
 
   DB.save('schedules', schedules);
   DB.save('bookings', bookings);
   DB.save('ledger', ledger);
+  if (payChanged) DB.save('payments', payments);
 
   DB.load('users', [])
     .filter((u) => u.role === 'superadmin')
@@ -488,6 +819,109 @@ export function cancelScheduleByOperator(sid, reason, by = 'pengemudi') {
 
   audit('schedule_operator_cancel', sid + ' • ' + by + ' • ' + count + ' booking • refund ' + total);
   return { ok: true, count, pending, total };
+}
+
+/** Pembuatan tiket oleh pengemudi untuk penumpang yang tidak pakai aplikasi.
+ *  Disimpan sebagai booking 'pending' (15 menit hold) dan harus dibayar online
+ *  terlebih dahulu. Ledger baru dibuat setelah pembayaran berhasil. */
+export function createDriverBooking(sid, { passengers = [], seats = [], driverId = '', payMethod = 'QRIS', discount = 0 } = {}) {
+  const s = schedById(sid);
+  if (!s) return { ok: false, msg: 'Jadwal tidak ditemukan' };
+  if (s.status !== 'open') return { ok: false, msg: 'Jadwal tidak terbuka' };
+  if (['arrived', 'missed', 'cancelled'].includes(s.tripStatus)) return { ok: false, msg: 'Jadwal sudah selesai/ditutup' };
+  if (s.tripStatus !== 'ontrip' && scheduleIsPast(s, 0)) return { ok: false, msg: 'Jadwal sudah lewat' };
+
+  const tk = takenSeats(s.id);
+  const taken = new Set([...tk.paid, ...tk.hold, ...(s.blockedSeats || []), ...tk.inactive]);
+  const layout = vehLayout(vehicleById(s.vehicleId));
+  const available = layout.filter((c) => c.type === 'seat' && c.sid && !taken.has(c.sid)).map((c) => c.sid);
+
+  const n = Math.max(1, Number(seats.length || passengers.length || 0));
+  if (!seats.length) {
+    if (n > available.length) return { ok: false, msg: 'Kursi tidak mencukupi' };
+    seats = available.slice(0, n);
+  } else {
+    seats = [...new Set(seats)];
+    if (seats.some((st) => !available.includes(st))) return { ok: false, msg: 'Kursi tidak tersedia atau sudah ditempati' };
+    if (seats.length !== passengers.length) return { ok: false, msg: 'Data penumpang harus sama dengan jumlah kursi' };
+  }
+
+  const r = routeById(s.routeId);
+  const pickup = (PICKUP_ORIGIN[r?.from] || [])[0] || (r?.pickups || [])[0] || '-';
+  const now = new Date().toISOString();
+  const fare = splitFare(s, seats.length, discount, 'driver');
+  const total = Math.max(0, Number(fare.total) || 0);
+  const code = 'TA-' + Math.random().toString(36).slice(2, 7).toUpperCase();
+
+  const booking = {
+    id: uid('BK'), code, scheduleId: sid, userEmail: null, userPhone: null,
+    passengers: passengers.map((p, i) => ({
+      name: String(p.name || '').trim() || 'Penumpang',
+      phone: String(p.phone || '').trim() || '-',
+      seat: seats[i],
+      pickup,
+      pickupCoords: '',
+    })),
+    seats,
+    subtotal: Math.max(0, Number(s.price || 0) * seats.length),
+    discount: Math.max(0, Number(discount) || 0),
+    total,
+    status: 'pending',
+    payMethod,
+    voucher: '',
+    source: 'driver',
+    createdBy: driverId || null,
+    createdAt: now,
+    paidAt: null,
+    holdExpiry: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+    tripStatus: 'scheduled',
+    boarded: false,
+  };
+
+  const arr = DB.load('bookings', []);
+  arr.unshift(booking);
+  DB.save('bookings', arr);
+
+  const pays = DB.load('payments', []);
+  pays.unshift({ id: uid('PAY'), bookingId: booking.id, amount: total, method: payMethod, status: 'pending', time: now, fee: fare.fee });
+  DB.save('payments', pays);
+
+  audit('booking_driver_create', code + ' • ' + sid + ' • ' + seats.join(','));
+  return { ok: true, booking, fare };
+}
+
+/** Tandai booking driver sebagai lunas setelah pembayaran online berhasil, lalu buat ledger. */
+export function confirmDriverBookingPayment(bookingId){
+  const bookings = DB.load('bookings', []);
+  const b = bookings.find((x) => x.id === bookingId);
+  if (!b) return { ok: false, msg: 'Booking tidak ditemukan' };
+  if (b.status !== 'pending') return { ok: false, msg: 'Booking belum dalam status menunggu bayar' };
+  const s = schedById(b.scheduleId);
+  if (!s) return { ok: false, msg: 'Jadwal tidak ditemukan' };
+  if (s.status === 'cancelled' || ['arrived', 'missed', 'cancelled'].includes(s.tripStatus)) {
+    return { ok: false, msg: 'Pembayaran ditutup — jadwal sudah selesai/dibatalkan' };
+  }
+  if (b.holdExpiry && new Date(b.holdExpiry).getTime() <= Date.now()) {
+    return { ok: false, msg: 'Hold kedaluwarsa — buat pesanan baru' };
+  }
+
+  const now = new Date().toISOString();
+  b.status = 'paid';
+  b.paidAt = now;
+  b.holdExpiry = null;
+  const fare = splitFare(s, (b.seats || []).length, b.discount || 0, b.source);
+  b.fare = fare;
+  DB.save('bookings', bookings);
+
+  const pays = DB.load('payments', []);
+  const p = pays.find((x) => x.bookingId === b.id);
+  if (p) { p.status = 'paid'; p.fee = fare.fee; DB.save('payments', pays); }
+
+  createLedger(b);
+
+  notify(b.userEmail, 'Pembayaran berhasil — ' + b.code, 'E-tiket QR terbit. Tunjukkan ke pengemudi saat boarding.', 'WA+Email');
+  audit('booking_driver_paid', b.code + ' • ' + fmtRp(b.total));
+  return { ok: true, booking: b, fare };
 }
 
 /** Ubah status trip jadwal; dipakai pengemudi maupun admin. */
@@ -510,12 +944,44 @@ export function setScheduleTripStatus(sid, st) {
   if (st === 'arrived') releaseLedger(sid);
 
   const bk = DB.load('bookings', []);
+  const cancelledPending = [];
   bk.forEach((b) => {
-    if (b.scheduleId !== sid || b.status !== 'paid') return;
+    if (b.scheduleId !== sid) return;
+    if (b.status === 'pending') {
+      b.status = 'cancelled';
+      b.tripStatus = 'cancelled';
+      b.refundPct = 0;
+      b.refundAmount = 0;
+      b.refundScope = 'ticket';
+      b.refundStatus = 'none';
+      b.refundPaidAt = null;
+      b.cancelReason = st === 'ontrip' ? 'Jadwal sudah berangkat' : 'Jadwal sudah selesai';
+      b.cancelledBy = 'sistem';
+      b.cancelledAt = now;
+      restoreVoucher(b);
+      cancelledPending.push(b);
+      return;
+    }
+    if (b.status !== 'paid') return;
     b.tripStatus = st;
     if (st === 'arrived') b.status = 'done';
   });
   DB.save('bookings', bk);
+
+  if (cancelledPending.length) {
+    const pays = DB.load('payments', []);
+    let payChanged = false;
+    cancelledPending.forEach((b) => {
+      if (updatePaymentRefund(pays, b, { refund: 0, pct: 0, scope: 'ticket', status: 'cancelled' })) payChanged = true;
+      notify(
+        b.userEmail,
+        'Booking dibatalkan otomatis — ' + b.code,
+        'Booking belum dibayar dan jadwal sudah ' + (st === 'ontrip' ? 'berangkat' : 'selesai') + '. Tidak ada refund.',
+        'WA'
+      );
+    });
+    if (payChanged) DB.save('payments', pays);
+  }
 
   bk.filter((b) => b.scheduleId === sid && b.status !== 'cancelled').forEach((b) => {
     notify(
@@ -530,8 +996,9 @@ export function setScheduleTripStatus(sid, st) {
 }
 
 /**
- * Admin menandai jadwal tidak berangkat dan memproses refund tiket manual.
- * Jasa agen & fee platform tidak dikembalikan (mengikuti kebijakan refund yang ada).
+ * Admin menandai jadwal tidak berangkat dan memproses refund secara manual.
+ * Jadwal tidak berangkat = kegagalan operator, jadi refund dihitung dari TOTAL
+ * pembayaran (tiket + jasa agen + fee platform) sesuai persentase yang dipilih admin.
  */
 export function resolveScheduleNoShow(sid, refundPct = 100) {
   const schedules = DB.load('schedules', []);
@@ -549,31 +1016,41 @@ export function resolveScheduleNoShow(sid, refundPct = 100) {
     return { ok: false, msg: 'Sudah ada booking selesai pada jadwal ini' };
   }
 
+  const payments = DB.load('payments', []);
   const pct = Math.max(0, Math.min(100, Number(refundPct) || 0));
   const now = new Date().toISOString();
   let count = 0;
   let total = 0;
+  let payChanged = false;
 
   bookings.forEach((b) => {
     if (b.scheduleId !== sid) return;
     if (b.status === 'paid') {
       const fare = b.fare || splitFare(s, (b.seats || []).length, b.discount || 0);
-      const refund = Math.round((Number(fare.ticket) || 0) * pct / 100);
+      /* Jadwal tidak berangkat = kegagalan operator, jadi dasar refund = TOTAL pembayaran
+         (tiket + jasa agen + fee platform), bukan hanya komponen tiket. */
+      const base = Math.max(0, Number(b.total) || Number(fare.total) || 0);
+      const refund = Math.round(base * pct / 100);
+      const scope = pct >= 100 ? 'total' : 'partial';
       b.status = 'cancelled';
       b.tripStatus = 'missed';
       b.refundPct = pct;
       b.refundAmount = refund;
-      b.refundScope = 'ticket';
+      b.refundScope = scope;
+      b.refundStatus = refund > 0 ? 'pending' : 'none';
+      b.refundPaidAt = null;
       b.cancelReason = 'Jadwal terlewat / tidak berangkat';
       b.cancelledBy = 'admin';
       b.cancelledAt = now;
       count += 1;
       total += refund;
+      if (updatePaymentRefund(payments, b, { refund, pct, scope, status: refund > 0 ? 'refunded' : 'cancelled' })) payChanged = true;
+      restoreVoucher(b);
       notify(
         b.userEmail,
         'Jadwal tidak berangkat — ' + b.code,
         refund > 0
-          ? 'Refund ' + new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(refund) + ' (' + pct + '%) diproses 1–3 hari kerja.'
+          ? 'Refund ' + new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(refund) + ' (' + pct + '% dari total) diproses 1–3 hari kerja.'
           : 'Booking dibatalkan. Tidak ada refund untuk booking ini (0%).',
         'WA'
       );
@@ -582,10 +1059,14 @@ export function resolveScheduleNoShow(sid, refundPct = 100) {
       b.tripStatus = 'missed';
       b.refundPct = 0;
       b.refundAmount = 0;
-      b.refundScope = 'ticket';
+      b.refundScope = 'total';
+      b.refundStatus = 'none';
+      b.refundPaidAt = null;
       b.cancelReason = 'Jadwal terlewat / tidak berangkat';
       b.cancelledBy = 'admin';
       b.cancelledAt = now;
+      if (updatePaymentRefund(payments, b, { refund: 0, pct: 0, scope: 'total', status: 'cancelled' })) payChanged = true;
+      restoreVoucher(b);
     }
   });
 
@@ -601,10 +1082,14 @@ export function resolveScheduleNoShow(sid, refundPct = 100) {
   s.reviewedAt = now;
   s.reviewResult = 'no_show';
   s.refundPct = pct;
+  s.cancelReason = 'Jadwal terlewat / tidak berangkat';
+  s.cancelledBy = 'admin';
+  s.cancelledAt = now;
 
   DB.save('schedules', schedules);
   DB.save('bookings', bookings);
   DB.save('ledger', ledger);
+  if (payChanged) DB.save('payments', payments);
 
   DB.load('users', [])
     .filter((u) => u.role === 'agen' && u.agencyId === s.agencyId)

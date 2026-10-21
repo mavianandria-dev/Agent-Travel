@@ -33,7 +33,7 @@ export default function History() {
           if (!s) return null;
           const r = routeById(s.routeId);
           return (
-            <tr key={b.id}><td className="font-mono font-extrabold">{b.code}</td><td className="font-semibold">{r.from} → {r.to}<br /><span className="text-slate-400 text-[12px]">{fmtDate(s.date)} {s.time}</span></td><td className="font-bold">{b.seats.join(', ')}</td><td className="font-extrabold">{fmtRp(b.total)}</td><td><BadgeStatus st={b.status} /></td>
+            <tr key={b.id}><td className="font-mono font-extrabold">{b.code}</td><td className="font-semibold">{r.from} → {r.to}<br /><span className="text-slate-400 text-[12px]">{fmtDate(s.date)} {s.time}</span></td><td className="font-bold">{b.seats.join(', ')}</td><td className="font-extrabold">{fmtRp(b.total)}</td><td><div className="flex items-center gap-1.5"><BadgeStatus st={b.status} />{b.tripStatus === 'missed' && b.status !== 'cancelled' ? <BadgeStatus st="missed" /> : null}</div></td>
               <td><button onClick={() => go('ticket-detail:' + b.id)} className="text-sky-600 font-bold text-[12px] hover:underline">Detail</button></td></tr>
           );
         })}

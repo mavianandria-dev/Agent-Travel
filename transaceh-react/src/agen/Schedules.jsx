@@ -39,6 +39,7 @@ export default function Schedules({ ag }) {
   const agency = ag || agencyOf(user);
   if (!agency) return <div className="bg-white rounded-3xl shadow-card p-5 text-center font-bold text-slate-400">Data travel tidak ditemukan</div>;
   const all = DB.load('schedules', []).filter((s) => s.agencyId === agency.id).sort((a, b) => (a.date + b.time).localeCompare(b.date + b.time));
+  const bookedIds = new Set(DB.load('bookings', []).map((b) => b.scheduleId));
   const upcoming = all.filter((s) => !scheduleInHistory(s));
   const history = all.filter(scheduleInHistory);
   const missed = all.filter((s) => s.tripStatus === 'missed' && !s.reviewedAt);
@@ -81,10 +82,11 @@ export default function Schedules({ ag }) {
           const drvNama = s.driverName || dr?.name || v?.drvName || '—';
           const back = s.backupName || v?.backName || '';
           const tk = takenSeats(s.id);
-          const hasBooking = bookingsOf(s.id).length > 0;
+          const hasBooking = bookingsOf(s.id).some((b) => ['pending', 'paid'].includes(b.status));
+          const hasTransactions = scheduleHasTransactions(s.id);
           const historical = tab === 'history' || ['ontrip', 'arrived', 'missed'].includes(s.tripStatus);
           return (
-            <tr key={s.id}><td className="font-bold">{fmtDate(s.date)}<br /><span className="text-sky-600">{s.time}</span> {s.tripStatus !== 'scheduled' ? <BadgeStatus st={s.tripStatus} /> : null}</td>
+            <tr key={s.id}><td className="font-bold">{fmtDate(s.date)}<br /><span className="text-sky-600">{s.time}</span> {!bookedIds.has(s.id) ? <span className="badge bg-slate-200 text-slate-700 ml-1">Tidak ada pemesan</span> : null} {s.tripStatus !== 'scheduled' ? <BadgeStatus st={s.tripStatus} /> : null}{s.tripStatus === 'scheduled' && s.delayUntil && new Date(s.delayUntil).getTime() > Date.now() ? <span className="badge bg-amber-100 text-amber-700 ml-1" title={'Estimasi ' + s.delayUntil}>Delay {s.delayMinutes}m</span> : null}</td>
               <td className="font-semibold">{r?.from} → {r?.to}</td>
               <td className="text-[12.5px] font-medium">{vehName(v)}{v?.plate ? <span className="text-slate-400"> • {v.plate}</span> : null}<br /><span className="text-slate-500">{drvNama}</span><br /><span className="text-[11.5px] text-slate-400">Pengganti: {back || '—'}</span></td>
               <td className="font-extrabold">{fmtRp(s.price)}</td>
@@ -92,7 +94,9 @@ export default function Schedules({ ag }) {
               <td><div className="flex gap-1.5"><button onClick={() => manifest(s.id)} title="Manifest" className="bg-sky-100 text-sky-700 p-2 rounded-lg"><Icon name="users" className="w-4 h-4" /></button>
                 {!historical ? <button onClick={() => blockSeat(s.id)} title="Tutup/buka kursi" className="bg-amber-100 text-amber-700 p-2 rounded-lg"><Icon name="ban" className="w-4 h-4" /></button> : null}
                 {!historical && hasBooking ? <button onClick={() => cancelTrip(s.id)} title="Batalkan jadwal (refund 100%)" className="bg-red-50 text-red-600 p-2 rounded-lg"><Icon name="calendar-x" className="w-4 h-4" /></button> : null}
-                {!historical && !hasBooking ? <button onClick={() => delSched(s.id)} title="Hapus jadwal" className="bg-red-50 text-red-500 p-2 rounded-lg"><Icon name="trash-2" className="w-4 h-4" /></button> : null}</div></td></tr>
+                {!historical && !hasBooking ? (hasTransactions
+                  ? <button disabled title="Tidak bisa dihapus — sudah ada riwayat transaksi" className="bg-slate-100 text-slate-300 p-2 rounded-lg cursor-not-allowed"><Icon name="trash-2" className="w-4 h-4" /></button>
+                  : <button onClick={() => delSched(s.id)} title="Hapus jadwal" className="bg-red-50 text-red-500 p-2 rounded-lg"><Icon name="trash-2" className="w-4 h-4" /></button>) : null}</div></td></tr>
           );
         })}
       </tbody></table></div>
