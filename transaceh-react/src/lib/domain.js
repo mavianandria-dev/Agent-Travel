@@ -67,6 +67,134 @@ export function fleetAvailable(agencyId){
 
 export function driverById(id){ return DB.load('drivers',[]).find(d=>d.id===id); }
 
+/* ---------- Profil driver: isi sendiri + verifikasi agen ----------
+   Field yang langsung berlaku: kontak, alamat, rekening, foto profil.
+   Field identitas/dokumen: disimpan sebagai usulan, berlaku setelah disetujui agen. */
+export const DRIVER_DIRECT_FIELDS = ['phone', 'address', 'emName', 'emPhone', 'emRelation', 'bank', 'photo'];
+export const DRIVER_VERIFY_FIELDS = ['nik', 'birthPlace', 'birthDate', 'gender', 'marital', 'education', 'simType', 'simNumber', 'simExp', 'simPhoto', 'ktpPhoto', 'selfie'];
+export const DRIVER_FIELD_LABELS = {
+  phone: 'No HP', address: 'Alamat', emName: 'Nama kontak darurat', emPhone: 'No HP kontak darurat',
+  emRelation: 'Hubungan kontak darurat', bank: 'Rekening bank', photo: 'Foto profil',
+  nik: 'NIK', birthPlace: 'Tempat lahir', birthDate: 'Tanggal lahir', gender: 'Jenis kelamin',
+  marital: 'Status perkawinan', education: 'Pendidikan', simType: 'Jenis SIM', simNumber: 'Nomor SIM',
+  simExp: 'Masa berlaku SIM', simPhoto: 'Dokumen SIM', ktpPhoto: 'Foto KTP', selfie: 'Swafoto',
+};
+export const driverFieldLabel = (k) => DRIVER_FIELD_LABELS[k] || k;
+
+/** Status proposed driver: ada usulan yang menunggu verifikasi agen? */
+export function driverProfileStatus(d) {
+  const pending = (d && d.pendingProfile && typeof d.pendingProfile === 'object') ? d.pendingProfile : {};
+  const keys = Object.keys(pending);
+  return { hasPending: keys.length > 0, pendingCount: keys.length, pending, pendingAt: (d && d.pendingAt) || null };
+}
+
+/** Pastikan ada record driver yang tertaut ke akun login (dibuat otomatis bila belum). */
+export function ensureDriverForUser(user) {
+  if (!user || !user.email) return null;
+  const arr = DB.load('drivers', []);
+  const em = String(user.email).toLowerCase();
+  let d = arr.find((x) => x.userEmail && String(x.userEmail).toLowerCase() === em);
+  if (!d) {
+    d = {
+      id: uid('DR'), agencyId: user.agencyId || '', name: user.name || '', phone: user.phone || '',
+      wa: user.wa || user.phone || '', photo: user.photo || '', userEmail: user.email,
+      status: 'aktif', rating: 5, trips: 0, createdAt: new Date().toISOString(),
+    };
+    arr.push(d);
+    DB.save('drivers', arr);
+    audit('driver_profile_create', d.name + ' • ' + d.id);
+  }
+  return d;
+}
+
+/** Sinkronkan data kontak driver ke akun loginnya. */
+function syncDriverUser(d) {
+  if (!d || !d.userEmail) return;
+  const us = DB.load('users', []);
+  const u = us.find((x) => String(x.email || '').toLowerCase() === String(d.userEmail).toLowerCase());
+  if (!u) return;
+  let ch = false;
+  if (d.phone && u.phone !== d.phone) { u.phone = d.phone; u.wa = d.phone; ch = true; }
+  if (d.photo && u.photo !== d.photo) { u.photo = d.photo; ch = true; }
+  if (d.name && u.name !== d.name) { u.name = d.name; ch = true; }
+  if (ch) DB.save('users', us);
+}
+
+/** Simpan perubahan profil driver: sebagian langsung berlaku, sebagian jadi usulan ke agen. */
+export function submitDriverProfile(driverId, changes = {}) {
+  const arr = DB.load('drivers', []);
+  const d = arr.find((x) => x.id === driverId);
+  if (!d) return { ok: false, msg: 'Data driver tidak ditemukan' };
+  const direct = {};
+  const proposal = {};
+  Object.entries(changes || {}).forEach(([k, v]) => {
+    if (DRIVER_DIRECT_FIELDS.includes(k)) direct[k] = v;
+    else if (DRIVER_VERIFY_FIELDS.includes(k)) proposal[k] = v;
+  });
+  Object.keys(direct).forEach((k) => { if (d[k] === direct[k]) delete direct[k]; });
+  const pending = { ...(d.pendingProfile && typeof d.pendingProfile === 'object' ? d.pendingProfile : {}) };
+  Object.entries(proposal).forEach(([k, v]) => { pending[k] = v; });
+  Object.keys(pending).forEach((k) => { if (pending[k] === d[k]) delete pending[k]; });
+
+  const now = new Date().toISOString();
+  Object.assign(d, direct);
+  d.updatedAt = now;
+  d.pendingProfile = pending;
+  d.pendingAt = Object.keys(pending).length ? now : null;
+  DB.save('drivers', arr);
+  syncDriverUser(d);
+
+  const directKeys = Object.keys(direct);
+  const pendingKeys = Object.keys(pending);
+  if (pendingKeys.length) {
+    DB.load('users', [])
+      .filter((u) => u.role === 'agen' && u.agencyId === d.agencyId)
+      .forEach((u) => notify(u.email, 'Usulan perubahan data driver',
+        d.name + ' mengirim ' + pendingKeys.length + ' field untuk diverifikasi: ' + pendingKeys.map(driverFieldLabel).join(', ') + '.', 'app'));
+  }
+  audit('driver_profile_submit', d.name + ' • langsung: ' + (directKeys.join(',') || '-') + ' • usulan: ' + (pendingKeys.join(',') || '-'));
+  return { ok: true, direct: directKeys, pending: pendingKeys };
+}
+
+/** Agen menyetujui usulan perubahan data driver. */
+export function approveDriverProfile(driverId, by = 'agen') {
+  const arr = DB.load('drivers', []);
+  const d = arr.find((x) => x.id === driverId);
+  if (!d) return { ok: false, msg: 'Data driver tidak ditemukan' };
+  const pending = (d.pendingProfile && typeof d.pendingProfile === 'object') ? d.pendingProfile : {};
+  const keys = Object.keys(pending);
+  if (!keys.length) return { ok: false, msg: 'Tidak ada usulan perubahan' };
+  Object.entries(pending).forEach(([k, v]) => { d[k] = v; });
+  d.pendingProfile = {};
+  d.pendingAt = null;
+  d.profileVerifiedAt = new Date().toISOString();
+  d.profileVerifiedBy = by;
+  DB.save('drivers', arr);
+  syncDriverUser(d);
+  notify(d.userEmail, 'Data driver disetujui',
+    'Perubahan data Anda (' + keys.length + ' field) sudah disetujui agen: ' + keys.map(driverFieldLabel).join(', ') + '.', 'app');
+  audit('driver_profile_approve', d.name + ' • ' + keys.join(','));
+  return { ok: true, count: keys.length };
+}
+
+/** Agen menolak usulan perubahan data driver. */
+export function rejectDriverProfile(driverId, reason = '', by = 'agen') {
+  const arr = DB.load('drivers', []);
+  const d = arr.find((x) => x.id === driverId);
+  if (!d) return { ok: false, msg: 'Data driver tidak ditemukan' };
+  const pending = (d.pendingProfile && typeof d.pendingProfile === 'object') ? d.pendingProfile : {};
+  const keys = Object.keys(pending);
+  if (!keys.length) return { ok: false, msg: 'Tidak ada usulan perubahan' };
+  const why = String(reason || '').trim() || 'Tidak sesuai data yang tercatat di agen';
+  d.pendingProfile = {};
+  d.pendingAt = null;
+  DB.save('drivers', arr);
+  notify(d.userEmail, 'Usulan data driver ditolak',
+    'Perubahan ' + keys.map(driverFieldLabel).join(', ') + ' tidak disetujui. Alasan: ' + why, 'app');
+  audit('driver_profile_reject', d.name + ' • ' + keys.join(',') + ' • ' + why);
+  return { ok: true, count: keys.length };
+}
+
 export function schedById(id){ return DB.load('schedules',[]).find(s=>s.id===id); }
 
 export function agencyById(id){ return DB.load('agencies',[]).find(a=>a.id===id); }

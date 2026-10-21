@@ -28,7 +28,7 @@ export default function Header() {
     if (!user) return;
     if (user.role === 'pelanggan') go('profile');
     else if (user.role === 'agen') { if (agencyPending(user)) go('agen-pending'); else { setAgenTab('setting'); go('agen'); } }
-    else if (user.role === 'pengemudi') go('driver');
+    else if (user.role === 'pengemudi') go('driver-profile');
     else go('admin');
   };
 
@@ -60,7 +60,7 @@ export default function Header() {
                 <div className="text-[13px] font-bold">{user.name}</div>
                 <div className="text-[10px] uppercase tracking-wider font-extrabold text-sky-300">{user.role}</div>
               </div>
-              <button onClick={avatarDest} aria-label="Profil" className="w-10 h-10 rounded-full bg-gradient-to-br from-sky-400 to-blue-600 flex items-center justify-center font-extrabold text-sm border-2 border-white/30 active:scale-95">
+              <button onClick={avatarDest} aria-label={user.role === 'pengemudi' ? 'Profil Driver' : 'Profil'} className="w-10 h-10 rounded-full bg-gradient-to-br from-sky-400 to-blue-600 flex items-center justify-center font-extrabold text-sm border-2 border-white/30 active:scale-95">
                 {(user.name[0] || '?').toUpperCase()}
               </button>
               <button onClick={logout} title={t('logout')} aria-label={t('logout')} className="w-10 h-10 rounded-full bg-white/10 hover:bg-red-500 active:scale-95 flex items-center justify-center transition">
@@ -105,7 +105,7 @@ export function tabsFor(u, t) {
     if (agencyPending(u)) return [{ v: 'agen-pending', icon: 'clipboard-list', label: 'Kelengkapan Data' }];
     return [{ v: 'agen', icon: 'layout-dashboard', label: t('dashboard') }, { v: 'agen-book', icon: 'clipboard-list', label: t('bookings') }, { v: 'agen-sched', icon: 'calendar-days', label: t('schedules') }, { v: 'agen-fleet', icon: 'car', label: t('vehicles') }, { v: 'agen-fin', icon: 'wallet', label: t('finance') }];
   }
-  if (u.role === 'pengemudi') return [{ v: 'driver', icon: 'car-front', label: t('tasks') }, { v: 'driver-trips', icon: 'route', label: 'Trip' }];
+  if (u.role === 'pengemudi') return [{ v: 'driver', icon: 'car-front', label: t('tasks') }, { v: 'driver-trips', icon: 'route', label: 'Trip' }, { v: 'driver-profile', icon: 'user', label: 'Profil' }];
   if (u.role === 'superadmin') return [{ v: 'admin', icon: 'shield-check', label: 'Admin' }, { v: 'admin-tx', icon: 'receipt-text', label: t('transactions') }, { v: 'admin-ag', icon: 'building-2', label: t('agencies') }, { v: 'admin-refund', icon: 'settings', label: 'Refund' }, { v: 'admin-master', icon: 'database', label: t('master') }];
   return [];
 }

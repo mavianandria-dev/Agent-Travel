@@ -15,9 +15,7 @@ import Agen from '@/agen/Agen.jsx';
 import KycWizard from '@/agen/KycWizard.jsx';
 import VehForm from '@/agen/VehForm.jsx';
 import DrvForm from '@/agen/DrvForm.jsx';
-import Tasks from '@/driver/Tasks.jsx';
-import Trips from '@/driver/Trips.jsx';
-import Wallet from '@/driver/Wallet.jsx';
+import DriverPanel from '@/driver/DriverPanel.jsx';
 import Admin from '@/admin/Admin.jsx';
 import { DB } from '@/lib/db.js';
 import { schedById, notify, agencyPending } from '@/lib/domain.js';
@@ -77,9 +75,7 @@ function Router() {
     else if (view === 'agen-drvform') page = <DrvForm />;
     else if (view === 'agen-vehform') page = <VehForm />;
     else page = <Agen />;
-  } else if (view === 'driver') page = user ? <Tasks /> : <Login />;
-  else if (view === 'driver-trips') page = user ? <Trips /> : <Login />;
-  else if (view === 'driver-wallet') page = user ? <Wallet /> : <Login />;
+  } else if (view.startsWith('driver')) page = user ? <DriverPanel /> : <Login />;
   else if (view.startsWith('admin')) page = user ? <Admin /> : <Login />;
   else page = <Home />;
 

@@ -317,12 +317,11 @@ function DriverBookingModal({ sid }) {
 }
 
 export default function Tasks() {
-  const { view, go, user, toast, refresh, openModal } = useApp();
+  const { go, user, toast, refresh, openModal } = useApp();
   const me = drvOfUser(user);
   const mySched = DB.load('schedules', []).filter((s) => !me || s.driverId === me.id).sort((a, b) => (a.date + b.time).localeCompare(b.date + b.time));
   const overdue = mySched.filter(scheduleNeedsReview);
   const upcoming = mySched.filter((s) => !scheduleInHistory(s) && !scheduleNeedsReview(s) && s.status !== 'cancelled' && !['arrived', 'missed', 'cancelled'].includes(s.tripStatus));
-  const pills = [['driver', 'car-front', 'Tugas Saya'], ['driver-trips', 'route', 'Trip'], ['driver-wallet', 'wallet', 'Dompet']];
 
   const renderTask = (s, late) => {
     const r = routeById(s.routeId), v = vehicleById(s.vehicleId);
@@ -361,14 +360,7 @@ export default function Tasks() {
 
   return (
     <>
-      <div className="anim bg-white rounded-3xl shadow-card p-4 flex gap-2 overflow-x-auto no-print">
-        {pills.map((x) => (
-          <button key={x[0]} onClick={() => go(x[0])} className={`flex items-center gap-1.5 text-[12.5px] font-extrabold px-4 py-2.5 rounded-xl whitespace-nowrap ${view === x[0] ? 'bg-[#0b2447] text-white shadow' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>
-            <Icon name={x[1]} className="w-4 h-4" />{x[2]}
-          </button>
-        ))}
-      </div>
-      <div className="anim space-y-4 mt-4">
+      <div className="anim space-y-4">
         <div className="bg-gradient-to-r from-[#0b2447] to-sky-700 text-white rounded-3xl p-5 shadow-card flex items-center gap-4">
           <div className="w-14 h-14 rounded-2xl bg-white/15 flex items-center justify-center font-extrabold text-2xl">{((me?.name || user?.name || 'P')[0])}</div>
           <div><div className="font-extrabold text-[17px]">Halo, {me?.name || user?.name}!</div><div className="text-[12.5px] opacity-80 font-medium">{overdue.length ? overdue.length + ' perlu diselesaikan • ' : ''}{upcoming.length} tugas ke depan • standby 30 mnt sebelum jam</div></div>
