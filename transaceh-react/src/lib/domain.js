@@ -135,6 +135,73 @@ export function corridorClash(date,time,routeId,agencyId){
 
 export function drvBlocks(L){ let n=0; for(let r=0;r<7;r++){ const a=L[r*4+2],b=L[r*4+3]; if(a&&b&&a.type==='driver'&&b.type==='driver') n++; } return n; }
 
+/* ---------- Siklus hidup jadwal ---------- */
+export const SCHEDULE_GRACE_HOURS = 3;
+
+/** Waktu keberangkatan jadwal dalam milidetik (zona waktu lokal). */
+export function scheduleDepartureMs(s) {
+  if (!s || !s.date) return NaN;
+  return new Date(s.date + 'T' + (s.time || '00:00') + ':00').getTime();
+}
+
+/** True bila jadwal sudah melewati jam keberangkatan + masa tenggang. */
+export function scheduleIsPast(s, graceHours = 0, now = Date.now()) {
+  const t = scheduleDepartureMs(s);
+  return Number.isFinite(t) && now > t + Number(graceHours || 0) * 3600000;
+}
+
+/** Jadwal yang sudah selesai/tidak lagi berjalan masuk ke tab Riwayat. */
+export function scheduleInHistory(s) {
+  if (!s) return false;
+  return String(s.date || '') < todayStr(0)
+    || ['arrived', 'missed'].includes(s.tripStatus)
+    || s.status === 'cancelled';
+}
+
+/** Jadwal lampau yang belum ditutup dan perlu keputusan pengemudi/admin. */
+export function scheduleNeedsReview(s) {
+  if (!s || s.reviewedAt || s.tripStatus === 'arrived' || s.status === 'cancelled') return false;
+  const datePassed = !!s.date && String(s.date) < todayStr(0);
+  if (s.tripStatus === 'ontrip') return datePassed;
+  return s.tripStatus === 'missed'
+    || ((!s.tripStatus || s.tripStatus === 'scheduled') && (datePassed || scheduleIsPast(s, SCHEDULE_GRACE_HOURS)));
+}
+
+/** Tandai jadwal terlambat sebagai Terlewat dan tutup dari pencarian.
+ *  Jadwal tanpa penumpang aktif langsung ditutup (tidak masuk antrean admin/sopir). */
+export function syncScheduleLifecycle() {
+  const arr = DB.load('schedules', []);
+  const bookings = DB.load('bookings', []);
+  const active = new Set(bookings.filter((b) => ['paid', 'pending'].includes(b.status)).map((b) => b.scheduleId));
+  let changed = false;
+  const now = Date.now();
+  arr.forEach((s) => {
+    if (!s.tripStatus) { s.tripStatus = 'scheduled'; changed = true; }
+    const datePassed = !!s.date && String(s.date) < todayStr(0);
+    if (s.tripStatus === 'scheduled' && (datePassed || scheduleIsPast(s, SCHEDULE_GRACE_HOURS, now))) {
+      s.tripStatus = 'missed';
+      s.missedAt = new Date(now).toISOString();
+      s.status = 'closed';
+      if (!active.has(s.id) && !s.reviewedAt) {
+        s.reviewedAt = s.missedAt;
+        s.reviewResult = 'empty';
+      }
+      changed = true;
+    } else if (['ontrip', 'arrived', 'missed'].includes(s.tripStatus) && s.status !== 'closed' && s.status !== 'cancelled') {
+      s.status = 'closed';
+      changed = true;
+    }
+  });
+  if (changed) DB.save('schedules', arr);
+  return changed;
+}
+
+/** True bila jadwal punya riwayat booking/ledger yang tidak boleh dihapus. */
+export function scheduleHasTransactions(sid) {
+  return DB.load('bookings', []).some((b) => b.scheduleId === sid)
+    || DB.load('ledger', []).some((e) => e.scheduleId === sid);
+}
+
 export function seatBookedFuture(vid,sid){
   return DB.load('schedules',[]).filter(s=>s.vehicleId===vid&&s.date>=todayStr(0)).some(s=>bookingsOf(s.id).some(b=>(b.seats||[]).includes(sid)));
 }
@@ -180,6 +247,78 @@ export function splitFare(s,nSeats=1,discount=0){
   const fee=Math.max(0,paid-ticket-service);
   return {ticket,service,fee,total:paid};
 }
+
+/* ---------- Kebijakan refund tiket ----------
+   Diatur super admin per agen. Refund pelanggan hanya komponen tiket;
+   jasa agen & fee platform tidak dikembalikan. Pembatalan sepihak oleh
+   operator (sopir/agen) sebelum berangkat = 100% total pembayaran. */
+export const DEFAULT_REFUND_POLICY = Object.freeze([
+  { minH: 72, pct: 100 },
+  { minH: 24, pct: 50 },
+  { minH: 0, pct: 0 },
+]);
+
+/** Normalisasi tier refund: jam & persen bulat, unik, urut menurun, selalu ada tier 0 jam. */
+export function normalizeRefundPolicy(list) {
+  const seen = new Set();
+  const out = [];
+  (Array.isArray(list) ? list : []).forEach((t) => {
+    const minH = Math.max(0, Math.round(Number(t && t.minH) || 0));
+    const pct = Math.max(0, Math.min(100, Math.round(Number(t && t.pct) || 0)));
+    if (seen.has(minH)) return;
+    seen.add(minH);
+    out.push({ minH, pct });
+  });
+  if (!seen.has(0)) out.push({ minH: 0, pct: 0 });
+  return out.sort((a, b) => b.minH - a.minH);
+}
+
+/** Kebijakan aktif agen; fallback ke default platform bila data kosong. */
+export function refundPolicyOf(agencyId) {
+  const a = agencyById(agencyId);
+  const pol = a && Array.isArray(a.refundPolicy) ? a.refundPolicy : [];
+  return pol.length
+    ? normalizeRefundPolicy(pol)
+    : DEFAULT_REFUND_POLICY.map((p) => ({ ...p }));
+}
+
+/** Tier refund yang berlaku untuk jadwal pada waktu tertentu. */
+export function refundRuleFor(agencyId, s, now = Date.now()) {
+  const hours = s ? Math.max(0, (scheduleDepartureMs(s) - now) / 36e5) : 0;
+  const policy = refundPolicyOf(agencyId);
+  const rule = policy.find((p) => hours >= p.minH) || policy[policy.length - 1];
+  return { ...(rule || { minH: 0, pct: 0 }), hours };
+}
+
+/** Teks ringkas kebijakan untuk pelanggan/agen, mis. "≥3 hari: 100% • ≥1 hari: 50% • <1 hari: 0%". */
+export function refundPolicyText(policy) {
+  const pol = normalizeRefundPolicy(Array.isArray(policy) ? policy : DEFAULT_REFUND_POLICY);
+  const days = (minH) => String(Math.round(((Number(minH) || 0) / 24) * 10) / 10).replace('.', ',');
+  return pol
+    .map((p, i) => (p.minH <= 0
+      ? '<' + days(pol[i - 1] ? pol[i - 1].minH : 24) + ' hari: ' + p.pct + '%'
+      : '≥' + days(p.minH) + ' hari: ' + p.pct + '%'))
+    .join(' • ');
+}
+
+/** Simpan kebijakan refund agen (khusus super admin). */
+export function saveRefundPolicy(agencyId, list) {
+  const arr = DB.load('agencies', []);
+  const a = arr.find((x) => x.id === agencyId);
+  if (!a) return { ok: false, msg: 'Agen tidak ditemukan' };
+  const raw = Array.isArray(list) ? list : [];
+  const seen = new Set();
+  for (const t of raw) {
+    const minH = Math.max(0, Math.round(Number(t && t.minH) || 0));
+    if (seen.has(minH)) return { ok: false, msg: 'Ambang jam tidak boleh sama' };
+    seen.add(minH);
+  }
+  const policy = normalizeRefundPolicy(raw);
+  a.refundPolicy = policy;
+  DB.save('agencies', arr);
+  audit('refund_policy', a.name + ' • ' + refundPolicyText(policy));
+  return { ok: true, policy };
+}
 /* Ledger: ditahan (bayar) → layak (trip tiba) → dicairkan (admin) ; void bila refund */
 export function createLedger(booking){
   if(!booking||booking.status!=='paid') return null;
@@ -202,6 +341,277 @@ export function voidLedger(bookingId){
   arr.forEach(e=>{ if(e.bookingId===bookingId&&e.status!=='dicairkan'){ e.status='void'; ch=true; } });
   if(ch){ DB.save('ledger',arr); audit('ledger_void',bookingId); }
   return ch;
+}
+
+/** Booking masih boleh dibatalkan: belum jalan/terlewat, belum boarding. */
+export function canCancelBooking(b, s) {
+  if (!b || !s) return false;
+  if (!['pending', 'paid'].includes(b.status) || b.boarded) return false;
+  if (['ontrip', 'arrived', 'missed', 'cancelled'].includes(s.tripStatus)) return false;
+  if (s.status === 'cancelled') return false;
+  return !scheduleIsPast(s, 0);
+}
+
+/**
+ * Pembatalan oleh pelanggan / agen atas permintaan pelanggan.
+ * Refund hanya komponen tiket sesuai kebijakan agen; booking pending = Rp0.
+ */
+export function cancelBooking(bookingId, { reason = '', by = 'pelanggan' } = {}) {
+  const bookings = DB.load('bookings', []);
+  const b = bookings.find((x) => x.id === bookingId);
+  if (!b) return { ok: false, msg: 'Booking tidak ditemukan' };
+  if (b.status === 'cancelled') return { ok: false, msg: 'Booking sudah dibatalkan' };
+  if (b.status === 'done') return { ok: false, msg: 'Perjalanan selesai — booking tidak bisa dibatalkan' };
+  const s = schedById(b.scheduleId);
+  if (!s) return { ok: false, msg: 'Jadwal tidak ditemukan' };
+  if (!canCancelBooking(b, s)) return { ok: false, msg: 'Pembatalan ditutup — jadwal sudah berangkat atau terlewat' };
+
+  const wasPaid = b.status === 'paid';
+  const fare = b.fare || splitFare(s, (b.seats || []).length, b.discount || 0);
+  const rule = wasPaid ? refundRuleFor(s.agencyId, s) : { minH: 0, pct: 0, hours: 0 };
+  const refund = wasPaid ? Math.round((Number(fare.ticket) || 0) * rule.pct / 100) : 0;
+  const now = new Date().toISOString();
+  const why = String(reason || '').trim() || (by === 'agen' ? 'Dibatalkan oleh agen' : 'Dibatalkan oleh pelanggan');
+
+  b.status = 'cancelled';
+  b.refundPct = rule.pct;
+  b.refundAmount = refund;
+  b.refundScope = 'ticket';
+  b.cancelReason = why;
+  b.cancelledBy = by;
+  b.cancelledAt = now;
+  DB.save('bookings', bookings);
+  voidLedger(b.id);
+
+  notify(
+    b.userEmail,
+    'Booking dibatalkan — ' + b.code,
+    refund > 0
+      ? 'Refund ' + new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(refund) + ' (' + rule.pct + '% tiket) diproses 1–3 hari kerja.'
+      : 'Tidak ada refund untuk booking ini (belum dibayar / kebijakan 0%).',
+    'WA'
+  );
+  audit('booking_cancel', b.code + ' • ' + by + ' • refund ' + rule.pct + '%');
+  processWaiting(b.scheduleId);
+  return { ok: true, refund, pct: rule.pct, pending: !wasPaid };
+}
+
+/**
+ * Pembatalan sepihak oleh operator (sopir/agen) sebelum keberangkatan.
+ * Wajib alasan; seluruh booking lunas direfund 100% dari total pembayaran.
+ */
+export function cancelScheduleByOperator(sid, reason, by = 'pengemudi') {
+  const why = String(reason || '').trim();
+  if (!why) return { ok: false, msg: 'Alasan pembatalan wajib diisi' };
+  const schedules = DB.load('schedules', []);
+  const s = schedules.find((x) => x.id === sid);
+  if (!s) return { ok: false, msg: 'Jadwal tidak ditemukan' };
+  if (s.status === 'cancelled' || s.tripStatus === 'cancelled') return { ok: false, msg: 'Jadwal sudah dibatalkan' };
+  if (s.tripStatus === 'ontrip') return { ok: false, msg: 'Perjalanan sudah dimulai — tidak bisa dibatalkan' };
+  if (s.tripStatus === 'arrived') return { ok: false, msg: 'Perjalanan sudah selesai' };
+  if (s.tripStatus === 'missed' || scheduleIsPast(s, 0)) {
+    return { ok: false, msg: 'Jadwal sudah lewat — selesaikan lewat antrean admin' };
+  }
+
+  const ledger = DB.load('ledger', []);
+  if (ledger.some((e) => e.scheduleId === sid && e.status === 'dicairkan')) {
+    return { ok: false, msg: 'Dana jadwal ini sudah dicairkan — hubungi admin' };
+  }
+
+  const bookings = DB.load('bookings', []);
+  const now = new Date().toISOString();
+  const rp = (n) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n);
+  let count = 0;
+  let pending = 0;
+  let total = 0;
+
+  bookings.forEach((b) => {
+    if (b.scheduleId !== sid) return;
+    if (b.status === 'paid') {
+      const fare = b.fare || splitFare(s, (b.seats || []).length, b.discount || 0);
+      const refund = Math.max(0, Number(b.total) || Number(fare.total) || 0);
+      b.status = 'cancelled';
+      b.refundPct = 100;
+      b.refundAmount = refund;
+      b.refundScope = 'total';
+      b.cancelReason = why;
+      b.cancelledBy = by;
+      b.cancelledAt = now;
+      count += 1;
+      total += refund;
+      notify(
+        b.userEmail,
+        'Jadwal dibatalkan — ' + b.code,
+        'Jadwal dibatalkan operator (' + why + '). Refund 100% ' + rp(refund) + ' diproses 1–3 hari kerja.',
+        'WA'
+      );
+    } else if (b.status === 'pending') {
+      b.status = 'cancelled';
+      b.refundPct = 0;
+      b.refundAmount = 0;
+      b.refundScope = 'total';
+      b.cancelReason = 'Jadwal dibatalkan operator: ' + why;
+      b.cancelledBy = by;
+      b.cancelledAt = now;
+      pending += 1;
+      notify(
+        b.userEmail,
+        'Jadwal dibatalkan — ' + b.code,
+        'Jadwal dibatalkan operator (' + why + '). Booking belum dibayar, tidak ada refund.',
+        'WA'
+      );
+    }
+  });
+
+  ledger.forEach((e) => {
+    if (e.scheduleId === sid && e.status !== 'dicairkan' && e.status !== 'void') {
+      e.status = 'void';
+      e.voidedAt = now;
+    }
+  });
+
+  s.tripStatus = 'cancelled';
+  s.status = 'cancelled';
+  s.cancelReason = why;
+  s.cancelledBy = by;
+  s.cancelledAt = now;
+  s.reviewedAt = now;
+  s.reviewResult = 'operator_cancel';
+
+  DB.save('schedules', schedules);
+  DB.save('bookings', bookings);
+  DB.save('ledger', ledger);
+
+  DB.load('users', [])
+    .filter((u) => u.role === 'superadmin')
+    .forEach((u) => notify(u.email, 'Jadwal dibatalkan operator', sid + ' • ' + why + ' • refund ' + rp(total), 'app'));
+
+  audit('schedule_operator_cancel', sid + ' • ' + by + ' • ' + count + ' booking • refund ' + total);
+  return { ok: true, count, pending, total };
+}
+
+/** Ubah status trip jadwal; dipakai pengemudi maupun admin. */
+export function setScheduleTripStatus(sid, st) {
+  if (!['ontrip', 'arrived'].includes(st)) return false;
+  const arr = DB.load('schedules', []);
+  const s = arr.find((x) => x.id === sid);
+  if (!s || s.tripStatus === st) return false;
+  if (s.reviewedAt && s.reviewResult === 'no_show') return false;
+  const prev = s.tripStatus || 'scheduled';
+  const now = new Date().toISOString();
+  s.tripStatus = st;
+  s.status = 'closed';
+  if (st === 'ontrip') s.departedAt = now;
+  if (st === 'arrived') {
+    s.arrivedAt = now;
+    if (prev === 'missed' || scheduleIsPast(s, SCHEDULE_GRACE_HOURS)) s.lateCompletion = true;
+  }
+  DB.save('schedules', arr);
+  if (st === 'arrived') releaseLedger(sid);
+
+  const bk = DB.load('bookings', []);
+  bk.forEach((b) => {
+    if (b.scheduleId !== sid || b.status !== 'paid') return;
+    b.tripStatus = st;
+    if (st === 'arrived') b.status = 'done';
+  });
+  DB.save('bookings', bk);
+
+  bk.filter((b) => b.scheduleId === sid && b.status !== 'cancelled').forEach((b) => {
+    notify(
+      b.userEmail,
+      st === 'ontrip' ? 'Perjalanan dimulai' : 'Kamu telah tiba',
+      st === 'ontrip' ? 'Armada berangkat. Selamat jalan!' : 'Terima kasih - jangan lupa beri rating.',
+      'WA'
+    );
+  });
+  audit('trip_update', sid + ' → ' + st + (s.lateCompletion ? ' • terlambat' : ''));
+  return true;
+}
+
+/**
+ * Admin menandai jadwal tidak berangkat dan memproses refund tiket manual.
+ * Jasa agen & fee platform tidak dikembalikan (mengikuti kebijakan refund yang ada).
+ */
+export function resolveScheduleNoShow(sid, refundPct = 100) {
+  const schedules = DB.load('schedules', []);
+  const s = schedules.find((x) => x.id === sid);
+  if (!s) return { ok: false, msg: 'Jadwal tidak ditemukan' };
+  if (!scheduleNeedsReview(s)) return { ok: false, msg: 'Jadwal sudah diselesaikan atau belum masuk antrean' };
+
+  const ledger = DB.load('ledger', []);
+  if (ledger.some((e) => e.scheduleId === sid && e.status === 'dicairkan')) {
+    return { ok: false, msg: 'Dana jadwal ini sudah dicairkan — refund tidak dapat diproses otomatis' };
+  }
+
+  const bookings = DB.load('bookings', []);
+  if (bookings.some((b) => b.scheduleId === sid && b.status === 'done')) {
+    return { ok: false, msg: 'Sudah ada booking selesai pada jadwal ini' };
+  }
+
+  const pct = Math.max(0, Math.min(100, Number(refundPct) || 0));
+  const now = new Date().toISOString();
+  let count = 0;
+  let total = 0;
+
+  bookings.forEach((b) => {
+    if (b.scheduleId !== sid) return;
+    if (b.status === 'paid') {
+      const fare = b.fare || splitFare(s, (b.seats || []).length, b.discount || 0);
+      const refund = Math.round((Number(fare.ticket) || 0) * pct / 100);
+      b.status = 'cancelled';
+      b.tripStatus = 'missed';
+      b.refundPct = pct;
+      b.refundAmount = refund;
+      b.refundScope = 'ticket';
+      b.cancelReason = 'Jadwal terlewat / tidak berangkat';
+      b.cancelledBy = 'admin';
+      b.cancelledAt = now;
+      count += 1;
+      total += refund;
+      notify(
+        b.userEmail,
+        'Jadwal tidak berangkat — ' + b.code,
+        refund > 0
+          ? 'Refund ' + new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(refund) + ' (' + pct + '%) diproses 1–3 hari kerja.'
+          : 'Booking dibatalkan. Tidak ada refund untuk booking ini (0%).',
+        'WA'
+      );
+    } else if (b.status === 'pending') {
+      b.status = 'cancelled';
+      b.tripStatus = 'missed';
+      b.refundPct = 0;
+      b.refundAmount = 0;
+      b.refundScope = 'ticket';
+      b.cancelReason = 'Jadwal terlewat / tidak berangkat';
+      b.cancelledBy = 'admin';
+      b.cancelledAt = now;
+    }
+  });
+
+  ledger.forEach((e) => {
+    if (e.scheduleId === sid && e.status !== 'dicairkan' && e.status !== 'void') {
+      e.status = 'void';
+      e.voidedAt = now;
+    }
+  });
+
+  s.tripStatus = 'missed';
+  s.status = 'cancelled';
+  s.reviewedAt = now;
+  s.reviewResult = 'no_show';
+  s.refundPct = pct;
+
+  DB.save('schedules', schedules);
+  DB.save('bookings', bookings);
+  DB.save('ledger', ledger);
+
+  DB.load('users', [])
+    .filter((u) => u.role === 'agen' && u.agencyId === s.agencyId)
+    .forEach((u) => notify(u.email, 'Jadwal ditandai tidak berangkat', 'Jadwal ' + sid + ' ditutup dengan refund tiket ' + pct + '%.', 'app'));
+
+  audit('schedule_no_show', sid + ' • refund ' + pct + '% • ' + count + ' booking • ' + total);
+  return { ok: true, count, total, pct };
 }
 export function settleLedger(ids){
   const arr=DB.load('ledger',[]); let n=0;

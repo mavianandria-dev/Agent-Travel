@@ -1,6 +1,6 @@
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { agencyOf, routeById, vehicleById, vehName, driverById, schedById, bookingsOf, agencyById, audit, notify, processWaiting, splitFare, createLedger } from '@/lib/domain.js';
+import { agencyOf, routeById, vehicleById, vehName, driverById, schedById, bookingsOf, agencyById, audit, splitFare, createLedger, canCancelBooking, cancelBooking as cancelBookingDomain, refundRuleFor, refundPolicyText } from '@/lib/domain.js';
 import { fmtRp, todayStr } from '@/lib/utils.js';
 import { Icon, BadgeStatus, fmtDate } from '@/components/ui.jsx';
 
@@ -42,29 +42,26 @@ function CancelModal({ bid }) {
   const b = DB.load('bookings', []).find((x) => x.id === bid);
   if (!b) return <div className="p-6 font-bold text-slate-500">Booking tidak ditemukan</div>;
   const s = schedById(b.scheduleId);
-  const h = (new Date(s.date + 'T' + s.time) - Date.now()) / 36e5;
-  const pol = ((agencyById(s.agencyId)?.refundPolicy) || []).slice().sort((a, b2) => b2.minH - a.minH);
-  const rule = pol.find((p) => h >= p.minH) || { pct: 0 };
+  if (!s) return <div className="p-6 font-bold text-slate-500">Jadwal tidak ditemukan</div>;
+  const fare = b.fare || splitFare(s, (b.seats || []).length, b.discount || 0);
+  const rule = refundRuleFor(s.agencyId, s);
+  const paid = b.status === 'paid';
+  const est = paid ? Math.round((Number(fare.ticket) || 0) * rule.pct / 100) : 0;
+  const cancelable = canCancelBooking(b, s);
   const doCancel = () => {
-    const arr = DB.load('bookings', []);
-    const m = arr.find((x) => x.id === bid);
-    m.status = 'cancelled';
-    m.refundPct = rule.pct;
-    m.refundAmount = Math.round(m.total * (rule.pct / 100));
-    DB.save('bookings', arr); refresh();
-    audit('booking_cancel', m.code + ' • refund ' + m.refundPct + '%');
-    notify(m.userEmail, 'Booking dibatalkan — ' + m.code, 'Refund ' + fmtRp(m.refundAmount || 0) + ' (' + (m.refundPct || 0) + '%) diproses 1–3 hari kerja.', 'WA');
-    processWaiting(m.scheduleId);
+    const res = cancelBookingDomain(bid, { by: 'agen' });
     closeModal();
-    toast('Booking dibatalkan. Refund ' + fmtRp(m.refundAmount || 0), 'info');
     refresh();
+    if (!res.ok) { toast(res.msg, 'err'); return; }
+    toast(res.refund > 0 ? 'Booking dibatalkan. Refund ' + fmtRp(res.refund) : 'Booking dibatalkan. Tidak ada refund.', 'info');
   };
   return (
     <div className="p-6"><h3 className="font-extrabold text-[17px]">Batalkan Booking?</h3>
-      <p className="text-[13px] text-slate-500 font-medium mt-1">Refund mengikuti kebijakan agen: H-3 = 100%, H-1 = 50%, hari-H = 0%.</p>
-      <div className="mt-3"><div className="bg-sky-50 rounded-2xl p-3 text-[13px] font-bold text-sky-900">Estimasi refund: <b>{rule.pct}% × {fmtRp(b.total)} = {fmtRp(Math.round(b.total * rule.pct / 100))}</b><br /><span className="font-medium text-[12px]">Keberangkatan {Math.max(0, Math.round(h))} jam lagi</span></div></div>
+      <p className="text-[13px] text-slate-500 font-medium mt-1">Refund mengikuti kebijakan travel: {refundPolicyText((agencyById(s.agencyId) || {}).refundPolicy)}. Hanya komponen tiket yang kembali — jasa agen &amp; fee platform hangus.</p>
+      <div className="mt-3"><div className="bg-sky-50 rounded-2xl p-3 text-[13px] font-bold text-sky-900">{paid ? <>Estimasi refund: <b>{rule.pct}% × {fmtRp(fare.ticket)} (tiket) = {fmtRp(est)}</b><br /><span className="font-medium text-[12px]">Keberangkatan {Math.max(0, Math.round(rule.hours))} jam lagi</span></> : <>Booking belum dibayar — <b>tidak ada refund</b>.</>}</div></div>
+      {!cancelable ? <div className="mt-3 bg-amber-50 border border-amber-200 rounded-2xl px-3 py-2 text-[12px] font-semibold text-amber-800">Pembatalan sudah ditutup — jadwal berangkat/terlewat atau booking sudah selesai.</div> : null}
       <div className="flex gap-2 mt-4"><button onClick={() => closeModal()} className="flex-1 bg-slate-100 font-bold text-[13px] py-2.5 rounded-xl">Batal</button>
-        <button onClick={doCancel} className="flex-1 bg-red-500 text-white font-extrabold text-[13px] py-2.5 rounded-xl">Ya, Batalkan</button></div></div>
+        <button onClick={doCancel} disabled={!cancelable} className="flex-1 bg-red-500 text-white font-extrabold text-[13px] py-2.5 rounded-xl disabled:opacity-40">Ya, Batalkan</button></div></div>
   );
 }
 
@@ -134,7 +131,7 @@ export default function Bookings({ ag }) {
                 <td className="whitespace-nowrap"><div className="flex gap-1.5">
                   {b.status === 'pending' ? <button onClick={() => verifyPay(b.id)} title="Verifikasi manual" className="bg-green-100 text-green-700 p-2 rounded-lg"><Icon name="check-check" className="w-4 h-4" /></button> : null}
                   <button onClick={() => manifest(s.id)} title="Manifest" className="bg-sky-100 text-sky-700 p-2 rounded-lg"><Icon name="printer" className="w-4 h-4" /></button>
-                  {b.status !== 'cancelled' ? <button onClick={() => cancelBooking(b.id)} className="bg-red-50 text-red-500 p-2 rounded-lg"><Icon name="x" className="w-4 h-4" /></button> : null}
+                  {canCancelBooking(b, s) ? <button onClick={() => cancelBooking(b.id)} className="bg-red-50 text-red-500 p-2 rounded-lg"><Icon name="x" className="w-4 h-4" /></button> : null}
                 </div></td></tr>
             );
           })}

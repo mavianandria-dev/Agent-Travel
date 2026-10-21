@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { routeById, vehicleById, bookingsOf, vehName, vehLayout, schedSeatCap, takenSeats, audit, notify, releaseLedger } from '@/lib/domain.js';
+import { routeById, vehicleById, bookingsOf, vehName, vehLayout, schedSeatCap, takenSeats, audit, setScheduleTripStatus, scheduleNeedsReview } from '@/lib/domain.js';
 import { todayStr } from '@/lib/utils.js';
 import { Icon, Empty, BadgeStatus, fmtDate } from '@/components/ui.jsx';
+import CancelTripModal from '@/components/CancelTripModal.jsx';
 
 export function drvOfUser(u) {
   if (!u) return null;
@@ -13,22 +14,9 @@ export function drvOfUser(u) {
 }
 
 export function tripUpdate(sid, st, toast, refresh) {
-  const arr = DB.load('schedules', []);
-  const s = arr.find((x) => x.id === sid);
-  if (!s) return;
-  s.tripStatus = st;
-  if (st === 'arrived') { s.arrivedAt = new Date().toISOString(); }
-  DB.save('schedules', arr);
+  if (!setScheduleTripStatus(sid, st)) return;
   refresh();
-  if (st === 'arrived') { releaseLedger(sid); refresh(); }
-  const bk = DB.load('bookings', []);
-  bk.forEach((b) => { if (b.scheduleId === sid && b.status === 'paid') { b.tripStatus = st; if (st === 'arrived') b.status = 'done'; } });
-  DB.save('bookings', bk);
-  refresh();
-  bk.filter((b) => b.scheduleId === sid).forEach((b) => notify(b.userEmail, st === 'ontrip' ? 'Perjalanan dimulai' : 'Kamu telah tiba', st === 'ontrip' ? 'Armada berangkat. Selamat jalan!' : 'Terima kasih - jangan lupa beri rating.', 'WA'));
-  audit('trip_update', sid + ' → ' + st);
   toast(st === 'ontrip' ? 'Status: Dalam Perjalanan - notif terkirim ke penumpang' : 'Perjalanan selesai. Booking → Selesai.');
-  refresh();
 }
 
 function ManifestModal({ sid }) {
@@ -116,9 +104,39 @@ export function boardPassenger(sid, code, toast, closeModal, refresh) {
 export default function Tasks() {
   const { view, go, user, toast, refresh, openModal } = useApp();
   const me = drvOfUser(user);
+  const today = todayStr(0);
   const mySched = DB.load('schedules', []).filter((s) => !me || s.driverId === me.id).sort((a, b) => (a.date + b.time).localeCompare(b.date + b.time));
-  const upcoming = mySched.filter((s) => s.date >= todayStr(0));
+  const overdue = mySched.filter(scheduleNeedsReview);
+  const upcoming = mySched.filter((s) => s.date >= today && !scheduleNeedsReview(s) && s.status !== 'cancelled' && !['arrived', 'missed', 'cancelled'].includes(s.tripStatus));
   const pills = [['driver', 'car-front', 'Tugas Saya'], ['driver-trips', 'route', 'Trip'], ['driver-wallet', 'wallet', 'Dompet']];
+
+  const renderTask = (s, late) => {
+    const r = routeById(s.routeId), v = vehicleById(s.vehicleId);
+    const bk = bookingsOf(s.id);
+    const finish = () => {
+      if (late && !window.confirm('Tandai trip ini sebagai Tiba? Pastikan perjalanan benar-benar sudah terjadi.')) return;
+      tripUpdate(s.id, 'arrived', toast, refresh);
+    };
+    return (
+      <div key={s.id} className="bg-white rounded-3xl shadow-card p-4">
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="bg-[#0b2447] text-white rounded-2xl px-3.5 py-2 text-center"><div className="text-[11px] font-bold opacity-70">{fmtDate(s.date)}</div><div className="font-extrabold text-[16px]">{s.time}</div></div>
+          <div className="flex-1 min-w-[180px]"><div className="font-extrabold text-[15px]">{r.from} → {r.to}</div><div className="text-[12px] text-slate-500 font-medium">{vehName(v)} {v?.plate} • {takenSeats(s.id).paid.length}/{schedSeatCap(s.id)} penumpang</div></div>
+          <BadgeStatus st={s.tripStatus || 'scheduled'} />
+        </div>
+        <div className="mt-2.5 bg-slate-50 rounded-2xl p-3 text-[12.5px] font-semibold"><span className="text-slate-400 font-extrabold text-[11px]">TITIK JEMPUT:</span> {(r.pickups || []).join(' → ')}</div>
+        <div className="flex flex-wrap gap-2 mt-3">
+          <button onClick={() => openModal(<ManifestModal sid={s.id} />)} className="flex-1 bg-sky-50 text-sky-700 text-[12.5px] font-extrabold py-2.5 rounded-xl min-w-[130px]"><Icon name="users" className="w-4 h-4 inline" /> Manifest ({bk.length})</button>
+          {late ? <button onClick={finish} className="flex-1 bg-blue-600 text-white text-[12.5px] font-extrabold py-2.5 rounded-xl min-w-[130px]">Tandai Tiba</button> : null}
+          {!late && (s.tripStatus === 'scheduled' || !s.tripStatus) ? <button onClick={() => tripUpdate(s.id, 'ontrip', toast, refresh)} className="flex-1 bg-green-500 text-white text-[12.5px] font-extrabold py-2.5 rounded-xl min-w-[130px]">Berangkat →</button> : null}
+          {!late && (s.tripStatus === 'scheduled' || !s.tripStatus) && bk.length ? <button onClick={() => openModal(<CancelTripModal sid={s.id} by="pengemudi" />)} className="bg-red-50 text-red-600 text-[12.5px] font-extrabold px-4 py-2.5 rounded-xl"><Icon name="calendar-x" className="w-4 h-4 inline" /> Batalkan</button> : null}
+          {!late && s.tripStatus === 'ontrip' ? <button onClick={finish} className="flex-1 bg-blue-600 text-white text-[12.5px] font-extrabold py-2.5 rounded-xl min-w-[130px]">Tiba di Tujuan</button> : null}
+          <button onClick={() => openModal(<ScanModal sid={s.id} />)} className="bg-[#0b2447] text-white text-[12.5px] font-extrabold px-4 py-2.5 rounded-xl"><Icon name="scan-line" className="w-4 h-4 inline" /> Scan QR</button>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <>
       <div className="anim bg-white rounded-3xl shadow-card p-4 flex gap-2 overflow-x-auto no-print">
@@ -131,31 +149,19 @@ export default function Tasks() {
       <div className="anim space-y-4 mt-4">
         <div className="bg-gradient-to-r from-[#0b2447] to-sky-700 text-white rounded-3xl p-5 shadow-card flex items-center gap-4">
           <div className="w-14 h-14 rounded-2xl bg-white/15 flex items-center justify-center font-extrabold text-2xl">{((me?.name || user?.name || 'P')[0])}</div>
-          <div><div className="font-extrabold text-[17px]">Halo, {me?.name || user?.name}!</div><div className="text-[12.5px] opacity-80 font-medium">{upcoming.length} tugas ke depan • standby 30 mnt sebelum jam</div></div>
+          <div><div className="font-extrabold text-[17px]">Halo, {me?.name || user?.name}!</div><div className="text-[12.5px] opacity-80 font-medium">{overdue.length ? overdue.length + ' perlu diselesaikan • ' : ''}{upcoming.length} tugas ke depan • standby 30 mnt sebelum jam</div></div>
           <div className="flex-1"></div><button onClick={() => go('driver-trips')} className="bg-white/15 text-[12px] font-extrabold px-4 py-2 rounded-xl">Riwayat</button>
         </div>
+
+        {overdue.length ? <div className="bg-amber-50 border-2 border-amber-200 rounded-3xl p-4">
+          <h3 className="font-extrabold text-[15px] flex items-center gap-2 text-amber-900"><Icon name="triangle-alert" className="w-4 h-4 text-amber-600" />Perlu Diselesaikan ({overdue.length})</h3>
+          <p className="text-[12px] font-medium text-amber-800 mt-1">Jadwal sudah lewat. Tandai Tiba hanya jika perjalanan benar-benar terjadi.</p>
+          <div className="space-y-3 mt-3">{overdue.slice(0, 6).map((s) => renderTask(s, true))}</div>
+        </div> : null}
+
         <div className="space-y-3">
-          {upcoming.slice(0, 6).map((s) => {
-            const r = routeById(s.routeId), v = vehicleById(s.vehicleId);
-            const bk = bookingsOf(s.id);
-            return (
-              <div key={s.id} className="bg-white rounded-3xl shadow-card p-4">
-                <div className="flex items-center gap-3 flex-wrap">
-                  <div className="bg-[#0b2447] text-white rounded-2xl px-3.5 py-2 text-center"><div className="text-[11px] font-bold opacity-70">{fmtDate(s.date)}</div><div className="font-extrabold text-[16px]">{s.time}</div></div>
-                  <div className="flex-1 min-w-[180px]"><div className="font-extrabold text-[15px]">{r.from} → {r.to}</div><div className="text-[12px] text-slate-500 font-medium">{vehName(v)} {v?.plate} • {takenSeats(s.id).paid.length}/{schedSeatCap(s.id)} penumpang</div></div>
-                  <BadgeStatus st={s.tripStatus || 'scheduled'} />
-                </div>
-                <div className="mt-2.5 bg-slate-50 rounded-2xl p-3 text-[12.5px] font-semibold"><span className="text-slate-400 font-extrabold text-[11px]">TITIK JEMPUT:</span> {(r.pickups || []).join(' → ')}</div>
-                <div className="flex flex-wrap gap-2 mt-3">
-                  <button onClick={() => openModal(<ManifestModal sid={s.id} />)} className="flex-1 bg-sky-50 text-sky-700 text-[12.5px] font-extrabold py-2.5 rounded-xl min-w-[130px]"><Icon name="users" className="w-4 h-4 inline" /> Manifest ({bk.length})</button>
-                  {s.tripStatus === 'scheduled' || !s.tripStatus ? <button onClick={() => tripUpdate(s.id, 'ontrip', toast, refresh)} className="flex-1 bg-green-500 text-white text-[12.5px] font-extrabold py-2.5 rounded-xl min-w-[130px]">Berangkat →</button> : null}
-                  {s.tripStatus === 'ontrip' ? <button onClick={() => tripUpdate(s.id, 'arrived', toast, refresh)} className="flex-1 bg-blue-600 text-white text-[12.5px] font-extrabold py-2.5 rounded-xl min-w-[130px]">Tiba di Tujuan</button> : null}
-                  <button onClick={() => openModal(<ScanModal sid={s.id} />)} className="bg-[#0b2447] text-white text-[12.5px] font-extrabold px-4 py-2.5 rounded-xl"><Icon name="scan-line" className="w-4 h-4 inline" /> Scan QR</button>
-                </div>
-              </div>
-            );
-          })}
-          {upcoming.length === 0 ? <Empty icon="car" msg="Tidak ada tugas — Istirahat dulu, Pengemudi hebat." /> : null}
+          {upcoming.slice(0, 6).map((s) => renderTask(s, false))}
+          {upcoming.length === 0 && overdue.length === 0 ? <Empty icon="car" msg="Tidak ada tugas — Istirahat dulu, Pengemudi hebat." /> : null}
         </div>
       </div>
     </>

@@ -78,7 +78,7 @@ export function StatCard({ icon, label, val, sub, color }) {
 
 const STATUS_MAP = {
   pending: ['b-pending', 'Menunggu Bayar'], paid: ['b-paid', 'Lunas'], cancelled: ['b-cancel', 'Dibatalkan'],
-  done: ['b-done', 'Selesai'], scheduled: ['b-wait', 'Terjadwal'], ontrip: ['b-pending', 'Berjalan'], arrived: ['b-done', 'Tiba'],
+  done: ['b-done', 'Selesai'], scheduled: ['b-wait', 'Terjadwal'], ontrip: ['b-pending', 'Berjalan'], arrived: ['b-done', 'Tiba'], missed: ['b-missed', 'Terlewat'],
 };
 
 export function BadgeStatus({ st }) {

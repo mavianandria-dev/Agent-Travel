@@ -106,7 +106,7 @@ export function tabsFor(u, t) {
     return [{ v: 'agen', icon: 'layout-dashboard', label: t('dashboard') }, { v: 'agen-book', icon: 'clipboard-list', label: t('bookings') }, { v: 'agen-sched', icon: 'calendar-days', label: t('schedules') }, { v: 'agen-fleet', icon: 'car', label: t('vehicles') }, { v: 'agen-fin', icon: 'wallet', label: t('finance') }];
   }
   if (u.role === 'pengemudi') return [{ v: 'driver', icon: 'car-front', label: t('tasks') }, { v: 'driver-trips', icon: 'route', label: 'Trip' }];
-  if (u.role === 'superadmin') return [{ v: 'admin', icon: 'shield-check', label: 'Admin' }, { v: 'admin-tx', icon: 'receipt-text', label: t('transactions') }, { v: 'admin-ag', icon: 'building-2', label: t('agencies') }, { v: 'admin-master', icon: 'database', label: t('master') }];
+  if (u.role === 'superadmin') return [{ v: 'admin', icon: 'shield-check', label: 'Admin' }, { v: 'admin-tx', icon: 'receipt-text', label: t('transactions') }, { v: 'admin-ag', icon: 'building-2', label: t('agencies') }, { v: 'admin-refund', icon: 'settings', label: 'Refund' }, { v: 'admin-master', icon: 'database', label: t('master') }];
   return [];
 }
 

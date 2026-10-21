@@ -9,7 +9,7 @@ export default function Trips() {
   const { view, go, user } = useApp();
   const me = drvOfUser(user);
   const mySched = DB.load('schedules', []).filter((s) => !me || s.driverId === me.id).sort((a, b) => (a.date + b.time).localeCompare(b.date + b.time));
-  const upcoming = mySched.filter((s) => s.date >= todayStr(0));
+  const upcoming = mySched.filter((s) => s.date >= todayStr(0) && s.status !== 'cancelled' && !['arrived', 'missed', 'cancelled'].includes(s.tripStatus));
   const pills = [['driver', 'car-front', 'Tugas Saya'], ['driver-trips', 'route', 'Trip'], ['driver-wallet', 'wallet', 'Dompet']];
   return (
     <>

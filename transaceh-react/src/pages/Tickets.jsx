@@ -1,6 +1,6 @@
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { schedById, routeById, vehicleById, vehName } from '@/lib/domain.js';
+import { schedById, routeById, vehicleById, vehName, canCancelBooking } from '@/lib/domain.js';
 import { fmtRp } from '@/lib/utils.js';
 import { Icon, Empty, BadgeStatus, fmtDate } from '@/components/ui.jsx';
 import { PaymentModal } from './Search.jsx';
@@ -68,7 +68,7 @@ export default function Tickets() {
                 <div className="flex gap-2 mt-3">
                   <button onClick={() => go('ticket-detail:' + b.id)} className="flex-1 bg-[#0b2447] text-white text-[12.5px] font-extrabold py-2.5 rounded-xl">Detail / E-Tiket</button>
                   {b.status === 'pending' ? <button onClick={() => repay(b.id)} className="flex-1 bg-green-500 text-white text-[12.5px] font-extrabold py-2.5 rounded-xl">Bayar</button> : null}
-                  {['pending', 'paid'].includes(b.status) ? <button onClick={() => cancelBooking(b.id)} className="px-3.5 bg-red-50 text-red-600 rounded-xl" title="Batalkan"><Icon name="trash-2" className="w-4 h-4" /></button> : null}
+                  {canCancelBooking(b, d.s) ? <button onClick={() => cancelBooking(b.id)} className="px-3.5 bg-red-50 text-red-600 rounded-xl" title="Batalkan"><Icon name="trash-2" className="w-4 h-4" /></button> : null}
                 </div></div></div>
           );
         })}</div>

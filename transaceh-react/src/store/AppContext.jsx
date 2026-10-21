@@ -2,10 +2,11 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { T } from '@/lib/i18n.js';
 import { todayStr } from '@/lib/utils.js';
 import { initDB } from '@/lib/seed.js';
-import { currentUser, setSession, cleanupHolds, audit, agencyPending } from '@/lib/domain.js';
+import { currentUser, setSession, cleanupHolds, syncScheduleLifecycle, audit, agencyPending } from '@/lib/domain.js';
 import { clearCheckoutDraft } from '@/lib/checkoutDraft.js';
 
 initDB();
+syncScheduleLifecycle();
 
 const AppCtx = createContext(null);
 export const useApp = () => useContext(AppCtx);
@@ -97,8 +98,11 @@ export function AppProvider({ children }) {
 
   useEffect(() => {
     cleanupHolds();
-    const iv = setInterval(cleanupHolds, 10000);
-    return () => clearInterval(iv);
+    const holdIv = setInterval(cleanupHolds, 10000);
+    const scheduleIv = setInterval(() => {
+      if (syncScheduleLifecycle()) setTick((x) => x + 1);
+    }, 60000);
+    return () => { clearInterval(holdIv); clearInterval(scheduleIv); };
   }, []);
 
   useEffect(() => {

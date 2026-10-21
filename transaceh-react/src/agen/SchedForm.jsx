@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { agencyById, routeById, vehicleById, vehName, driverByName, schedConflict, corridorClash, priceForAgency, routeOfferedTo, audit, DEFAULT_SERVICE } from '@/lib/domain.js';
+import { agencyById, routeById, vehicleById, vehName, driverByName, schedConflict, corridorClash, priceForAgency, routeOfferedTo, scheduleDepartureMs, audit, DEFAULT_SERVICE } from '@/lib/domain.js';
 import { fmtRp, todayStr } from '@/lib/utils.js';
 import { Icon } from '@/components/ui.jsx';
 
@@ -126,6 +126,7 @@ export function SchedFormModal({ agId, onDone }) {
   const [mm, setMm] = useState('00');
   const [dates, setDates] = useState(() => new Set());
   const [cal, setCal] = useState(() => { const t = new Date(); return { y: t.getFullYear(), m: t.getMonth() }; });
+  const [nowMs] = useState(() => Date.now());
 
   const today = todayStr(0);
   const atCur = cal.y === Number(today.slice(0, 4)) && cal.m === Number(today.slice(5, 7)) - 1;
@@ -142,8 +143,9 @@ export function SchedFormModal({ agId, onDone }) {
   const clashList = selSorted.map((d) => ({ d, s: schedConflict(d, time, vidOk, drvAuto ? drvAuto.id : '', veh ? veh.drvName : '') })).filter((x) => x.s);
   /* jam kembar: koridor sama + tanggal sama + jam sama, milik agen ini saja */
   const dupList = selSorted.map((d) => ({ d, s: corridorClash(d, time, routeId, agId) })).filter((x) => x.s && !clashList.some((c) => c.d === x.d));
+  const isPastSelection = (d, at = nowMs) => scheduleDepartureMs({ date: d, time }) <= at;
   const skipped = (d) => clashList.some((x) => x.d === d) || dupList.some((x) => x.d === d);
-  const okCount = selSorted.length - clashList.length - dupList.length;
+  const okCount = selSorted.filter((d) => !skipped(d) && !isPastSelection(d)).length;
   const finalPrice = priceForAgency(routeById(routeId), agId);
 
   const saveSched = () => {
@@ -152,8 +154,9 @@ export function SchedFormModal({ agId, onDone }) {
     if (!r) { toast('Pilih rute dulu', 'err'); return; }
     if (!(finalPrice > 0)) { toast('Rute belum punya harga — usulkan harga via halaman Rute', 'err'); return; }
     if (!vidOk) { toast('Belum ada armada tersedia di rute ini — tambah armada dulu', 'err'); return; }
-    if (!okCount) { toast('Semua tanggal bentrok — tidak ada jadwal yang bisa disimpan', 'err'); return; }
-    const ok = selSorted.filter((d) => !skipped(d));
+    const pastAtSave = selSorted.filter((d) => isPastSelection(d, Date.now()));
+    const ok = selSorted.filter((d) => !skipped(d) && !pastAtSave.includes(d));
+    if (!ok.length) { toast(pastAtSave.length ? 'Jam keberangkatan hari ini sudah lewat — pilih jam/tanggal lain' : 'Semua tanggal bentrok — tidak ada jadwal yang bisa disimpan', 'err'); return; }
     const arr = DB.load('schedules', []);
     ok.forEach((d) => {
       arr.push({ id: 'S-' + Math.random().toString(36).slice(2, 7).toUpperCase(), agencyId: agId, routeId: r.id, date: d, time, vehicleId: vidOk, driverId: drvAuto ? drvAuto.id : null, driverName: veh ? veh.drvName : '', backupName, price: finalPrice, status: 'open', tripStatus: 'scheduled', blockedSeats: [], createdAt: new Date().toISOString() });
@@ -161,7 +164,7 @@ export function SchedFormModal({ agId, onDone }) {
     DB.save('schedules', arr); refresh();
     audit('schedule_create', r.from + '→' + r.to + ' ' + time + ' • ' + ok.length + ' tanggal • ' + ok.slice(0, 6).join(', ') + (ok.length > 6 ? '…' : ''));
     closeModal();
-    toast(ok.length + ' jadwal disimpan' + (clashList.length + dupList.length ? ' • ' + (clashList.length + dupList.length) + ' tanggal bentrok dilewati' : ''));
+    toast(ok.length + ' jadwal disimpan' + (clashList.length + dupList.length ? ' • ' + (clashList.length + dupList.length) + ' tanggal bentrok dilewati' : '') + (pastAtSave.length ? ' • ' + pastAtSave.length + ' tanggal sudah lewat' : ''));
     refresh();
     if (onDone) onDone();
   };
@@ -247,7 +250,7 @@ export function SchedFormModal({ agId, onDone }) {
         </div>
       ) : null}
 
-      <button onClick={saveSched} className="mt-4 w-full bg-sky-600 text-white font-extrabold text-[14px] py-3 rounded-2xl">{!selSorted.length ? 'Simpan Jadwal' : okCount ? 'Simpan ' + okCount + ' Jadwal' : 'Semua Tanggal Bentrok'}</button>
+      <button onClick={saveSched} className="mt-4 w-full bg-sky-600 text-white font-extrabold text-[14px] py-3 rounded-2xl">{!selSorted.length ? 'Simpan Jadwal' : okCount ? 'Simpan ' + okCount + ' Jadwal' : 'Tidak Ada Tanggal Valid'}</button>
     </div>
   );
 }

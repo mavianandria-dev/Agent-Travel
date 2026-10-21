@@ -1,12 +1,47 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { settleLedger, ledgerEligible, driverById, schedById, routeById, agencyById } from '@/lib/domain.js';
+import { settleLedger, ledgerEligible, driverById, schedById, routeById, agencyById, scheduleNeedsReview, setScheduleTripStatus, resolveScheduleNoShow, splitFare } from '@/lib/domain.js';
 import { fmtRp } from '@/lib/utils.js';
 import { Icon, Empty } from '@/components/ui.jsx';
 
+function NoShowModal({ sid }) {
+  const { closeModal, toast, refresh } = useApp();
+  const [pct, setPct] = useState(100);
+  const s = schedById(sid);
+  if (!s) return <div className="p-6 font-bold text-slate-500">Jadwal tidak ditemukan</div>;
+  const paid = DB.load('bookings', []).filter((b) => b.scheduleId === sid && b.status === 'paid');
+  const ticketTotal = paid.reduce((a, b) => a + (Number((b.fare || splitFare(s, (b.seats || []).length, b.discount || 0)).ticket) || 0), 0);
+  const refund = Math.round(ticketTotal * (Number(pct) || 0) / 100);
+  const submit = () => {
+    const res = resolveScheduleNoShow(sid, pct);
+    if (!res.ok) { toast(res.msg, 'err'); return; }
+    closeModal();
+    refresh();
+    toast((res.count || 0) + ' booking dibatalkan • refund ' + fmtRp(res.total || 0));
+  };
+  return (
+    <div className="p-6">
+      <h3 className="font-extrabold text-[17px]">Tandai Tidak Berangkat?</h3>
+      <p className="text-[13px] text-slate-500 font-medium mt-1">Jadwal akan ditutup. Refund hanya dihitung dari komponen tiket; jasa agen dan fee platform tidak dikembalikan.</p>
+      <div className="mt-3 bg-slate-50 rounded-2xl p-3 text-[12.5px] font-semibold">
+        <div>Jadwal: <b>{s.date} {s.time}</b></div>
+        <div>Booking lunas: <b>{paid.length}</b></div>
+        <div>Total tiket: <b>{fmtRp(ticketTotal)}</b></div>
+      </div>
+      <label className="block mt-3 text-[11px] font-extrabold text-slate-500">PERSENTASE REFUND TIKET</label>
+      <input type="number" min="0" max="100" value={pct} onChange={(e) => setPct(Math.max(0, Math.min(100, Number(e.target.value) || 0)))} className="mt-1 w-full text-[14px] font-bold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" />
+      <div className="mt-2 text-[12.5px] font-semibold text-slate-600">Estimasi refund: <b className="text-green-700">{fmtRp(refund)}</b></div>
+      <div className="flex gap-2 mt-4">
+        <button onClick={closeModal} className="flex-1 bg-slate-100 font-bold text-[13px] py-2.5 rounded-xl">Batal</button>
+        <button onClick={submit} className="flex-1 bg-red-500 text-white font-extrabold text-[13px] py-2.5 rounded-xl">Tutup & Proses Refund</button>
+      </div>
+    </div>
+  );
+}
+
 export default function Settlement() {
-  const { toast, refresh } = useApp();
+  const { toast, refresh, openModal } = useApp();
   const [agFilter, setAgFilter] = useState('');
   const [sel, setSel] = useState([]);
   const agencies = DB.load('agencies', []);
@@ -41,6 +76,10 @@ export default function Settlement() {
     .sort((a, b) => (b.paidOutAt || '').localeCompare(a.paidOutAt || ''))
     .slice(0, 10);
 
+  const reviewSchedules = DB.load('schedules', [])
+    .filter((s) => scheduleNeedsReview(s) && (!agFilter || s.agencyId === agFilter))
+    .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+
   const rowInfo = (e) => {
     const s = schedById(e.scheduleId);
     const r = s ? routeById(s.routeId) : null;
@@ -53,6 +92,39 @@ export default function Settlement() {
 
   return (
     <div className="space-y-4">
+      {reviewSchedules.length ? <div className="bg-white rounded-3xl shadow-card p-5">
+        <h3 className="font-extrabold text-[16px] flex items-center gap-2"><Icon name="triangle-alert" className="w-5 h-5 text-amber-500" />Jadwal Perlu Penyelesaian ({reviewSchedules.length})</h3>
+        <p className="text-[12px] text-slate-500 font-medium mt-1">Konfirmasi trip yang benar-benar terjadi, atau proses refund manual bila jadwal tidak berangkat. Tidak ada refund otomatis.</p>
+        <div className="table-wrap mt-3"><table className="data w-full min-w-[900px]"><thead><tr>
+          <th>Jadwal</th><th>Rute / Agen</th><th>Pengemudi</th><th>Penumpang Lunas</th><th>Ledger</th><th>Aksi</th>
+        </tr></thead><tbody>
+          {reviewSchedules.map((s) => {
+            const r = routeById(s.routeId);
+            const ag = agencyById(s.agencyId);
+            const d = driverById(s.driverId);
+            const paid = bookings.filter((b) => b.scheduleId === s.id && b.status === 'paid');
+            const totalTicket = paid.reduce((a, b) => a + (Number((b.fare || splitFare(s, (b.seats || []).length, b.discount || 0)).ticket) || 0), 0);
+            const led = ledger.filter((e) => e.scheduleId === s.id);
+            return (
+              <tr key={s.id}>
+                <td className="font-bold">{s.date}<br /><span className="text-sky-600">{s.time}</span></td>
+                <td className="text-[12.5px] font-semibold">{r?.from} → {r?.to}<br /><span className="text-slate-400">{ag?.name}</span></td>
+                <td className="text-[12.5px] font-semibold">{d?.name || s.driverName || '-'}</td>
+                <td className="text-[12.5px] font-semibold">{paid.length} lunas<br /><span className="text-slate-400">{fmtRp(totalTicket)}</span></td>
+                <td className="text-[12px] font-semibold">{led.length ? [...new Set(led.map((e) => e.status))].join(', ') : '-'}</td>
+                <td><div className="flex flex-wrap gap-1.5">
+                  <button onClick={() => {
+                    if (!window.confirm('Tandai trip ini sebagai selesai? Ledger akan menjadi layak cair.')) return;
+                    if (setScheduleTripStatus(s.id, 'arrived')) { refresh(); toast('Trip ditandai selesai'); }
+                  }} className="bg-blue-600 text-white text-[11.5px] font-extrabold px-3 py-2 rounded-lg">Trip Terjadi</button>
+                  <button onClick={() => openModal(<NoShowModal sid={s.id} />)} className="bg-red-50 text-red-600 text-[11.5px] font-extrabold px-3 py-2 rounded-lg">Tidak Berangkat</button>
+                </div></td>
+              </tr>
+            );
+          })}
+        </tbody></table></div>
+      </div> : null}
+
       <div className="bg-white rounded-3xl shadow-card p-5">
         <div className="flex items-center gap-2 flex-wrap">
           <h3 className="font-extrabold text-[16px] flex items-center gap-2"><Icon name="hand-coins" className="w-5 h-5 text-sky-600" />Settlement Pencairan ({layakList.length})</h3>

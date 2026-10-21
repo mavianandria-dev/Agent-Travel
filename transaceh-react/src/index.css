@@ -47,6 +47,7 @@ body { background: #f1f5f9; }
 .b-cancel { background: #fee2e2; color: #991b1b; }
 .b-done { background: #dbeafe; color: #1e40af; }
 .b-wait { background: #f1f5f9; color: #475569; }
+.b-missed { background: #ffedd5; color: #9a3412; }
 
 .step-dot { width: 32px; height: 32px; border-radius: 99px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px; transition: all 0.3s; }
 .navbtn { transition: all 0.2s; }
