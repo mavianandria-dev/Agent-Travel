@@ -114,7 +114,8 @@
     <div>
       <h1>Alur Aplikasi TransAceh — Flowchart</h1>
       <p>Dokumentasi alur kerja platform: pendaftaran &amp; verifikasi → armada &amp; jadwal → pemesanan penumpang → hari-H &amp; arus uang.</p>
-      <div class="meta">Disusun dari kode aplikasi <b>transaceh-react</b> (simulasi localStorage) · <b>Revisi 3 — 21 Oktober 2026</b> · opens offline, tanpa internet</div>
+      <div class="meta">Disusun dari kode aplikasi <b>transaceh-react</b> (simulasi localStorage) · <b>Revisi 4 — 22 Oktober 2026</b> · opens offline, tanpa internet</div>
+      <div class="meta">Revisi 4 menambah: <b>ringkasan TITIK JEMPUT dari manifest</b> di kartu tugas pengemudi · <b>tutup/buka kursi manual</b> oleh agen &amp; pengemudi · <b>catatan audit kesalahan aplikasi</b> per 22 Oktober 2026.</div>
       <div class="meta">Revisi 3 menambah: <b>halaman profil pengemudi</b> (isi sendiri + verifikasi agen). Revisi 2 menambah: <b>fee platform global</b> · <b>tiket online oleh pengemudi</b> · <b>delay &amp; jadwal terlewat</b> · <b>aturan refund saat bus tidak berangkat</b>.</div>
     </div>
     <div class="sp"></div>
@@ -377,6 +378,7 @@
       <li class="am"><b>Bentrok ② (jam kembar):</b> di koridor yang sama, jam keberangkatan harus berbeda antar rute milik agen yang sama — inilah pembeda rute kembar agar tidak membingungkan penumpang.</li>
       <li class="sl"><b>Tanggal yang bentrok otomatis dilewati</b> (tidak menggagalkan seluruh penyimpanan) dan muncul toast berisi tanggal mana yang terlewat.</li>
       <li class="em"><b>Dua tab di halaman Jadwal:</b> <b>Akan Datang</b> (bisa diubah) dan <b>Riwayat</b> (read-only). Jadwal yang kosong tetap <b>ditampilkan di Riwayat</b> dengan label “Tidak ada pemesan” — sebagai bahan penilaian agen, tidak ada yang disembunyikan.</li>
+      <li class="am"><b>Tutup / buka kursi manual:</b> agen dapat menutup kursi tertentu (mis. kursi rusak) dengan alasan. Kursi tutup tidak bisa dipesan, tampil merah “TUTUP” di denah, dan tercatat di audit. Kursi yang sudah terisi/ditahan harus dibatalkan dulu.</li>
     </ul>
   </section>
 
@@ -479,6 +481,8 @@
     </svg>
     <ul class="notes">
       <li class="sk"><b>Kursi mengikuti denah kabin</b> armada yang dipilih (kapasitas = jumlah kursi aktif kendaraan), dan satu kursi hanya untuk satu orang.</li>
+      <li class="sk"><b>Titik jemput mengikuti rute:</b> pilihannya = fasilitas wilayah asal + titik yang ditetapkan agen; jika kosong, sistem memakai opsi pertama. Opsi “Jemput di rumah” menyimpan alamat + pin peta.</li>
+      <li class="sk"><b>Kursi &amp; penumpang selalu sinkron:</b> jika kursi yang dipilih ternyata sudah diambil saat checkout, kursi itu dilepas bersama data penumpangnya; hanya penumpang yang kursinya dipilih yang disimpan.</li>
       <li class="sl"><b>Penguncian 15 menit:</b> begitu menekan Bayar, kursi di-<i>hold</i> selama 15 menit; belum dibayar → kursi dilepas dan waiting list diberi tahu.</li>
       <li class="em"><b>Transfer bank</b> tidak instan: status <i>pending</i> sampai agen memverifikasi manual di halaman Pesanan (QRIS &amp; Virtual Account langsung lunas).</li>
       <li class="rd"><b>Kebijakan refund</b> diatur Superadmin per agen dalam satuan <b>hari</b> (mis. ≥3 hari 100%, ≥1 hari 50%, &lt;1 hari 0%) dan hanya komponen <b>tiket</b> yang kembali — jasa agen &amp; fee platform hangus.</li>
@@ -586,6 +590,8 @@
       <li class="rd"><b>Bus tidak berangkat = refund 100% TOTAL</b> (tiket + jasa agen + fee platform) — porcentasenya ditentukan admin karena kegagalan ada di operator, bukan pelanggan. Bandingkan dengan <b>pembatalan oleh pelanggan</b>: &lt;1 hari sebelum berangkat = 0%.</li>
       <li class="vi"><b>Agen &amp; Pengemudi</b> hanya melihat pos dananya (halaman Keuangan / Dompet) — pencairan tetap dilakukan Superadmin di halaman Settlement.</li>
       <li class="am"><b>Belum ada pengingat otomatis H-1</b> di kode: notifikasi dikirim saat status Berangkat, Tiba, Delay, Terlewat, dan saat refund diproses.</li>
+      <li class="am"><b>Ringkasan TITIK JEMPUT di kartu tugas:</b> diambil hanya dari manifest (penumpang yang kursinya benar-benar dipesan), dikelompokkan per titik, format <b>“Nama Titik, Kabupaten”</b> + jumlah penumpang. Jemput rumah → “Jemput rumah, …”. Tidak ada chip total; blok tidak muncul jika tidak ada titik jemput.</li>
+      <li class="am"><b>Tutup / buka kursi dari manifest:</b> pengemudi memilih alat “Tutup Kursi” atau “Buka Kursi”, lalu klik kursi di denah. Alasan wajib saat menutup; kursi yang sudah terisi/ditahan tidak bisa ditutup. Kursi tutup tidak bisa dipesan dan tercatat di audit.</li>
     </ul>
   </section>
 
@@ -872,10 +878,112 @@
     </ul>
   </section>
 
+  <!-- ============ PANEL 9: TITIK JEMPUT & KONTROL KURSI ============ -->
+  <section class="panel">
+    <h2><span class="num">9</span> Tugas Saya — Titik Jemput &amp; Kontrol Kursi (Revisi 4)</h2>
+    <p class="desc">Ringkasan titik jemput dibaca dari manifest, bukan dari rute. Kursi juga bisa ditutup sementara oleh agen atau pengemudi.</p>
+    <svg viewBox="0 0 1240 420" role="img" aria-label="Diagram ringkasan titik jemput dan kontrol kursi">
+      <rect class="lane sl" x="20" y="70" width="380" height="320" rx="20"/>
+      <rect class="lane am" x="420" y="70" width="380" height="320" rx="20"/>
+      <rect class="lane em" x="820" y="70" width="400" height="320" rx="20"/>
+      <rect class="chip sl" x="34" y="40" width="190" height="26" rx="9"/><text class="ct" x="129" y="58">Manifest penumpang</text>
+      <rect class="chip am" x="434" y="40" width="220" height="26" rx="9"/><text class="ct" x="544" y="58">Kartu Tugas · Pengemudi</text>
+      <rect class="chip em" x="834" y="40" width="190" height="26" rx="9"/><text class="ct" x="929" y="58">Kontrol kursi</text>
+
+      <g class="n sl"><rect x="60" y="105" width="300" height="100" rx="14"/>
+        <circle class="nb sl" cx="80" cy="126" r="10"/><text class="num" x="80" y="130">1</text>
+        <text class="t1" x="98" y="131">Data penumpang</text>
+        <text class="t2" x="78" y="154">nama • kursi • titik jemput</text>
+        <text class="t3" x="78" y="172">hanya kursi yang ada di booking</text>
+        <text class="t3" x="78" y="190">penumpang di luar kursi booking diabaikan</text></g>
+      <g class="n sl"><rect x="60" y="245" width="300" height="76" rx="14"/>
+        <circle class="nb sl" cx="80" cy="266" r="10"/><text class="num" x="80" y="270">2</text>
+        <text class="t1" x="98" y="271">Titik jemput apa adanya</text>
+        <text class="t2" x="78" y="294">terminal / pelabuhan / “Rumah: …”</text>
+        <text class="t3" x="78" y="312">nama titik tidak diubah</text></g>
+
+      <g class="n am"><rect x="460" y="105" width="300" height="100" rx="14"/>
+        <circle class="nb am" cx="480" cy="126" r="10"/><text class="num" x="480" y="130">3</text>
+        <text class="t1" x="498" y="131">Chip TITIK JEMPUT</text>
+        <text class="t2" x="478" y="154">satu chip per titik, bukan per kursi</text>
+        <text class="t3" x="478" y="172">label: Titik, Kabupaten</text>
+        <text class="t3" x="478" y="190">👥 jumlah penumpang</text></g>
+      <g class="n am"><rect x="460" y="245" width="300" height="76" rx="14"/>
+        <circle class="nb am" cx="480" cy="266" r="10"/><text class="num" x="480" y="270">4</text>
+        <text class="t1" x="498" y="271">Dikelompokkan &amp; diurutkan</text>
+        <text class="t2" x="478" y="294">urut kursi manifest</text>
+        <text class="t3" x="478" y="312">tanpa chip total</text></g>
+
+      <g class="n em"><rect x="860" y="105" width="320" height="76" rx="14"/>
+        <circle class="nb em" cx="880" cy="126" r="10"/><text class="num" x="880" y="130">5</text>
+        <text class="t1" x="898" y="131">Tutup / buka kursi</text>
+        <text class="t2" x="878" y="154">agen di Jadwal • pengemudi di Manifest</text>
+        <text class="t3" x="878" y="172">alasan wajib saat menutup</text></g>
+      <g class="n em"><rect x="860" y="225" width="320" height="100" rx="14"/>
+        <circle class="nb em" cx="880" cy="246" r="10"/><text class="num" x="880" y="250">6</text>
+        <text class="t1" x="898" y="251">Kursi TUTUP</text>
+        <text class="t2" x="878" y="274">tidak bisa dipesan pelanggan</text>
+        <text class="t3" x="878" y="292">tampil “diblokir” di manifest</text>
+        <text class="t3" x="878" y="310">tercatat di audit &amp; riwayat kursi</text></g>
+
+      <path class="e sl" d="M360 155 H460" marker-end="url(#ar)"/>
+      <text class="el" x="376" y="146">dibaca</text>
+      <path class="e am" d="M760 155 H860" marker-end="url(#ar-am)"/>
+      <text class="el" x="770" y="146">kursi terkunci</text>
+      <path class="e em" d="M1020 181 V225" marker-end="url(#ar-em)"/>
+      <path class="e sl" d="M360 283 H460" marker-end="url(#ar)"/>
+      <text class="el" x="376" y="274">teks asli</text>
+    </svg>
+    <ul class="notes">
+      <li class="sk"><b>Sumbernya manifest, bukan rute:</b> chip hanya dibuat dari penumpang yang kursinya ada di booking. Penumpang dengan kursi di luar booking (“penumpang hantu”) tidak ikut dihitung.</li>
+      <li class="am"><b>Format label:</b> nama titik dari manifest + kabupaten/kota asal rute — <i>Pelabuhan Calang, Aceh Jaya</i>; <i>Terminal Batoh, Banda Aceh</i>. Jemput rumah → <i>Jemput rumah, Aceh Jaya</i>. Kabupaten tidak diulang bila sudah disebut di nama titik.</li>
+      <li class="sl"><b>Tanpa total:</b> tidak ada chip “N penumpang” di header; tiap chip membawa jumlahnya sendiri. Kalau tidak ada titik jemput, seluruh blok TITIK JEMPUT tidak ditampilkan.</li>
+      <li class="em"><b>Tutup kursi:</b> agen (Jadwal) dan pengemudi (Manifest → Tutup / Buka Kursi) memilih alat lalu klik kursi. Alasan wajib; kursi yang sudah terisi/ditahan harus dibatalkan dulu. Kursi tutup tampil merah “TUTUP”, tidak bisa dipesan, dan masuk audit.</li>
+    </ul>
+  </section>
+
+  <!-- ============ CATATAN KESALAHAN APLIKASI ============ -->
+  <section class="panel">
+    <h2><span class="num">!</span> Catatan Kesalahan Aplikasi (Audit 22 Oktober 2026)</h2>
+    <p class="desc">Ditemukan saat audit setelah pembaruan terakhir. Semua item di bawah <b>belum diperbaiki</b>; daftar ini menjadi acuan revisi berikutnya.</p>
+    <div class="grid3">
+      <div class="card"><h3><span class="dot" style="background:#dc2626"></span>Tinggi — segera</h3>
+        <ul class="menu">
+          <li><b>“Pesan Tiket” di perjalanan selalu gagal.</b> Setelah “Berangkat”, jadwal berstatus tutup, tetapi tombolnya masih muncul. Contoh: S-0MBDI (24 Okt). → izinkan penjualan saat ontrip atau sembunyikan tombol.</li>
+          <li><b>Penumpang hantu masih tampil.</b> Booking TA-8I3T6 hanya membayar kursi A3, tetapi halaman tiket dan daftar agen masih menampilkan nama A1; daftar agen bahkan menulis “wew +0”. → filter penumpang berdasarkan kursi yang dibeli di semua tampilan.</li>
+          <li><b>Hold 15 menit bisa diperpanjang terus.</b> Setiap klik “Bayar” me-reset hold +15 menit walau modal ditutup. → jangan reset hold saat membuka pembayaran.</li>
+        </ul>
+      </div>
+      <div class="card"><h3><span class="dot" style="background:#b45309"></span>Sedang — jadwalkan</h3>
+        <ul class="menu">
+          <li><b>Kursi diblokir/nonaktif dihitung sebagai penumpang.</b> S-BBTO4 punya A6 ditutup dan 0 booking, tetapi tampil “1/6 penumpang”; okupansi agen ikut naik. → pisahkan jumlah penumpang dari kursi tidak tersedia.</li>
+          <li><b>“Kursi tersisa” di Home menghitung jadwal selesai/berjalan.</b> Beberapa rute terbaca belasan kursi lebih banyak (mis. R-4VBRV ±11 dari jadwal arrived/ontrip). → hanya hitung jadwal yang masih buka dan belum berangkat.</li>
+          <li><b>“Berangkat” tanpa konfirmasi/guard waktu.</b> Salah klik → booking pending batal, penjualan tutup, tanpa undo. Data menunjukkan trip 24 Okt sudah berangkat 22 Okt. → tambah konfirmasi dan peringatan waktu.</li>
+        </ul>
+      </div>
+      <div class="card"><h3><span class="dot" style="background:#475569"></span>Rendah / laten</h3>
+        <ul class="menu">
+          <li><b>Kursi nonaktif dihitung dua kali</b> pada sisa kursi (belum terjadi karena semua armada 6 kursi aktif).</li>
+          <li><b>Manifest agen tanpa fallback layout</b> — kendaraan lama tanpa layout bisa kehilangan baris kursi kosong.</li>
+          <li><b>Default pickup “-”</b> jika rute tidak punya opsi; chip bisa tampil “-, Aceh Jaya”.</li>
+          <li><b>Manifest vs chip beda fallback pickup</b> — manifest hanya membaca pickup penumpang, chip memakai pickup booking bila kosong.</li>
+          <li><b>“Rumah Sakit …” dianggap jemput rumah</b> karena deteksi hanya melihat kata “Rumah”.</li>
+          <li><b>Tier refund memakai jam awal</b>, bukan estimasi setelah delay.</li>
+          <li><b>Status payment “refunded”</b> muncul sebelum dana refund benar-benar dikirim.</li>
+          <li><b>Blokir kursi tanpa guard status trip</b> — kursi masih bisa ditutup pada jadwal yang sudah berangkat/arrived.</li>
+        </ul>
+      </div>
+    </div>
+    <ul class="notes">
+      <li class="rd"><b>Urutan perbaikan yang disarankan:</b> (1) tombol Pesan Tiket saat ontrip → (2) filter penumpang hantu → (3) hold tidak boleh diperpanjang → (4) hitungan penumpang vs kursi tutup → (5) kursi tersisa di Home → (6) konfirmasi “Berangkat”.</li>
+      <li class="sl"><b>Catatan:</b> temuan “tinggi” dan “sedang” sudah diverifikasi pada data aplikasi per 22 Oktober 2026 (termasuk jadwal 25 Oktober); item “rendah/laten” berasal dari pembacaan kode dan belum tentu muncul di data saat ini.</li>
+    </ul>
+  </section>
+
   <!-- ============ ATURAN PENTING ============ -->
   <section class="panel">
     <h2><span class="num">★</span> Aturan Penting (ringkasan)</h2>
-    <p class="desc">Enam aturan yang paling sering ditanyakan saat menjelaskan sistem ini.</p>
+    <p class="desc">Aturan yang paling sering ditanyakan saat menjelaskan sistem ini.</p>
     <div class="grid3">
       <div class="card"><h3><span class="dot" style="background:#7c3aed"></span>Persetujuan admin</h3><p>Rute baru (dan perubahan harga) hanya aktif setelah disetujui Superadmin. Agen hanya mengirim usulan.</p></div>
       <div class="card"><h3><span class="dot" style="background:#059669"></span>Satu armada = satu rute</h3><p>Saat mengusulkan rute, yang bisa dipilih hanya armada aktif yang belum dipakai rute lain. Jumlah armada tampil di kartu rute dan bisa dilihat detailnya.</p></div>
@@ -887,6 +995,9 @@
       <div class="card"><h3><span class="dot" style="background:#b45309"></span>Bus tidak berangkat</h3><p>Jadwal yang tidak berangkat direfund 100% dari total (tiket + jasa agen + fee platform) karena kegagalan ada di operator. Berbeda dengan pembatalan pelanggan &lt;1 hari = 0%.</p></div>
       <div class="card"><h3><span class="dot" style="background:#059669"></span>Tiket oleh Pengemudi</h3><p>Pengemudi bisa membuat tiket untuk penumpang yang tidak memakai aplikasi. Dibayar online, jasanya 0, fee platform tetap, dan tercatat di manifest.</p></div>
       <div class="card"><h3><span class="dot" style="background:#0284c7"></span>Tidak ada refund otomatis</h3><p>Refund selalu diproses manual admin: Menunggu → Diproses → Selesai. Pencairan juga manual di halaman Settlement.</p></div>
+      <div class="card"><h3><span class="dot" style="background:#0284c7"></span>Titik jemput dari manifest</h3><p>Ringkasan TITIK JEMPUT hanya memakai penumpang yang kursinya benar-benar dipesan: label titik + kabupaten, jumlah orang per titik, tanpa chip total.</p></div>
+      <div class="card"><h3><span class="dot" style="background:#dc2626"></span>Kursi bisa ditutup</h3><p>Agen/pengemudi dapat menutup kursi sementara dengan alasan. Kursi tutup tidak bisa dipesan, tampil di manifest, dan tercatat di audit; kursi yang sudah terisi harus dibatalkan dulu.</p></div>
+      <div class="card"><h3><span class="dot" style="background:#059669"></span>Kursi &amp; penumpang sinkron</h3><p>Saat checkout, kursi yang sudah diambil dilepas bersama data penumpangnya; hanya penumpang yang kursinya dipilih yang disimpan.</p></div>
     </div>
   </section>
 
@@ -898,16 +1009,16 @@
       <div class="card"><span class="tag" style="background:#0284c7">Pelanggan</span>
         <ul class="menu"><li>Beranda — cari perjalanan cepat</li><li>Cari Perjalanan — 4 langkah pemesanan</li><li>Tiket Saya — bayar lanjut / batal</li><li>Riwayat perjalanan</li><li>Profil &amp; notifikasi</li></ul></div>
       <div class="card"><span class="tag" style="background:#059669">Agen Travel</span>
-        <ul class="menu"><li>Dashboard — ringkasan</li><li>Pesanan — verifikasi, manifest, CSV, label “Pengemudi”</li><li>Jadwal — tambah jadwal, tab Akan Datang / Riwayat</li><li>Rute — usulan &amp; Rute Saya</li><li>Armada — armada &amp; layout kursi</li><li>Pengemudi — daftar &amp; status</li><li>Keuangan — pos dana</li><li>Setting</li></ul></div>
+        <ul class="menu"><li>Dashboard — ringkasan</li><li>Pesanan — verifikasi, manifest, CSV, label “Pengemudi”</li><li>Jadwal — tambah jadwal, tab Akan Datang / Riwayat, tutup/buka kursi</li><li>Rute — usulan &amp; Rute Saya</li><li>Armada — armada &amp; layout kursi</li><li>Pengemudi — daftar &amp; status</li><li>Keuangan — pos dana</li><li>Setting</li></ul></div>
       <div class="card"><span class="tag" style="background:#b45309">Pengemudi</span>
-        <ul class="menu"><li>Tugas harian + manifest</li><li>Pesan Tiket (online, untuk penumpang non-app)</li><li>Scan QR boarding</li><li>Update status perjalanan</li><li>Delay keberangkatan &amp; info keterlambatan</li><li>Profil — isi data diri,upload dokumen</li><li>Riwayat trip</li><li>Dompet — posisi dana</li></ul></div>
+        <ul class="menu"><li>Tugas harian + manifest + ringkasan TITIK JEMPUT</li><li>Tutup / buka kursi dari manifest</li><li>Pesan Tiket (online, untuk penumpang non-app)</li><li>Scan QR boarding</li><li>Update status perjalanan</li><li>Delay keberangkatan &amp; info keterlambatan</li><li>Profil — isi data diri, upload dokumen</li><li>Riwayat trip</li><li>Dompet — posisi dana</li></ul></div>
       <div class="card"><span class="tag" style="background:#7c3aed">Superadmin</span>
         <ul class="menu"><li>Overview — monitoring + fee masuk</li><li>Transaksi — semua booking &amp; bayar</li><li>Agen — approve / suspend</li><li>Rute — approve usulan / suspend rute</li><li>Settlement — cairkan dana &amp; antrean refund</li><li>Refund — kebijakan per agen (hari)</li><li>Master — fee platform global, jasa agen, banner, audit</li></ul></div>
     </div>
   </section>
 
   <footer>
-    Flowchart alur aplikasi TransAceh · disusun dari kode <b>transaceh-react</b> · file mandiri (bisa dicetak / disimpan PDF, tanpa perlu internet)
+    Flowchart alur aplikasi TransAceh · disusun dari kode <b>transaceh-react</b> · <b>Revisi 4 — 22 Oktober 2026</b> · file mandiri (bisa dicetak / disimpan PDF, tanpa perlu internet)
   </footer>
 </div>
 </body>
