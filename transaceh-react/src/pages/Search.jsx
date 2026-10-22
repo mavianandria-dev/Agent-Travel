@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { schedById, schedReady, takenSeats, seatsLeft, routeById, vehicleById, driverById, vehLayout, schedSeatCap, audit, notify, vehName, splitFare, createLedger, routeBookable, isRouteSuspended, canPayBooking, scheduleIsPast, ensureHoldExpiry } from '@/lib/domain.js';
+import { schedById, schedReady, takenSeats, seatsLeft, routeById, vehicleById, driverById, vehLayout, schedSeatCap, audit, notify, vehName, splitFare, createLedger, routeBookable, isRouteSuspended, canPayBooking, scheduleIsPast, ensureHoldExpiry, agencyById, routeGroupKey, groupRoutes, routesInRouteGroup } from '@/lib/domain.js';
 import { fmtRp, todayStr, uid, fmtClock } from '@/lib/utils.js';
 import { Icon, CabinGrid, fmtDate } from '@/components/ui.jsx';
 import { HOME_PICKUP, pickupOptions } from '@/lib/pickups.js';
 import { saveCheckoutDraft, clearCheckoutDraft } from '@/lib/checkoutDraft.js';
-import { CITY_COORDS, routeMeta } from '@/lib/geo.js';
+import { CITY_COORDS } from '@/lib/geo.js';
 import { MapPicker } from '@/components/MapPicker.jsx';
 
 const validCoords = (s) => {
@@ -159,16 +159,23 @@ export default function Search() {
   const { bw, setBw, user, go, toast, refresh, tick, payMethod, setPayMethod, openModal } = useApp();
   void tick;
 
-  const routes = DB.load('routes', []).filter(routeBookable);
+  const allRoutes = DB.load('routes', []);
+  const routes = allRoutes.filter(routeBookable);
+  const routeGroups = groupRoutes(routes);
+  const currentRoute = allRoutes.find((r) => r.id === bw.routeId);
+  const currentGroupKey = currentRoute ? routeGroupKey(currentRoute) : '';
+  const selectedGroup = routeGroups.find((g) => g.key === currentGroupKey);
+  const selectedRoutes = currentGroupKey ? routesInRouteGroup(bw.routeId, allRoutes) : [];
+  const selectedRouteIds = new Set(selectedRoutes.map((r) => r.id));
   const stepSchedules = () => DB.load('schedules', [])
-    .filter((x) => x.routeId === bw.routeId && x.date === bw.date && x.status === 'open' && !scheduleIsPast(x, 0) && !['ontrip', 'arrived', 'missed', 'cancelled'].includes(x.tripStatus) && !isRouteSuspended(routeById(x.routeId), x.agencyId))
-    .sort((a, b) => a.time.localeCompare(b.time));
+    .filter((x) => selectedRouteIds.has(x.routeId) && x.date === bw.date && x.status === 'open' && !scheduleIsPast(x, 0) && !['ontrip', 'arrived', 'missed', 'cancelled'].includes(x.tripStatus) && routeBookable(routeById(x.routeId)) && !isRouteSuspended(routeById(x.routeId), x.agencyId))
+    .sort((a, b) => a.time.localeCompare(b.time) || Number(a.price) - Number(b.price));
 
 
   const wizNext = () => {
-    if (bw.step === 1 && !bw.routeId) return toast('Pilih rute dulu', 'warn');
+    if (bw.step === 1 && !selectedGroup) return toast('Pilih rute dulu', 'warn');
     if (bw.step === 3 && !bw.scheduleId) return toast('Pilih armada / jadwal dulu', 'warn');
-    if (bw.step === 3 && bw.scheduleId && !schedReady(schedById(bw.scheduleId))) {
+    if (bw.step === 3 && bw.scheduleId && (!selectedRouteIds.has(schedById(bw.scheduleId)?.routeId) || !schedReady(schedById(bw.scheduleId)))) {
       setBw({ ...bw, scheduleId: null });
       refresh();
       return toast('Jadwal tidak tersedia (sudah lewat / armada maintenance / pengemudi nonaktif / ditutup) — pilih yang lain', 'err');
@@ -296,10 +303,9 @@ export default function Search() {
   const renderStep1 = () => (
     <>
       <h3 className="font-extrabold text-[16px]">Pilih Rute Perjalanan</h3>
-      <div className="grid sm:grid-cols-2 gap-3 mt-3">{routes.map((r) => (
-        <button key={r.id} onClick={() => setBw({ ...bw, routeId: r.id, scheduleId: null })} className={'text-left rounded-2xl border-2 p-4 transition ' + (bw.routeId === r.id ? 'border-sky-500 bg-sky-50 shadow-lg' : 'border-slate-100 hover:border-sky-200')}>
-          <div className="font-extrabold text-[15px]">{r.from} → {r.to}</div><div className="text-[12px] text-slate-500 font-medium">{routeMeta(r, true)} • mulai {fmtRp(r.basePrice)}</div>
-          <div className="text-[11px] font-bold text-slate-400 mt-1.5 flex items-center gap-1 flex-wrap"><Icon name="map-pin" className="w-3 h-3" />{r.pickups.length} titik jemput door-to-door{r.homePickup !== false ? <span className="badge bg-green-100 text-green-700 ml-1">Jemput rumah tersedia</span> : null}</div>
+      <div className="grid sm:grid-cols-2 gap-3 mt-3">{routeGroups.map((g) => (
+        <button key={g.key} data-route-group={g.key} aria-pressed={selectedGroup?.key === g.key} onClick={() => setBw({ ...bw, routeId: g.routeId, step: 1, scheduleId: null, seats: [], passengers: [], pickup: '', pickupAddr: '', pickupCoords: '', voucher: '', discount: 0 })} className={'text-left rounded-2xl border-2 p-4 min-h-[72px] flex items-center transition ' + (selectedGroup?.key === g.key ? 'border-sky-500 bg-sky-50 shadow-lg' : 'border-slate-100 hover:border-sky-200')}>
+          <div className="font-extrabold text-[15px]">{g.from} → {g.to}</div>
         </button>
       ))}</div>
       {wizNav(false, true)}
@@ -308,9 +314,11 @@ export default function Search() {
 
   const renderStep2 = () => {
     const days = [];
-    for (let i = 0; i < 14; i++) {
+    const allSchedules = DB.load('schedules', []);
+    /* Tampilkan hari ini sampai 30 hari ke depan agar seluruh jadwal seed bisa dipilih. */
+    for (let i = 0; i <= 30; i++) {
       const d = todayStr(i);
-      const list = DB.load('schedules', []).filter((x) => x.routeId === bw.routeId && x.date === d && !isRouteSuspended(routeById(x.routeId), x.agencyId));
+      const list = allSchedules.filter((x) => selectedRouteIds.has(x.routeId) && x.date === d && routeBookable(routeById(x.routeId)) && !isRouteSuspended(routeById(x.routeId), x.agencyId));
       const avail = list.filter((s) => schedReady(s) && seatsLeft(s.id) > 0).length;
       const dt = new Date(d);
       days.push({
@@ -324,7 +332,7 @@ export default function Search() {
       <>
         <h3 className="font-extrabold text-[16px]">Pilih Tanggal Keberangkatan</h3><p className="text-[12px] text-slate-500 font-medium">Hijau = ada armada tersedia • Merah = 0 tersedia</p>
         <div className="grid grid-cols-4 sm:grid-cols-7 gap-2 mt-3">{days.map((x) => (
-          <button key={x.d} onClick={() => setBw({ ...bw, date: x.d, scheduleId: null })} className={'rounded-2xl border-2 p-2.5 text-center transition ' + (bw.date === x.d ? 'border-sky-500 bg-sky-600 text-white shadow-lg' : x.avail > 0 ? 'border-green-200 bg-green-50 hover:border-green-400' : 'border-red-100 bg-red-50 opacity-70')}>
+          <button key={x.d} onClick={() => setBw({ ...bw, date: x.d, scheduleId: null, seats: [], passengers: [], pickup: '', pickupAddr: '', pickupCoords: '', voucher: '', discount: 0 })} className={'rounded-2xl border-2 p-2.5 text-center transition ' + (bw.date === x.d ? 'border-sky-500 bg-sky-600 text-white shadow-lg' : x.avail > 0 ? 'border-green-200 bg-green-50 hover:border-green-400' : 'border-red-100 bg-red-50 opacity-70')}>
             <div className={'text-[10px] font-extrabold uppercase ' + (bw.date === x.d ? 'text-sky-200' : '')}>{x.wd}</div><div className="font-extrabold text-[18px] leading-none my-0.5">{x.dn}</div><div className="text-[10px] font-bold">{x.mo}</div>
             <div className={'badge mt-1.5 mx-auto !text-[10px] ' + (x.avail > 0 ? 'bg-green-500 text-white' : 'bg-red-500 text-white')}>{x.avail} tersedia</div>
           </button>
@@ -343,21 +351,23 @@ export default function Search() {
         </div>
       );
     }
-    const r0 = routeById(bw.routeId);
+    const r0 = selectedGroup || routeById(bw.routeId);
     return (
       <>
         <h3 className="font-extrabold text-[16px]">Pilih Armada — {r0 ? r0.from + ' → ' + r0.to : ''} • {fmtDate(bw.date)}</h3>
         <div className="space-y-3 mt-3">{list.map((s) => {
           const v = vehicleById(s.vehicleId);
           const dr = driverById(s.driverId);
+          const ag = agencyById(s.agencyId);
           const left = seatsLeft(s.id);
           const sel = bw.scheduleId === s.id;
           const ready = schedReady(s);
+          const selectable = ready && left > 0;
           const why = !ready ? ((v && v.status !== 'aktif') ? 'Armada maintenance' : (dr && dr.status !== 'aktif') ? 'Pengemudi nonaktif' : 'Jadwal ditutup') : '';
           return (
-            <div key={s.id} onClick={() => { if (ready) setBw({ ...bw, scheduleId: s.id }); }} className={(ready ? 'cursor-pointer card-hover active:scale-[.99]' : 'opacity-70') + ' rounded-2xl border-2 p-3 sm:p-3.5 flex flex-col xs:flex-row sm:flex-row gap-3 transition ' + (sel && ready ? 'border-sky-500 shadow-lg bg-sky-50/50' : 'border-slate-100 hover:border-sky-200 bg-white')}>
+            <div key={s.id} data-schedule-id={s.id} aria-disabled={!selectable} onClick={() => { if (selectable) setBw({ ...bw, routeId: s.routeId, scheduleId: s.id, seats: [], passengers: [], pickup: '', pickupAddr: '', pickupCoords: '', voucher: '', discount: 0 }); }} className={(selectable ? 'cursor-pointer card-hover active:scale-[.99]' : 'opacity-70') + ' rounded-2xl border-2 p-3 sm:p-3.5 flex flex-col xs:flex-row sm:flex-row gap-3 transition ' + (sel && selectable ? 'border-sky-500 shadow-lg bg-sky-50/50' : 'border-slate-100 hover:border-sky-200 bg-white')}>
               <img src={v.photo} onError={(e) => { e.currentTarget.src = 'https://picsum.photos/seed/' + v.id + '/400/250'; }} className="w-full h-36 xs:w-28 xs:h-24 sm:w-40 sm:h-28 object-cover rounded-2xl shrink-0" loading="lazy" alt={vehName(v)} />
-              <div className="flex-1 min-w-0"><div className="flex items-center gap-2 flex-wrap"><span className="font-extrabold text-[15px]">{vehName(v)}</span><span className="badge bg-slate-100 text-slate-600">{v.plate}</span>{routeById(s.routeId)?.homePickup !== false ? <span className="badge bg-green-100 text-green-700">Jemput rumah</span> : null}{s.tripStatus === 'scheduled' && s.delayUntil && new Date(s.delayUntil).getTime() > Date.now() ? <span className="badge bg-amber-100 text-amber-700">Delay {s.delayMinutes} mnt • {fmtClock(s.delayUntil)}</span> : null}{!ready ? <span className="badge bg-amber-100 text-amber-700">{why}</span> : left <= 2 && left > 0 ? <span className="badge bg-red-100 text-red-700">Sisa {left}</span> : null}{ready && left === 0 ? <span className="badge bg-red-500 text-white">PENUH</span> : null}</div>
+              <div className="flex-1 min-w-0"><div className="flex items-center gap-2 flex-wrap"><span className="font-extrabold text-[15px]">{vehName(v)}</span><span className="badge bg-slate-100 text-slate-600">{v.plate}</span>{ag ? <span className="badge bg-indigo-50 text-indigo-700">{ag.name}</span> : null}{routeById(s.routeId)?.homePickup !== false ? <span className="badge bg-green-100 text-green-700">Jemput rumah</span> : null}{s.tripStatus === 'scheduled' && s.delayUntil && new Date(s.delayUntil).getTime() > Date.now() ? <span className="badge bg-amber-100 text-amber-700">Delay {s.delayMinutes} mnt • {fmtClock(s.delayUntil)}</span> : null}{!ready ? <span className="badge bg-amber-100 text-amber-700">{why}</span> : left <= 2 && left > 0 ? <span className="badge bg-red-100 text-red-700">Sisa {left}</span> : null}{ready && left === 0 ? <span className="badge bg-red-500 text-white">PENUH</span> : null}</div>
                 <div className="text-[12.5px] font-bold text-sky-700 mt-1 flex items-center gap-2"><Icon name="clock" className="w-3.5 h-3.5" />Berangkat {s.time} WIB • <Icon name="user" className="w-3.5 h-3.5" />{dr.name} ★{dr.rating}</div>
                 <div className="flex flex-wrap gap-1.5 mt-2">{(v.facilities || []).map((f) => (<span key={f} className="badge bg-slate-100 text-slate-600 !font-semibold"><Icon name="check" className="w-3 h-3" />{f}</span>))}</div>
                 <div className="flex items-center justify-between mt-2.5"><div className="font-extrabold text-[17px] text-[#0b2447]">{fmtRp(s.price)}<span className="text-[11px] font-semibold text-slate-400">/kursi</span></div>
@@ -430,6 +440,7 @@ export default function Search() {
     if (!s) return (<><div className="text-center py-10 text-slate-400 font-bold">Jadwal tidak ditemukan — kembali pilih armada.</div>{wizNav(true, false)}</>);
     const r = routeById(s.routeId);
     const v = vehicleById(s.vehicleId);
+    const ag = agencyById(s.agencyId);
     const sub = s.price * bw.seats.length;
     const discount = calcDiscount(bw.voucher, bw.scheduleId, bw.seats.length);
     const total = sub - discount;
@@ -441,6 +452,7 @@ export default function Search() {
         <div className="grid md:grid-cols-2 gap-4 mt-3">
           <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200">
             <div className="font-extrabold text-[14px]">{r.from} → {r.to}</div>
+            {ag ? <div className="text-[11.5px] font-extrabold text-indigo-600 mt-0.5">{ag.name}</div> : null}
             <div className="text-[12.5px] font-semibold text-slate-600 mt-1">{fmtDate(s.date)} • {s.time} WIB • {vehName(v)} ({v.plate})</div>
             {s.tripStatus === 'scheduled' && s.delayUntil && new Date(s.delayUntil).getTime() > Date.now() ? <div className="text-[12px] font-extrabold text-amber-700 mt-1">Delay {s.delayMinutes} menit • estimasi {fmtClock(s.delayUntil)}</div> : null}
             <div className="text-[12.5px] font-semibold text-slate-600">Kursi: <b>{bw.seats.join(', ')}</b> • Jemput: <b>{bw.pickup === HOME_PICKUP ? 'Rumah: ' + bw.pickupAddr : bw.pickup || (pickupOptions(r)[0] || '')}</b>{bw.pickup === HOME_PICKUP && bw.pickupCoords ? <b> ({bw.pickupCoords})</b> : null}</div>

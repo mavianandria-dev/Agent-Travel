@@ -370,4 +370,290 @@ export function initDB(){
     localStorage.setItem('at_purge_seed_routes_v1','1');
   }catch{}
 })();
+/* Seed data perbandingan: rute dan jadwal 30 hari untuk agen demo.
+   Flag at_seed_compare_v1 juga dipakai pengujian untuk melewati seed ini.
+   Data pengguna yang sudah ada tidak dihapus; seed hanya menambah yang belum ada. */
+(function seedCompareRoutesV1(){
+  try{
+    if(localStorage.getItem('at_seed_compare_v1')==='1') return;
+    const svgURI=s=>'data:image/svg+xml;utf8,'+encodeURIComponent(s);
+    const demoAvatar=(ini,c1,c2)=>svgURI(`<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='${c1}'/><stop offset='1' stop-color='${c2}'/></linearGradient></defs><rect width='160' height='160' fill='url(#g)'/><text x='80' y='94' font-family='Arial,sans-serif' font-size='58' font-weight='bold' fill='#fff' text-anchor='middle'>${ini}</text></svg>`);
+    const demoSim=(t,nm,num,exp)=>svgURI(`<svg xmlns='http://www.w3.org/2000/svg' width='320' height='200'><rect width='320' height='200' rx='16' fill='#0b2447'/><rect x='16' y='16' width='288' height='168' rx='12' fill='none' stroke='#38bdf8' stroke-width='2'/><text x='28' y='52' font-family='Arial,sans-serif' font-size='22' font-weight='bold' fill='#7dd3fc'>SIM ${t} • DEMO</text><text x='28' y='92' font-family='Arial,sans-serif' font-size='17' font-weight='bold' fill='#fff'>${nm}</text><text x='28' y='118' font-family='Arial,sans-serif' font-size='14' fill='#cbd5e1'>${num}</text><text x='28' y='144' font-family='Arial,sans-serif' font-size='14' fill='#cbd5e1'>Berlaku s.d. ${exp}</text><text x='28' y='168' font-family='Arial,sans-serif' font-size='11' fill='#64748b'>Contoh seed — ganti dengan foto asli</text></svg>`);
+    const nowIso=new Date().toISOString();
+    const ag4Kyc={
+      jenis:'Perorangan / Freelance', nama:'Nasir',
+      nik:'1173010101900004', tmpLahir:'Meulaboh', tglLahir:'1990-01-01',
+      gender:'Laki-laki', agama:'Islam',
+      alamat:{ jalan:'Jl. Diponegoro No.7', rtRw:'02/03', kelurahan:'Meulaboh', kecamatan:'Johan Pahlawan', kota:'Aceh Barat', provinsi:'Aceh', kodePos:'23611' },
+      hp:'0812000030', email:'agen@cahaya.com',
+      darurat:{ nama:'Siti Rahmah', hubungan:'Istri / Suami', hp:'0813000030' },
+      bank:'BRI', rekeningNo:'0022010190008', rekeningNama:'Nasir',
+      npwpSamaKtp:true, npwp:'',
+      docs:{
+        ktp:seedDoc('KTP Nasir'), pasfoto:seedDoc('Pasfoto Nasir'),
+        bukuTabungan:seedDoc('Buku Tabungan Nasir'), npwpPribadi:seedDoc('NPWP Nasir'),
+      },
+      status:'lengkap', step:3, terms:true,
+      submittedAt:'2026-01-01T00:00:00.000Z', updatedAt:'2026-01-01T00:00:00.000Z',
+    };
+
+    /* AG4 Cahaya Perkasa ikut aktif dan lengkap agar bisa dipakai membandingkan. */
+    const ags=DB.load('agencies',[]);
+    const ag4=ags.find(a=>a.id==='AG4');
+    if(ag4){
+      let ch=false;
+      if(!ag4.kyc||!ag4.kyc.nama){ ag4.kyc=ag4Kyc; ch=true; }
+      if(ag4.status!=='active'){ ag4.status='active'; ch=true; }
+      const patch=agencyProfileFromKyc(ag4.kyc);
+      Object.entries(patch).forEach(([k,v])=>{ if(v&&(!ag4[k]||ag4[k]==='-')){ ag4[k]=v; ch=true; } });
+      if(ch) DB.save('agencies',ags);
+    }
+
+    const users=DB.load('users',[]); let uch=false;
+    const uag4=users.find(u=>u.id==='U-AG4');
+    if(uag4&&uag4.status!=='active'){ uag4.status='active'; uch=true; }
+    if(!users.some(u=>u.id==='U-DR8'||String(u.email||'').toLowerCase()==='pengemudi@cahaya.com')){
+      users.push({id:'U-DR8',name:'Muhammad Iqbal',email:'pengemudi@cahaya.com',phone:'0812000031',pass:'pengemudi123',role:'pengemudi',agencyId:'AG4',status:'active',profileStep:'done',photo:''});
+      uch=true;
+    }
+    if(uch) DB.save('users',users);
+
+    const drivers=DB.load('drivers',[]);
+    if(!drivers.some(d=>d.id==='D8')){
+      drivers.push({id:'D8',agencyId:'AG4',name:'Muhammad Iqbal',phone:'0812000031',simType:'A',simExp:2029,simPhoto:demoSim('A','Muhammad Iqbal','1173010101900008','2029'),ktpPhoto:'',selfie:'',photo:demoAvatar('MI','#0ea5e9','#0c4a6e'),status:'aktif',rating:4.8,trips:0,userEmail:'pengemudi@cahaya.com',birthPlace:'Meulaboh',birthDate:'1990-01-01',gender:'Laki-laki',address:'Jl. Diponegoro No.7, Meulaboh',nik:'1173010101900008',marital:'Menikah',education:'SMA',emName:'Siti Rahmah',emPhone:'0813000030',emRelation:'Istri',simNumber:'1173010101900008',bank:'BRI 0022010190008 a.n. Muhammad Iqbal'});
+      DB.save('drivers',drivers);
+    }
+
+    const vehicles=DB.load('vehicles',[]);
+    if(!vehicles.some(v=>v.id==='V6')){
+      vehicles.push({id:'V6',agencyId:'AG4',brand:'Toyota',model:'Avanza',year:2022,color:'Putih',plate:'BL 3456 GH',chassis:'MHFXW42G2N2006001',engine:'2NR2006001',vtype:'MPV',vtypeOther:'',baggage:'Sedang',tax:'Aktif',stnkExp:'2027-08-10',kir:'Berlaku s.d. 2027',condition:'Baik',capacity:6,photo:'https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?w=600&q=80',facilities:['AC','USB Charger','Air Mineral'],status:'aktif',ownerName:'Nasir',ownerBiz:'Cahaya Perkasa',ownerNik:'1173010101900004',ownerAddr:'Jl. Diponegoro No.7, Meulaboh',ownerPhone:'0812000030',ownerEmail:'agen@cahaya.com',ownership:'Milik perusahaan',coopDriverId:'D8',hasEmail:'Ya',docs:['STNK','KTP pemilik'],docOther:'',stnkPhoto:'',ktpOwnerPhoto:'',mainRoute:'Meulaboh — Banda Aceh',origin:'Aceh Barat',dest:'Banda Aceh',freq:'Setiap hari',freqOther:'',services:['Antar jemput alamat','Paket barang'],opSchedule:'07:00 setiap hari',coopTariff:155000,coopSys:'Bagi hasil',coopOther:'',fleetCount:1,hasDriver:'Ya',drvName:'Muhammad Iqbal',drvPhone:'0812000031',drvSim:'A - 1173010101900008',drvSimExp:'2029-01-01',drvExp:'5 tahun',hasBackup:'Tidak',backName:'',backPhone:'',backSim:'',backSimExp:'',inactiveSeats:[],layout:vehLayout({}),seatSeq:6});
+      DB.save('vehicles',vehicles);
+    }
+
+    const routeDefs=[
+      {key:'AG1BNDA',id:'R-SEED-AG1-BNDA',agencyId:'AG1',from:'Aceh Jaya',to:'Banda Aceh',price:150000,vehicleIds:['V1','V2'],driverIds:['D1','D2'],pickups:['Terminal Aceh Jaya','Pelabuhan Calang']},
+      {key:'AG1ABR',id:'R-SEED-AG1-ABR',agencyId:'AG1',from:'Aceh Jaya',to:'Aceh Barat',price:120000,vehicleIds:['V2'],driverIds:['D7'],pickups:['Terminal Aceh Jaya','Pelabuhan Calang']},
+      {key:'AG2MDN',id:'R-SEED-AG2-MDN',agencyId:'AG2',from:'Banda Aceh',to:'Medan',price:320000,vehicleIds:['V4'],driverIds:['D4'],pickups:['Terminal Batoh','Bandara Sultan Iskandar Muda','Pelabuhan Ulee Lheue']},
+      {key:'AG2LSW',id:'R-SEED-AG2-LSW',agencyId:'AG2',from:'Banda Aceh',to:'Lhokseumawe',price:180000,vehicleIds:['V4'],driverIds:['D5'],pickups:['Terminal Batoh','Bandara Sultan Iskandar Muda','Pelabuhan Ulee Lheue']},
+      {key:'AG3MDN',id:'R-SEED-AG3-MDN',agencyId:'AG3',from:'Banda Aceh',to:'Medan',price:350000,vehicleIds:['V5'],driverIds:['D6'],pickups:['Terminal Batoh','Bandara Sultan Iskandar Muda','Pelabuhan Ulee Lheue']},
+      {key:'AG4BNDA',id:'R-SEED-AG4-BNDA',agencyId:'AG4',from:'Aceh Barat',to:'Banda Aceh',price:155000,vehicleIds:['V6'],driverIds:['D8'],pickups:['Terminal Aceh Barat']},
+      {key:'AG4ABR',id:'R-SEED-AG4-ABR',agencyId:'AG4',from:'Banda Aceh',to:'Aceh Barat',price:155000,vehicleIds:['V6'],driverIds:['D8'],pickups:['Terminal Batoh','Bandara Sultan Iskandar Muda','Pelabuhan Ulee Lheue']},
+    ];
+    const routes=DB.load('routes',[]); let rch=false;
+    routeDefs.forEach(def=>{
+      if(routes.some(r=>r.id===def.id)) return;
+      const est=estimateRoute(def.from,def.to)||{};
+      routes.push({id:def.id,from:def.from,to:def.to,distance:est.distance||'-',duration:est.duration||'-',basePrice:def.price,prices:{[def.agencyId]:def.price},homePickup:true,pickups:def.pickups,vehicleIds:def.vehicleIds,active:true,agencyId:def.agencyId,agencyIds:[def.agencyId],driverId:def.driverIds[0]||null,driverIds:def.driverIds,suspensions:{}});
+      rch=true;
+    });
+    if(rch) DB.save('routes',routes);
+
+    const byId=new Map(routes.map(r=>[r.id,r]));
+    const validDefs=routeDefs.filter(def=>{
+      const r=byId.get(def.id);
+      return !!r&&(r.agencyIds||(r.agencyId?[r.agencyId]:[])).includes(def.agencyId);
+    });
+    const schedules=DB.load('schedules',[]);
+    const seen=new Set(schedules.map(s=>s.id));
+    let sch=false;
+    const add=(def,date,time,vehicleId,driverId,driverName)=>{
+      const id='S-SEED-'+def.key+'-'+date.replace(/-/g,'')+'-'+time.replace(':','');
+      if(seen.has(id)) return;
+      if(schedules.some(s=>s.agencyId===def.agencyId&&s.routeId===def.id&&s.date===date&&s.time===time)) return;
+      schedules.push({id,agencyId:def.agencyId,routeId:def.id,date,time,vehicleId,driverId,driverName,price:def.price,status:'open',tripStatus:'scheduled',blockedSeats:[],createdAt:nowIso});
+      seen.add(id); sch=true;
+    };
+    const def=Object.fromEntries(validDefs.map(d=>[d.key,d]));
+    for(let day=1;day<=30;day++){
+      const date=todayStr(day);
+      if(def.AG1BNDA){ add(def.AG1BNDA,date,'07:00','V1','D1','Bang Jamil'); add(def.AG1BNDA,date,'14:00','V2','D2','Teuku Rizal'); }
+      if(def.AG2MDN) add(def.AG2MDN,date,'08:00','V4','D4','Bang Hendra');
+      if(def.AG3MDN) add(def.AG3MDN,date,'21:00','V5','D6','Agus Medan');
+      if(def.AG4BNDA) add(def.AG4BNDA,date,'07:00','V6','D8','Muhammad Iqbal');
+      if(day%2===1){
+        if(def.AG1ABR) add(def.AG1ABR,date,'08:00','V2','D7','Ilham Saputra');
+        if(def.AG2LSW) add(def.AG2LSW,date,'22:00','V4','D5','Dedi Saputra');
+        if(def.AG4ABR) add(def.AG4ABR,date,'16:00','V6','D8','Muhammad Iqbal');
+      }
+    }
+    if(sch){
+      DB.save('schedules',schedules);
+      const logs=DB.load('audit',[]);
+      logs.unshift({id:uid('LOG'),time:nowIso,actor:'system',action:'seed_compare',detail:'Seed rute dan jadwal perbandingan 30 hari'});
+      DB.save('audit',logs);
+    }
+    localStorage.setItem('at_seed_compare_v1','1');
+  }catch(e){ console.warn('seed perbandingan gagal',e); }
+})();
+/* Variasi armada tambahan per agen. Migrasi terpisah agar browser yang sudah
+   menjalankan seed perbandingan sebelumnya tetap mendapat armada baru. */
+(function seedFleetVariationV1(){
+  try{
+    if(localStorage.getItem('at_seed_fleet_variation_v1')==='1') return;
+    const demoRoutes=DB.load('routes',[]).filter(r=>String(r.id).startsWith('R-SEED-'));
+    if(!demoRoutes.length){ localStorage.setItem('at_seed_fleet_variation_v1','1'); return; }
+    const nowIso=new Date().toISOString();
+    const mkVehicle=(o)=>({
+      id:'',agencyId:'',brand:'',model:'',year:2023,color:'',plate:'',chassis:'',engine:'',vtype:'MPV',vtypeOther:'',baggage:'Sedang',tax:'Aktif',stnkExp:'2028-01-01',kir:'-',condition:'Baik',capacity:6,photo:'',facilities:['AC'],status:'aktif',ownerName:'',ownerBiz:'',ownerNik:'',ownerAddr:'',ownerPhone:'',ownerEmail:'',ownership:'Milik perusahaan',coopDriverId:'',hasEmail:'Ya',docs:['STNK','KTP pemilik'],docOther:'',stnkPhoto:'',ktpOwnerPhoto:'',mainRoute:'',origin:'',dest:'',freq:'Setiap hari',freqOther:'',services:['Antar jemput alamat'],opSchedule:'',coopTariff:0,coopSys:'Bagi hasil',coopOther:'',fleetCount:1,hasDriver:'Ya',drvName:'',drvPhone:'',drvSim:'',drvSimExp:'',drvExp:'',hasBackup:'Tidak',backName:'',backPhone:'',backSim:'',backSimExp:'',inactiveSeats:[],layout:vehLayout({}),seatSeq:6,...o
+    });
+    const fleet=[
+      mkVehicle({id:'V7',agencyId:'AG1',brand:'Toyota',model:'Fortuner',year:2023,color:'Hitam',plate:'BL 9900 MN',chassis:'MHFXW42G2P2007001',engine:'2GD2007001',vtype:'SUV',baggage:'Besar',stnkExp:'2028-02-10',kir:'Berlaku s.d. 2028',condition:'Sangat baik',photo:'https://images.unsplash.com/photo-1519641471654-76ce0107ad1b?w=600&q=80',facilities:['AC','USB Charger','Air Mineral','Reclining Seat'],ownerName:'H. Muhammad Nur',ownerBiz:'Barakah Travel',ownerNik:'1173010101800001',ownerAddr:'Jl. Merdeka No.12, Calang',ownerPhone:'0812000001',ownerEmail:'agen@barakah.com',coopDriverId:'D7',mainRoute:'Calang — Banda Aceh',origin:'Aceh Jaya',dest:'Banda Aceh',services:['Antar jemput alamat','Paket barang'],opSchedule:'16:00 setiap hari',coopTariff:150000,fleetCount:4,drvName:'Ilham Saputra',drvPhone:'0812000099',drvSim:'B1 - 1171031201970007',drvSimExp:'2029-01-01',drvExp:'5 tahun'}),
+      mkVehicle({id:'V8',agencyId:'AG2',brand:'Toyota',model:'Hiace Commuter',year:2022,color:'Putih',plate:'BK 1122 XY',chassis:'JTFHX02P2N001008',engine:'1GD001008',vtype:'Van',baggage:'Besar',stnkExp:'2028-06-15',kir:'Berlaku s.d. 2028',condition:'Baik',photo:'https://images.unsplash.com/photo-1570125909232-eb263c188f7e?w=600&q=80',facilities:['AC','USB Charger','Reclining Seat','Snack'],ownerName:'Faisal',ownerBiz:'Putra Jaya Trans',ownerNik:'1171010101880002',ownerAddr:'Jl. T. Umar No.88, Banda Aceh',ownerPhone:'0812000010',ownerEmail:'agen@putrajaya.com',coopDriverId:'D5',mainRoute:'Banda Aceh — Medan',origin:'Banda Aceh',dest:'Medan',services:['Antar jemput alamat','Antar jemput terminal','Paket barang'],opSchedule:'05:00 setiap hari',coopTariff:320000,fleetCount:2,drvName:'Dedi Saputra',drvPhone:'0812000012',drvSim:'B1 - 1171021701950005',drvSimExp:'2028-01-01',drvExp:'6 tahun'}),
+      mkVehicle({id:'V9',agencyId:'AG3',brand:'Mitsubishi',model:'Xpander',year:2023,color:'Silver',plate:'BK 4455 ZZ',chassis:'MKYXPN1S1PJ001009',engine:'4A91T001009',vtype:'MPV',baggage:'Sedang',stnkExp:'2028-09-20',kir:'Berlaku s.d. 2028',condition:'Sangat baik',photo:'https://images.unsplash.com/photo-1503376780353-7e6692767b70?w=600&q=80',facilities:['AC','USB Charger','Air Mineral','Reclining Seat'],ownerName:'Rizky',ownerBiz:'Lintas Utara',ownerNik:'1271010101900003',ownerAddr:'Jl. Gatot Subroto No.45, Medan',ownerPhone:'0812000020',ownerEmail:'agen@lintasutara.com',coopDriverId:'D6',mainRoute:'Banda Aceh — Medan',origin:'Banda Aceh',dest:'Medan',services:['Antar jemput alamat','Antar jemput terminal'],opSchedule:'07:00 setiap hari',coopTariff:350000,fleetCount:2,drvName:'Agus Medan',drvPhone:'0812000021',drvSim:'B1 - 1271010505920006',drvSimExp:'2027-04-01',drvExp:'7 tahun'}),
+      mkVehicle({id:'V10',agencyId:'AG4',brand:'Daihatsu',model:'Terios',year:2022,color:'Merah',plate:'BL 7788 KL',chassis:'MHKA1BA1JN001010',engine:'2NR001010',vtype:'SUV',baggage:'Sedang',stnkExp:'2027-12-05',kir:'Berlaku s.d. 2027',condition:'Baik',photo:'https://images.unsplash.com/photo-1533473359331-0135ef1b58bf?w=600&q=80',facilities:['AC','USB Charger','Air Mineral'],ownerName:'Nasir',ownerBiz:'Cahaya Perkasa',ownerNik:'1173010101900004',ownerAddr:'Jl. Diponegoro No.7, Meulaboh',ownerPhone:'0812000030',ownerEmail:'agen@cahaya.com',coopDriverId:'D8',mainRoute:'Meulaboh — Banda Aceh',origin:'Aceh Barat',dest:'Banda Aceh',services:['Antar jemput alamat','Paket barang'],opSchedule:'14:00 dua hari sekali',coopTariff:155000,fleetCount:2,drvName:'Muhammad Iqbal',drvPhone:'0812000031',drvSim:'A - 1173010101900008',drvSimExp:'2029-01-01',drvExp:'5 tahun'}),
+    ];
+    const vehicles=DB.load('vehicles',[]); let vch=false;
+    fleet.forEach(v=>{ if(!vehicles.some(x=>x.id===v.id)){ vehicles.push(v); vch=true; } });
+    if(vch) DB.save('vehicles',vehicles);
+
+    const routes=DB.load('routes',[]); let rch=false;
+    const routeFleet={
+      'R-SEED-AG1-BNDA':['V7'],
+      'R-SEED-AG2-MDN':['V8'],
+      'R-SEED-AG3-MDN':['V9'],
+      'R-SEED-AG4-BNDA':['V10'],
+    };
+    Object.entries(routeFleet).forEach(([rid,ids])=>{
+      const r=routes.find(x=>x.id===rid); if(!r) return;
+      const cur=Array.isArray(r.vehicleIds)?r.vehicleIds:[];
+      const next=[...new Set([...cur,...ids])];
+      if(next.length!==cur.length){ r.vehicleIds=next; rch=true; }
+    });
+    if(rch) DB.save('routes',routes);
+
+    const schedules=DB.load('schedules',[]);
+    const seen=new Set(schedules.map(s=>s.id));
+    const routeMap=new Map(routes.map(r=>[r.id,r]));
+    let sch=false;
+    const add=(routeId,date,time,vehicleId,driverId,driverName)=>{
+      const r=routeMap.get(routeId); if(!r) return;
+      const agencyId=r.agencyId||(r.agencyIds||[])[0]; if(!agencyId) return;
+      const price=Number((r.prices||{})[agencyId]??r.basePrice??0)||0;
+      const id='S-SEED-FLEET-'+routeId.replace('R-SEED-','')+'-'+date.replace(/-/g,'')+'-'+time.replace(':','');
+      if(seen.has(id)) return;
+      if(schedules.some(s=>s.agencyId===agencyId&&s.routeId===routeId&&s.date===date&&s.time===time)) return;
+      schedules.push({id,agencyId,routeId,date,time,vehicleId,driverId,driverName,price,status:'open',tripStatus:'scheduled',blockedSeats:[],createdAt:nowIso});
+      seen.add(id); sch=true;
+    };
+    for(let day=1;day<=30;day++){
+      const date=todayStr(day);
+      add('R-SEED-AG1-BNDA',date,'16:00','V7','D7','Ilham Saputra');
+      add('R-SEED-AG2-MDN',date,'05:00','V8','D5','Dedi Saputra');
+      add('R-SEED-AG3-MDN',date,'07:00','V9','D6','Agus Medan');
+      if(day%2===0) add('R-SEED-AG4-BNDA',date,'14:00','V10','D8','Muhammad Iqbal');
+    }
+    if(sch){
+      DB.save('schedules',schedules);
+      const logs=DB.load('audit',[]);
+      logs.unshift({id:uid('LOG'),time:nowIso,actor:'system',action:'seed_fleet_variation',detail:'Seed variasi armada tambahan untuk 4 agen'});
+      DB.save('audit',logs);
+    }
+    localStorage.setItem('at_seed_fleet_variation_v1','1');
+  }catch(e){ console.warn('seed variasi armada gagal',e); }
+})();
+/* Pesaing di rute Aceh Jaya -> Banda Aceh. Migrasi terpisah agar data seed
+   yang sudah ada tetap aman dan tidak digandakan saat halaman dimuat ulang. */
+(function seedAcehJayaCompetitionV1(){
+  try{
+    if(localStorage.getItem('at_seed_ajy_competition_v1')==='1') return;
+    const demoRoutes=DB.load('routes',[]).filter(r=>String(r.id).startsWith('R-SEED-'));
+    if(!demoRoutes.length){ localStorage.setItem('at_seed_ajy_competition_v1','1'); return; }
+    const nowIso=new Date().toISOString();
+    const svgURI=s=>'data:image/svg+xml;utf8,'+encodeURIComponent(s);
+    const avatar=(ini,c1,c2)=>svgURI(`<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='${c1}'/><stop offset='1' stop-color='${c2}'/></linearGradient></defs><rect width='160' height='160' fill='url(#g)'/><text x='80' y='94' font-family='Arial,sans-serif' font-size='58' font-weight='bold' fill='#fff' text-anchor='middle'>${ini}</text></svg>`);
+    const sim=(t,nm,num,exp)=>svgURI(`<svg xmlns='http://www.w3.org/2000/svg' width='320' height='200'><rect width='320' height='200' rx='16' fill='#0b2447'/><rect x='16' y='16' width='288' height='168' rx='12' fill='none' stroke='#38bdf8' stroke-width='2'/><text x='28' y='52' font-family='Arial,sans-serif' font-size='22' font-weight='bold' fill='#7dd3fc'>SIM ${t} • DEMO</text><text x='28' y='92' font-family='Arial,sans-serif' font-size='17' font-weight='bold' fill='#fff'>${nm}</text><text x='28' y='118' font-family='Arial,sans-serif' font-size='14' fill='#cbd5e1'>${num}</text><text x='28' y='144' font-family='Arial,sans-serif' font-size='14' fill='#cbd5e1'>Berlaku s.d. ${exp}</text><text x='28' y='168' font-family='Arial,sans-serif' font-size='11' fill='#64748b'>Contoh seed — ganti dengan foto asli</text></svg>`);
+
+    const users=DB.load('users',[]); let uch=false;
+    const newUsers=[
+      {id:'U-DR9',name:'Rizal Effendi',email:'rizal@putrajaya.com',phone:'0812000042',pass:'pengemudi123',role:'pengemudi',agencyId:'AG2',status:'active',profileStep:'done',photo:''},
+      {id:'U-DR10',name:'Surya Batubara',email:'surya@lintasutara.com',phone:'0812000043',pass:'pengemudi123',role:'pengemudi',agencyId:'AG3',status:'active',profileStep:'done',photo:''},
+      {id:'U-DR11',name:'Ahmad Fauzi',email:'ahmad@cahaya.com',phone:'0812000044',pass:'pengemudi123',role:'pengemudi',agencyId:'AG4',status:'active',profileStep:'done',photo:''},
+    ];
+    newUsers.forEach(u=>{
+      if(!users.some(x=>x.id===u.id||String(x.email||'').toLowerCase()===u.email)){ users.push(u); uch=true; }
+    });
+    if(uch) DB.save('users',users);
+
+    const drivers=DB.load('drivers',[]); let dch=false;
+    const newDrivers=[
+      {id:'D9',agencyId:'AG2',name:'Rizal Effendi',phone:'0812000042',simType:'B1',simExp:2029,simPhoto:sim('B1','Rizal Effendi','1171010502940009','2029'),ktpPhoto:'',selfie:'',photo:avatar('RE','#2563eb','#1e3a8a'),status:'aktif',rating:4.7,trips:0,userEmail:'rizal@putrajaya.com',birthPlace:'Banda Aceh',birthDate:'1994-02-05',gender:'Laki-laki',address:'Jl. T. Umar No.88, Banda Aceh',nik:'1171010502940009',marital:'Belum menikah',education:'SMA',emName:'Jamal',emPhone:'0813000042',emRelation:'Ayah',simNumber:'1171010502940009',bank:'BCA 8210099009 a.n. Rizal Effendi'},
+      {id:'D10',agencyId:'AG3',name:'Surya Batubara',phone:'0812000043',simType:'B1',simExp:2028,simPhoto:sim('B1','Surya Batubara','1271011203930010','2028'),ktpPhoto:'',selfie:'',photo:avatar('SB','#0891b2','#164e63'),status:'aktif',rating:4.8,trips:0,userEmail:'surya@lintasutara.com',birthPlace:'Medan',birthDate:'1993-03-12',gender:'Laki-laki',address:'Jl. Gatot Subroto No.45, Medan',nik:'1271011203930010',marital:'Belum menikah',education:'SMA',emName:'Rosmaida',emPhone:'0813000043',emRelation:'Ibu',simNumber:'1271011203930010',bank:'Mandiri 8900010193010 a.n. Surya Batubara'},
+      {id:'D11',agencyId:'AG4',name:'Ahmad Fauzi',phone:'0812000044',simType:'A',simExp:2029,simPhoto:sim('A','Ahmad Fauzi','1173011104950011','2029'),ktpPhoto:'',selfie:'',photo:avatar('AF','#f97316','#7c2d12'),status:'aktif',rating:4.6,trips:0,userEmail:'ahmad@cahaya.com',birthPlace:'Meulaboh',birthDate:'1995-04-11',gender:'Laki-laki',address:'Jl. Diponegoro No.7, Meulaboh',nik:'1173011104950011',marital:'Belum menikah',education:'SMA',emName:'Cut Nyak',emPhone:'0813000044',emRelation:'Ibu',simNumber:'1173011104950011',bank:'BRI 0022010195011 a.n. Ahmad Fauzi'},
+    ];
+    newDrivers.forEach(d=>{
+      if(!drivers.some(x=>x.id===d.id)){ drivers.push(d); dch=true; }
+    });
+    if(dch) DB.save('drivers',drivers);
+
+    const mkVehicle=(o)=>({
+      id:'',agencyId:'',brand:'',model:'',year:2023,color:'',plate:'',chassis:'',engine:'',vtype:'MPV',vtypeOther:'',baggage:'Sedang',tax:'Aktif',stnkExp:'2028-01-01',kir:'-',condition:'Baik',capacity:6,photo:'',facilities:['AC'],status:'aktif',ownerName:'',ownerBiz:'',ownerNik:'',ownerAddr:'',ownerPhone:'',ownerEmail:'',ownership:'Milik perusahaan',coopDriverId:'',hasEmail:'Ya',docs:['STNK','KTP pemilik'],docOther:'',stnkPhoto:'',ktpOwnerPhoto:'',mainRoute:'',origin:'',dest:'',freq:'Setiap hari',freqOther:'',services:['Antar jemput alamat'],opSchedule:'',coopTariff:0,coopSys:'Bagi hasil',coopOther:'',fleetCount:1,hasDriver:'Ya',drvName:'',drvPhone:'',drvSim:'',drvSimExp:'',drvExp:'',hasBackup:'Tidak',backName:'',backPhone:'',backSim:'',backSimExp:'',inactiveSeats:[],layout:vehLayout({}),seatSeq:6,...o
+    });
+    const newFleet=[
+      mkVehicle({id:'V11',agencyId:'AG2',brand:'Toyota',model:'Innova Zenix',year:2023,color:'Hitam',plate:'BL 2468 QA',chassis:'MHFXW42G2P2011001',engine:'2GD2011001',vtype:'MPV',baggage:'Besar',stnkExp:'2028-04-12',kir:'Berlaku s.d. 2028',condition:'Sangat baik',photo:'https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?w=600&q=80',facilities:['AC','USB Charger','Air Mineral','Reclining Seat','Snack'],ownerName:'Faisal',ownerBiz:'Putra Jaya Trans',ownerNik:'1171010101880002',ownerAddr:'Jl. T. Umar No.88, Banda Aceh',ownerPhone:'0812000010',ownerEmail:'agen@putrajaya.com',coopDriverId:'D9',mainRoute:'Aceh Jaya — Banda Aceh',origin:'Aceh Jaya',dest:'Banda Aceh',services:['Antar jemput alamat','Antar jemput terminal','Paket barang'],opSchedule:'08:00 setiap hari',coopTariff:160000,fleetCount:3,drvName:'Rizal Effendi',drvPhone:'0812000042',drvSim:'B1 - 1171010502940009',drvSimExp:'2029-01-01',drvExp:'6 tahun'}),
+      mkVehicle({id:'V12',agencyId:'AG3',brand:'Mitsubishi',model:'Pajero Sport',year:2023,color:'Putih',plate:'BK 3377 PS',chassis:'MKYXPN1S1PJ001012',engine:'4D56T001012',vtype:'SUV',baggage:'Besar',stnkExp:'2028-07-18',kir:'Berlaku s.d. 2028',condition:'Sangat baik',photo:'https://images.unsplash.com/photo-1519641471654-76ce0107ad1b?w=600&q=80',facilities:['AC','USB Charger','Air Mineral','Reclining Seat','WiFi'],ownerName:'Rizky',ownerBiz:'Lintas Utara',ownerNik:'1271010101900003',ownerAddr:'Jl. Gatot Subroto No.45, Medan',ownerPhone:'0812000020',ownerEmail:'agen@lintasutara.com',coopDriverId:'D10',mainRoute:'Aceh Jaya — Banda Aceh',origin:'Aceh Jaya',dest:'Banda Aceh',services:['Antar jemput alamat','Antar jemput terminal'],opSchedule:'09:00 setiap hari',coopTariff:170000,fleetCount:3,drvName:'Surya Batubara',drvPhone:'0812000043',drvSim:'B1 - 1271011203930010',drvSimExp:'2028-01-01',drvExp:'7 tahun'}),
+      mkVehicle({id:'V13',agencyId:'AG4',brand:'Honda',model:'BR-V',year:2022,color:'Silver',plate:'BL 5566 BR',chassis:'MHKA1BA1JN001013',engine:'2NR001013',vtype:'SUV',baggage:'Sedang',stnkExp:'2027-11-22',kir:'Berlaku s.d. 2027',condition:'Baik',photo:'https://images.unsplash.com/photo-1533473359331-0135ef1b58bf?w=600&q=80',facilities:['AC','USB Charger','Air Mineral'],ownerName:'Nasir',ownerBiz:'Cahaya Perkasa',ownerNik:'1173010101900004',ownerAddr:'Jl. Diponegoro No.7, Meulaboh',ownerPhone:'0812000030',ownerEmail:'agen@cahaya.com',coopDriverId:'D11',mainRoute:'Aceh Jaya — Banda Aceh',origin:'Aceh Jaya',dest:'Banda Aceh',services:['Antar jemput alamat','Paket barang'],opSchedule:'10:00 setiap hari',coopTariff:155000,fleetCount:3,drvName:'Ahmad Fauzi',drvPhone:'0812000044',drvSim:'A - 1173011104950011',drvSimExp:'2029-01-01',drvExp:'5 tahun'}),
+    ];
+    const vehicles=DB.load('vehicles',[]); let vch=false;
+    newFleet.forEach(v=>{
+      if(!vehicles.some(x=>x.id===v.id)){ vehicles.push(v); vch=true; }
+    });
+    if(vch) DB.save('vehicles',vehicles);
+
+    const routes=DB.load('routes',[]); let rch=false;
+    const routeDefs=[
+      {id:'R-SEED-AG2-AJY-BNDA',agencyId:'AG2',price:160000,vehicleIds:['V11'],driverIds:['D9'],driverName:'Rizal Effendi'},
+      {id:'R-SEED-AG3-AJY-BNDA',agencyId:'AG3',price:170000,vehicleIds:['V12'],driverIds:['D10'],driverName:'Surya Batubara'},
+      {id:'R-SEED-AG4-AJY-BNDA',agencyId:'AG4',price:155000,vehicleIds:['V13'],driverIds:['D11'],driverName:'Ahmad Fauzi'},
+    ];
+    const routeByAgency={};
+    const est=estimateRoute('Aceh Jaya','Banda Aceh')||{};
+    routeDefs.forEach(def=>{
+      let r=routes.find(x=>x.id===def.id);
+      if(!r){
+        r=routes.find(x=>x.from==='Aceh Jaya'&&x.to==='Banda Aceh'&&(x.agencyIds||(x.agencyId?[x.agencyId]:[])).includes(def.agencyId));
+      }
+      if(!r){
+        r={id:def.id,from:'Aceh Jaya',to:'Banda Aceh',distance:est.distance||'-',duration:est.duration||'-',basePrice:def.price,prices:{[def.agencyId]:def.price},homePickup:true,pickups:['Terminal Aceh Jaya','Pelabuhan Calang'],vehicleIds:def.vehicleIds,active:true,agencyId:def.agencyId,agencyIds:[def.agencyId],driverId:def.driverIds[0]||null,driverIds:def.driverIds,suspensions:{}};
+        routes.push(r); rch=true;
+      } else {
+        const curVehicles=Array.isArray(r.vehicleIds)?r.vehicleIds:[];
+        const nextVehicles=[...new Set([...curVehicles,...def.vehicleIds])];
+        const curDrivers=Array.isArray(r.driverIds)?r.driverIds:[];
+        const nextDrivers=[...new Set([...curDrivers,...def.driverIds])];
+        if(nextVehicles.length!==curVehicles.length){ r.vehicleIds=nextVehicles; rch=true; }
+        if(nextDrivers.length!==curDrivers.length){ r.driverIds=nextDrivers; rch=true; }
+        if(!r.driverId&&def.driverIds[0]){ r.driverId=def.driverIds[0]; rch=true; }
+      }
+      routeByAgency[def.agencyId]=r;
+    });
+    if(rch) DB.save('routes',routes);
+
+    const schedules=DB.load('schedules',[]);
+    const seen=new Set(schedules.map(s=>s.id));
+    let sch=false;
+    const add=(def,date,time)=>{
+      const r=routeByAgency[def.agencyId]; if(!r) return;
+      const price=Number((r.prices||{})[def.agencyId]??r.basePrice??def.price)||def.price;
+      const id='S-SEED-AJY-'+def.agencyId+'-'+date.replace(/-/g,'')+'-'+time.replace(':','');
+      if(seen.has(id)) return;
+      if(schedules.some(s=>s.agencyId===def.agencyId&&s.routeId===r.id&&s.date===date&&s.time===time)) return;
+      schedules.push({id,agencyId:def.agencyId,routeId:r.id,date,time,vehicleId:def.vehicleIds[0],driverId:def.driverIds[0],driverName:def.driverName,price,status:'open',tripStatus:'scheduled',blockedSeats:[],createdAt:nowIso});
+      seen.add(id); sch=true;
+    };
+    const defByAgency=Object.fromEntries(routeDefs.map(d=>[d.agencyId,d]));
+    for(let day=1;day<=30;day++){
+      const date=todayStr(day);
+      if(defByAgency.AG2) add(defByAgency.AG2,date,'08:00');
+      if(defByAgency.AG3) add(defByAgency.AG3,date,'09:00');
+      if(defByAgency.AG4) add(defByAgency.AG4,date,'10:00');
+    }
+    if(sch){
+      DB.save('schedules',schedules);
+      const logs=DB.load('audit',[]);
+      logs.unshift({id:uid('LOG'),time:nowIso,actor:'system',action:'seed_aceh_jaya_competition',detail:'Seed 3 agen pesaing di rute Aceh Jaya - Banda Aceh'});
+      DB.save('audit',logs);
+    }
+    localStorage.setItem('at_seed_ajy_competition_v1','1');
+  }catch(e){ console.warn('seed pesaing Aceh Jaya gagal',e); }
+})();
 }

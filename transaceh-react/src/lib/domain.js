@@ -362,6 +362,48 @@ export function syncAgencyProfileFromKyc(ag) {
 
 export function routeById(id){ return DB.load('routes',[]).find(r=>r.id===id); }
 
+/* ---------- Grup rute pelanggan ----------
+   Data rute tetap tersimpan per agen. Untuk tampilan pelanggan, rute dengan
+   asal + tujuan yang sama digabung menjadi satu kartu. Arah tetap dibedakan. */
+export function routeGroupKey(route){
+  const norm=s=>String(s==null?'':s).trim().toLowerCase().replace(/\s+/g,' ');
+  return route?norm(route.from)+'|'+norm(route.to):'';
+}
+
+export function groupRoutes(routes){
+  const map=new Map();
+  (Array.isArray(routes)?routes:[]).forEach(r=>{
+    const key=routeGroupKey(r);
+    if(!key||key==='|') return;
+    if(!map.has(key)){
+      map.set(key,{
+        key,from:r.from,to:r.to,routeId:r.id,
+        routes:[],routeIds:[],agencyIds:[],pickups:[],
+        homePickup:false,basePrice:Infinity,
+        distance:r.distance||'',duration:r.duration||'',
+      });
+    }
+    const g=map.get(key);
+    g.routes.push(r);
+    if(!g.routeIds.includes(r.id)) g.routeIds.push(r.id);
+    const ids=(r.agencyIds&&r.agencyIds.length)?r.agencyIds:(r.agencyId?[r.agencyId]:[]);
+    ids.forEach(id=>{ if(id&&!g.agencyIds.includes(id)) g.agencyIds.push(id); });
+    g.pickups=normalizePoints([...g.pickups,...(r.pickups||[])]);
+    if(r.homePickup!==false) g.homePickup=true;
+    const price=Number(r.basePrice);
+    if(Number.isFinite(price)) g.basePrice=Math.min(g.basePrice,price);
+  });
+  return [...map.values()].map(g=>({...g,basePrice:Number.isFinite(g.basePrice)?g.basePrice:0}));
+}
+
+export function routesInRouteGroup(routeOrId,routes){
+  const all=Array.isArray(routes)?routes:DB.load('routes',[]);
+  const base=typeof routeOrId==='string'?all.find(r=>r.id===routeOrId):routeOrId;
+  if(!base) return [];
+  const key=routeGroupKey(base);
+  return all.filter(r=>routeGroupKey(r)===key);
+}
+
 export function vehicleById(id){ return DB.load('vehicles',[]).find(v=>v.id===id); }
 
 export function vehName(v){ return v?(((v.brand||'')+(v.model?' '+v.model:'')).trim()||'Armada'):''; }
