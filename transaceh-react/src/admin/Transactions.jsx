@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { schedById, routeById, agencyById, splitFare } from '@/lib/domain.js';
+import { schedById, routeById, agencyById, splitFare, bookedPassengers } from '@/lib/domain.js';
 import { fmtRp } from '@/lib/utils.js';
 import { BadgeStatus } from '@/components/ui.jsx';
 
@@ -12,7 +12,7 @@ export function Transactions() {
   const f = list.filter((b) => !q || (b.code || '').toLowerCase().includes(q.toLowerCase()));
   const exportCSV = () => {
     let csv = 'Kode,Nama,Kursi,Rute,Tanggal,Jam,Total,Status\n';
-    f.forEach((b) => { const s = schedById(b.scheduleId); if (!s) return; const r = routeById(s.routeId); csv += `${b.code},"${(b.passengers || []).map((p) => p.name).join(';')}","${(b.seats || []).join(' ')}","${r.from}-${r.to}",${s.date},${s.time},${b.total},${b.status}\n`; });
+    f.forEach((b) => { const s = schedById(b.scheduleId); if (!s) return; const r = routeById(s.routeId); csv += `${b.code},"${bookedPassengers(b).map((p) => p.name).join(';')}","${(b.seats || []).join(' ')}","${r.from}-${r.to}",${s.date},${s.time},${b.total},${b.status}\n`; });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
     a.download = 'laporan-transaksi.csv';

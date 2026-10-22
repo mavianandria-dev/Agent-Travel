@@ -201,16 +201,32 @@ export function agencyById(id){ return DB.load('agencies',[]).find(a=>a.id===id)
 
 export function bookingsOf(schedId){ return DB.load('bookings',[]).filter(b=>b.scheduleId===schedId && b.status!=='cancelled'); }
 
+/** Penumpang yang kursinya benar-benar ada di booking. Data lama bisa punya
+ *  penumpang "hantu" (kursi tidak dibeli); jangan pernah tampilkan mereka. */
+export function bookedPassengers(b){
+  const seats=Array.isArray(b?.seats)?b.seats:[];
+  const list=Array.isArray(b?.passengers)?b.passengers:[];
+  if(!seats.length) return [];
+  const booked=new Set(seats.map(String));
+  return list.filter(p=>p && p.seat && booked.has(String(p.seat)));
+}
+
 export function takenSeats(schedId){
-  const sch=schedById(schedId); const out={paid:[],hold:[],inactive:[]};
-  bookingsOf(schedId).forEach(b=>{ (b.seats||[]).forEach(s=>{ if(b.status==='paid'||b.status==='done') out.paid.push(s); else if(b.status==='pending') out.hold.push(s); }); });
-  (sch?.blockedSeats||[]).forEach(s=>{ if(!out.paid.includes(s)) out.paid.push(s); });
+  const sch=schedById(schedId); const out={paid:[],booked:[],hold:[],inactive:[],blocked:[]};
+  bookingsOf(schedId).forEach(b=>{ (b.seats||[]).forEach(s=>{ if(b.status==='paid'||b.status==='done'){ out.booked.push(s); out.paid.push(s); } else if(b.status==='pending') out.hold.push(s); }); });
+  (sch?.blockedSeats||[]).forEach(s=>{ if(!out.blocked.includes(s)) out.blocked.push(s); if(!out.paid.includes(s)) out.paid.push(s); });
   const veh=sch?vehicleById(sch.vehicleId):null;
-  (veh?.inactiveSeats||[]).forEach(s=>{ if(!out.paid.includes(s)) out.paid.push(s); if(!out.inactive.includes(s)) out.inactive.push(s); });
+  (veh?.inactiveSeats||[]).forEach(s=>{ if(!out.inactive.includes(s)) out.inactive.push(s); if(!out.paid.includes(s)) out.paid.push(s); });
   return out;
 }
 
-export function seatsLeft(schedId){ return schedSeatCap(schedId) - takenSeats(schedId).paid.length - takenSeats(schedId).hold.length; }
+export function seatsLeft(schedId){
+  const tk=takenSeats(schedId);
+  /* Kapasitas sudah tidak menghitung kursi nonaktif (layout 'off').
+     Jadi jangan kurangi kursi nonaktif lagi; cukup kursi terisi, hold, dan blokir. */
+  const used=new Set([...tk.booked, ...tk.hold, ...tk.blocked].map(String));
+  return Math.max(0, schedSeatCap(schedId) - used.size);
+}
 
 export function vehLayout(v){
   if(v&&Array.isArray(v.layout)&&v.layout.length===28) return v.layout.map(c=>({sid:c.sid||null,type:c.type||'empty'}));
@@ -285,6 +301,17 @@ export function scheduleEffectiveDepartureMs(s) {
   const base = scheduleDepartureMs(s);
   const delayed = s && s.delayUntil ? new Date(s.delayUntil).getTime() : NaN;
   return Number.isFinite(delayed) && (!Number.isFinite(base) || delayed > base) ? delayed : base;
+}
+
+/** Posisi waktu terhadap jam keberangkatan efektif.
+ *  minutes > 0 = masih lebih awal; minutes < 0 = sudah lewat. */
+export function departureTiming(s, now = Date.now()) {
+  const target = scheduleEffectiveDepartureMs(s);
+  if (!Number.isFinite(target)) return { state: 'unknown', minutes: 0 };
+  const minutes = Math.round((target - now) / 60000);
+  if (minutes > 60) return { state: 'early', minutes };
+  if (minutes < -120) return { state: 'late', minutes };
+  return { state: 'normal', minutes };
 }
 
 /** True bila jadwal sudah melewati jam keberangkatan efektif + masa tenggang. */
@@ -536,7 +563,6 @@ export function seatBookedFuture(vid,sid){
 export function cleanupHolds(){
   const arr=DB.load('bookings',[]);
   const expired=[];
-  const released=new Set();
   const now=Date.now();
   const nowIso=new Date(now).toISOString();
   arr.forEach((b)=>{
@@ -553,7 +579,6 @@ export function cleanupHolds(){
     b.cancelledAt=nowIso;
     restoreVoucher(b);
     expired.push(b);
-    released.add(b.scheduleId);
   });
   if(!expired.length) return;
   DB.save('bookings',arr);
@@ -561,12 +586,6 @@ export function cleanupHolds(){
   let payChanged=false;
   expired.forEach((b)=>{ if(updatePaymentRefund(pays,b,{refund:0,pct:0,scope:'ticket',status:'cancelled'})) payChanged=true; });
   if(payChanged) DB.save('payments',pays);
-  released.forEach(processWaiting);
-}
-
-export function processWaiting(schedId){
-  const w=DB.load('waiting',[]); const idx=w.findIndex(x=>x.scheduleId===schedId);
-  if(idx>=0 && seatsLeft(schedId)>0){ const item=w.splice(idx,1)[0]; DB.save('waiting',w); notify(item.userEmail,'Kursi tersedia!','Kursi pada jadwal '+schedId+' kini tersedia ('+seatsLeft(schedId)+' sisa). Segera booking.','WA'); }
 }
 
 export function feeFor(agencyId, amount){ const a=agencyById(agencyId); if(!a) return Math.round(amount*0.08); return a.feeType==='flat'? a.feeValue : Math.round(amount*a.feeValue/100); }
@@ -656,7 +675,7 @@ export function refundPolicyOf(agencyId) {
 
 /** Tier refund yang berlaku untuk jadwal pada waktu tertentu. */
 export function refundRuleFor(agencyId, s, now = Date.now()) {
-  const hours = s ? Math.max(0, (scheduleDepartureMs(s) - now) / 36e5) : 0;
+  const hours = s ? Math.max(0, (scheduleEffectiveDepartureMs(s) - now) / 36e5) : 0;
   const policy = refundPolicyOf(agencyId);
   const rule = policy.find((p) => hours >= p.minH) || policy[policy.length - 1];
   return { ...(rule || { minH: 0, pct: 0 }), hours };
@@ -727,7 +746,9 @@ function restoreVoucher(b) {
   }
 }
 
-/** Catat status refund pada data pembayaran agar laporan dan antrean admin sinkron. */
+/** Catat status refund pada data pembayaran agar laporan dan antrean admin sinkron.
+ *  Status pembayaran TIDAK langsung menjadi 'refunded'; itu baru terjadi setelah
+ *  admin menandai dana benar-benar dikirim (markRefundPaid). */
 function updatePaymentRefund(pays, b, { refund, pct, scope, status }) {
   const p = pays.find((x) => x.bookingId === b.id);
   if (!p) return false;
@@ -736,10 +757,18 @@ function updatePaymentRefund(pays, b, { refund, pct, scope, status }) {
   p.refundPct = pct;
   p.refundScope = scope;
   p.refundStatus = refund > 0 ? 'pending' : 'none';
-  p.refundedAt = at;
+  p.refundRequestedAt = at;
+  p.refundedAt = null;
   p.refundPaidAt = null;
   if (status) p.status = status;
   return true;
+}
+
+/** Booking pending lama yang belum punya hold diberi hold sekali.
+ *  Hold yang sudah ada TIDAK diperpanjang saat modal pembayaran dibuka. */
+export function ensureHoldExpiry(b) {
+  if (!b || b.status !== 'pending' || b.holdExpiry) return b;
+  return { ...b, holdExpiry: new Date(Date.now() + 15 * 60 * 1000).toISOString() };
 }
 
 /** Booking pending masih bisa dibayar: hold aktif, jadwal masih terbuka dan belum berangkat. */
@@ -809,7 +838,6 @@ export function cancelBooking(bookingId, { reason = '', by = 'pelanggan' } = {})
     'WA'
   );
   audit('booking_cancel', b.code + ' • ' + by + ' • refund ' + rule.pct + '%');
-  processWaiting(b.scheduleId);
   return { ok: true, refund, pct: rule.pct, pending: !wasPaid };
 }
 
@@ -862,6 +890,8 @@ export function markRefundPaid(bookingId, by = 'admin') {
   if (p) {
     p.refundStatus = 'done';
     p.refundPaidAt = now;
+    p.refundedAt = now;
+    p.status = 'refunded';
     DB.save('payments', pays);
   }
 
@@ -923,7 +953,7 @@ export function cancelScheduleByOperator(sid, reason, by = 'pengemudi') {
       b.cancelledAt = now;
       count += 1;
       total += refund;
-      if (updatePaymentRefund(payments, b, { refund, pct: 100, scope: 'total', status: 'refunded' })) payChanged = true;
+      if (updatePaymentRefund(payments, b, { refund, pct: 100, scope: 'total' })) payChanged = true;
       restoreVoucher(b);
       notify(
         b.userEmail,
@@ -990,8 +1020,8 @@ export function createDriverBooking(sid, { passengers = [], seats = [], driverId
   const s = schedById(sid);
   if (!s) return { ok: false, msg: 'Jadwal tidak ditemukan' };
   if (s.status !== 'open') return { ok: false, msg: 'Jadwal tidak terbuka' };
-  if (['arrived', 'missed', 'cancelled'].includes(s.tripStatus)) return { ok: false, msg: 'Jadwal sudah selesai/ditutup' };
-  if (s.tripStatus !== 'ontrip' && scheduleIsPast(s, 0)) return { ok: false, msg: 'Jadwal sudah lewat' };
+  if (['ontrip', 'arrived', 'missed', 'cancelled'].includes(s.tripStatus)) return { ok: false, msg: 'Jadwal sudah berjalan/selesai — penjualan tiket ditutup' };
+  if (scheduleIsPast(s, 0)) return { ok: false, msg: 'Jadwal sudah lewat' };
 
   const tk = takenSeats(s.id);
   const taken = new Set([...tk.paid, ...tk.hold, ...(s.blockedSeats || []), ...tk.inactive]);
@@ -1092,6 +1122,9 @@ export function toggleScheduleSeatBlock(sid, seat, { reason = '', by = 'agen' } 
   const arr = DB.load('schedules', []);
   const s = arr.find((x) => x.id === sid);
   if (!s) return { ok: false, msg: 'Jadwal tidak ditemukan' };
+  if (s.status === 'cancelled' || ['ontrip', 'arrived', 'missed', 'cancelled'].includes(s.tripStatus) || scheduleIsPast(s, 0)) {
+    return { ok: false, msg: 'Jadwal sudah berjalan/selesai — kursi tidak bisa diubah' };
+  }
   const blocked = Array.isArray(s.blockedSeats) ? [...s.blockedSeats] : [];
   const removing = blocked.includes(seat);
 
@@ -1128,7 +1161,7 @@ export function toggleScheduleSeatBlock(sid, seat, { reason = '', by = 'agen' } 
 }
 
 /** Ubah status trip jadwal; dipakai pengemudi maupun admin. */
-export function setScheduleTripStatus(sid, st) {
+export function setScheduleTripStatus(sid, st, { reason = '', by = '' } = {}) {
   if (!['ontrip', 'arrived'].includes(st)) return false;
   const arr = DB.load('schedules', []);
   const s = arr.find((x) => x.id === sid);
@@ -1138,7 +1171,11 @@ export function setScheduleTripStatus(sid, st) {
   const now = new Date().toISOString();
   s.tripStatus = st;
   s.status = 'closed';
-  if (st === 'ontrip') s.departedAt = now;
+  if (st === 'ontrip') {
+    s.departedAt = now;
+    if (by) s.departedBy = by;
+    if (String(reason || '').trim()) s.earlyStartReason = String(reason).trim();
+  }
   if (st === 'arrived') {
     s.arrivedAt = now;
     if (prev === 'missed' || scheduleIsPast(s, SCHEDULE_GRACE_HOURS)) s.lateCompletion = true;
@@ -1194,7 +1231,7 @@ export function setScheduleTripStatus(sid, st) {
       'WA'
     );
   });
-  audit('trip_update', sid + ' → ' + st + (s.lateCompletion ? ' • terlambat' : ''));
+  audit('trip_update', sid + ' → ' + st + (s.lateCompletion ? ' • terlambat' : '') + (String(reason || '').trim() ? ' • ' + String(reason).trim() : ''));
   return true;
 }
 
@@ -1247,7 +1284,7 @@ export function resolveScheduleNoShow(sid, refundPct = 100) {
       b.cancelledAt = now;
       count += 1;
       total += refund;
-      if (updatePaymentRefund(payments, b, { refund, pct, scope, status: refund > 0 ? 'refunded' : 'cancelled' })) payChanged = true;
+      if (updatePaymentRefund(payments, b, { refund, pct, scope, status: refund > 0 ? undefined : 'cancelled' })) payChanged = true;
       restoreVoucher(b);
       notify(
         b.userEmail,

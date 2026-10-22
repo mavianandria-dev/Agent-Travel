@@ -22,7 +22,7 @@ export default function Trips() {
         <div className="table-wrap mt-3"><table className="data w-full min-w-[560px]"><thead><tr><th>Jadwal</th><th>Rute</th><th>Penumpang</th><th>Status</th></tr></thead><tbody>
           {mySched.map((s) => {
             const r = routeById(s.routeId);
-            return <tr key={s.id}><td className="font-bold">{s.date} {s.time}</td><td>{r.from} → {r.to}</td><td><b>{takenSeats(s.id).paid.length}/{schedSeatCap(s.id)}</b></td><td><BadgeStatus st={s.tripStatus || 'scheduled'} /></td></tr>;
+            return <tr key={s.id}><td className="font-bold">{s.date} {s.time}</td><td>{r.from} → {r.to}</td><td><b>{takenSeats(s.id).booked.length}/{schedSeatCap(s.id)}</b></td><td><BadgeStatus st={s.tripStatus || 'scheduled'} /></td></tr>;
           })}
         </tbody></table></div>
       </div>

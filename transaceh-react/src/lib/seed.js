@@ -122,7 +122,6 @@ export function initDB(){
   DB.save('fees',{defaultType:'percent',defaultValue:8});
   DB.save('audit',[{id:uid('LOG'),time:new Date().toISOString(),actor:'system',action:'seed',detail:'Database awal dibuat'}]);
   DB.save('banners',[{id:'B1',title:'Diskon 20% Rute Aceh Jaya – Banda Aceh',sub:'Kode: HEMAT20 • s.d. akhir bulan',active:true}]);
-  DB.save('waiting',[]);
   DB.save('routeRequests',[]);
   localStorage.setItem('at_seeded_v16','1');
   }

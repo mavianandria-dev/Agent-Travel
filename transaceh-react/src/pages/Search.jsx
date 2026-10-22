@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { schedById, schedReady, takenSeats, seatsLeft, routeById, vehicleById, driverById, vehLayout, schedSeatCap, audit, notify, vehName, splitFare, createLedger, routeBookable, isRouteSuspended, canPayBooking, scheduleIsPast } from '@/lib/domain.js';
+import { schedById, schedReady, takenSeats, seatsLeft, routeById, vehicleById, driverById, vehLayout, schedSeatCap, audit, notify, vehName, splitFare, createLedger, routeBookable, isRouteSuspended, canPayBooking, scheduleIsPast, ensureHoldExpiry } from '@/lib/domain.js';
 import { fmtRp, todayStr, uid, fmtClock } from '@/lib/utils.js';
 import { Icon, CabinGrid, fmtDate } from '@/components/ui.jsx';
 import { HOME_PICKUP, pickupOptions } from '@/lib/pickups.js';
@@ -150,8 +150,8 @@ export function PaymentModal({ booking, onDone }) {
 export function openPayment(bid, openModal) {
   const b = DB.load('bookings', []).find((x) => x.id === bid);
   if (!b || !canPayBooking(b, schedById(b.scheduleId))) return;
-  const nb = { ...b, holdExpiry: new Date(Date.now() + 15 * 60 * 1000).toISOString() };
-  DB.save('bookings', DB.load('bookings', []).map((x) => (x.id === bid ? nb : x)));
+  const nb = ensureHoldExpiry(b);
+  if (nb !== b) DB.save('bookings', DB.load('bookings', []).map((x) => (x.id === bid ? nb : x)));
   openModal(<PaymentModal booking={nb} />);
 }
 
@@ -226,18 +226,6 @@ export default function Search() {
     else toast('Kode voucher tidak valid / kedaluwarsa', 'err');
   };
 
-  const joinWaiting = () => {
-    if (!user) { go('login'); return; }
-    const sid = bw.scheduleId || (stepSchedules()[0] || {}).id;
-    if (!sid) { toast('Pilih jadwal dulu', 'warn'); return; }
-    const w = DB.load('waiting', []);
-    w.push({ id: uid('WL'), scheduleId: sid, userEmail: user.email, time: new Date().toISOString() });
-    DB.save('waiting', w);
-    refresh();
-    audit('waiting_list', user.email + ' → ' + sid);
-    toast('Masuk waiting list. Kami notifikasi via WA jika ada kursi kosong.', 'ok');
-  };
-
   const doCheckout = () => {
     if (!user) {
       saveCheckoutDraft(bw);
@@ -298,8 +286,8 @@ export default function Search() {
       refresh();
       return;
     }
-    const nb = { ...b, holdExpiry: new Date(Date.now() + 15 * 60 * 1000).toISOString() };
-    DB.save('bookings', DB.load('bookings', []).map((x) => (x.id === bid ? nb : x)));
+    const nb = ensureHoldExpiry(b);
+    if (nb !== b) DB.save('bookings', DB.load('bookings', []).map((x) => (x.id === bid ? nb : x)));
     refresh();
     openModal(<PaymentModal booking={nb} />);
   };
@@ -350,8 +338,7 @@ export default function Search() {
     const list = stepSchedules();
     if (!list.length) {
       return (
-        <div className="text-center py-10"><Icon name="calendar-x" className="w-12 h-12 text-slate-300 mx-auto" /><div className="font-extrabold mt-2">Tidak ada jadwal hari ini</div><p className="text-[13px] text-slate-500">Coba tanggal lain atau masuk waiting list.</p>
-          <button onClick={joinWaiting} className="mt-3 bg-amber-500 text-white font-bold text-[13px] px-5 py-2.5 rounded-xl"><Icon name="bell-ring" className="w-4 h-4 inline" /> Masuk Waiting List</button>
+        <div className="text-center py-10"><Icon name="calendar-x" className="w-12 h-12 text-slate-300 mx-auto" /><div className="font-extrabold mt-2">Tidak ada jadwal hari ini</div><p className="text-[13px] text-slate-500">Coba tanggal lain.</p>
           {wizNav(true, false)}
         </div>
       );
@@ -475,7 +462,6 @@ export default function Search() {
             </div>
             <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 mt-3 text-[12.5px] font-semibold text-amber-900 flex gap-2"><Icon name="timer" className="w-5 h-5 shrink-0" /><span>Kursi di-hold <b>15 menit</b> setelah klik Bayar. 1 kursi hanya untuk 1 orang — lock real-time aktif.</span></div>
             <button onClick={doCheckout} className="w-full mt-3 bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 text-white font-extrabold text-[15px] py-3.5 rounded-2xl shadow-lg transition flex items-center justify-center gap-2"><Icon name="shield-check" className="w-5 h-5" />Bayar {fmtRp(total)}</button>
-            <button onClick={joinWaiting} className="w-full mt-2 text-[12px] font-bold text-slate-500 hover:text-amber-600">Kursi penuh? Masuk waiting list →</button>
           </div>
         </div>
         {wizNav(true, false)}

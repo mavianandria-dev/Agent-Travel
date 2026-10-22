@@ -1,6 +1,6 @@
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { setSession, seatsLeft, audit, routeBookable } from '@/lib/domain.js';
+import { setSession, seatsLeft, audit, routeBookable, schedReady } from '@/lib/domain.js';
 import { fmtRp, todayStr } from '@/lib/utils.js';
 import { routeMeta } from '@/lib/geo.js';
 import { Icon } from '@/components/ui.jsx';
@@ -13,7 +13,7 @@ export default function Home() {
   const routes = DB.load('routes', []).filter(routeBookable);
   const reviews = DB.load('reviews', []);
   const ags = DB.load('agencies', []).filter((a) => a.status === 'active');
-  const scheds = DB.load('schedules', []).filter((s) => s.date >= todayStr(0));
+  const scheds = DB.load('schedules', []).filter((s) => s.date >= todayStr(0) && schedReady(s));
 
   const quickBook = (routeId) => {
     clearCheckoutDraft();

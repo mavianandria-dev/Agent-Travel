@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { agencyOf, vehicleById, driverById, vehLayout, drvBlocks, seatBookedFuture, bookingsOf, schedSeatCap, processWaiting, audit, notify } from '@/lib/domain.js';
+import { agencyOf, vehicleById, driverById, vehLayout, drvBlocks, seatBookedFuture, bookingsOf, schedSeatCap, audit, notify } from '@/lib/domain.js';
 import { todayStr, uid, SEAT_LABELS, V_OWN, V_TYPES, V_FAC, V_SERVICES, VTOOLS, VCELLCLS, VCELLICON, inC } from '@/lib/utils.js';
 import { Icon, Sec, PillRadios, CheckPills, UpBox } from '@/components/ui.jsx';
 
@@ -294,7 +294,6 @@ function VehFormInner({ agId, oldV, vid }) {
     audit('vehicle_save', (data.brand + (data.model ? ' ' + data.model : '')) + ' • ' + data.capacity + ' kursi' + (off.length ? ' • nonaktif: ' + off.join(',') : ''));
     if (vid && opened.length) {
       const affected = new Set();
-      DB.load('schedules', []).filter((s) => s.vehicleId === vid).forEach((s) => { if ((schedSeatCap(s.id) - bookingsOf(s.id).reduce((a, b) => a + (b.seats || []).length, 0)) > 0) processWaiting(s.id); });
       DB.load('bookings', []).filter((b) => { const s = DB.load('schedules', []).find((x) => x.id === b.scheduleId); return s && s.vehicleId === vid; }).forEach((b) => affected.add(b.userEmail));
       affected.forEach((em) => notify(em, 'Kursi dibuka kembali', 'Bangku ' + opened.join(', ') + ' pada armada ' + (data.brand + (data.model ? ' ' + data.model : '')) + ' (' + data.plate + ') kini tersedia.', 'app'));
     }

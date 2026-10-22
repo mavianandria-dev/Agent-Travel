@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { schedById, routeById, vehicleById, driverById, agencyById, audit, vehName, splitFare, cancelBooking as cancelBookingDomain, canCancelBooking, canPayBooking, refundRuleFor, refundPolicyOf, refundPolicyText, scheduleIsPast } from '@/lib/domain.js';
+import { schedById, routeById, vehicleById, driverById, agencyById, audit, vehName, splitFare, cancelBooking as cancelBookingDomain, canCancelBooking, canPayBooking, refundRuleFor, refundPolicyOf, refundPolicyText, scheduleIsPast, ensureHoldExpiry, bookedPassengers } from '@/lib/domain.js';
 import { fmtRp, todayStr, uid, fmtClock } from '@/lib/utils.js';
+import { pickupOf } from '@/lib/pickups.js';
 import { Icon, Empty, BadgeStatus, fmtDate } from '@/components/ui.jsx';
 import { PaymentModal } from './Search.jsx';
 
@@ -37,6 +38,9 @@ export default function TicketDetail({ bid }) {
   const dr = driverById(s.driverId);
   const ag = agencyById(s.agencyId);
   const _fare = b.fare || splitFare(s, (b.seats || []).length, b.discount || 0);
+  const pax = bookedPassengers(b);
+  const firstPax = pax[0] || null;
+  const pickupText = (pickupOf(firstPax, b) || '-') + ((firstPax?.pickupCoords || b.pickupCoords) ? ' • ' + (firstPax?.pickupCoords || b.pickupCoords) : '');
   const tripStatus = s.tripStatus && s.tripStatus !== 'scheduled' ? s.tripStatus : (b.tripStatus || 'scheduled');
   const delayActive = s.tripStatus === 'scheduled' && s.delayUntil && new Date(s.delayUntil).getTime() > Date.now();
   const tripDelayInfo = s.tripStatus === 'ontrip' && Array.isArray(s.tripDelayInfo) ? s.tripDelayInfo[0] : null;
@@ -49,7 +53,7 @@ export default function TicketDetail({ bid }) {
     DB.save('bookings', arr);
     refresh();
     const rv = DB.load('reviews', []);
-    rv.unshift({ id: uid('RV'), agencyId: s.agencyId, user: (user || {}).name || target.passengers[0]?.name || 'Penumpang', rating: rate, text: rateText || 'Perjalanan menyenangkan!', date: todayStr(0), trip: r.from + ' → ' + r.to });
+    rv.unshift({ id: uid('RV'), agencyId: s.agencyId, user: (user || {}).name || firstPax?.name || 'Penumpang', rating: rate, text: rateText || 'Perjalanan menyenangkan!', date: todayStr(0), trip: r.from + ' → ' + r.to });
     DB.save('reviews', rv);
     refresh();
     audit('review', b.code + ' ★' + rate);
@@ -63,8 +67,8 @@ export default function TicketDetail({ bid }) {
       refresh();
       return;
     }
-    const nb = { ...b, holdExpiry: new Date(Date.now() + 15 * 60 * 1000).toISOString() };
-    DB.save('bookings', DB.load('bookings', []).map((x) => (x.id === b.id ? nb : x)));
+    const nb = ensureHoldExpiry(b);
+    if (nb !== b) DB.save('bookings', DB.load('bookings', []).map((x) => (x.id === b.id ? nb : x)));
     refresh();
     openModal(<PaymentModal booking={nb} />);
   };
@@ -121,8 +125,8 @@ export default function TicketDetail({ bid }) {
             </div></div>
           <div className="mt-4 bg-slate-50 rounded-2xl p-3.5 text-[13px] font-semibold space-y-1">
             <div className="font-extrabold text-[12px] text-slate-400 tracking-wider">PENUMPANG</div>
-            {b.passengers.map((p) => (<div key={p.seat} className="flex justify-between border-t border-slate-200 pt-1.5"><span>{p.name} <span className="text-slate-400">({p.phone})</span></span><span className="badge bg-sky-600 text-white">{p.seat}</span></div>))}
-            <div className="flex justify-between border-t pt-1.5"><span>Jemput</span><b>{((b.passengers[0] && b.passengers[0].pickup) || '-') + ((b.passengers[0] && b.passengers[0].pickupCoords) ? ' • ' + b.passengers[0].pickupCoords : '')}</b></div>
+            {pax.length ? pax.map((p) => (<div key={p.seat} className="flex justify-between border-t border-slate-200 pt-1.5"><span>{p.name} <span className="text-slate-400">({p.phone})</span></span><span className="badge bg-sky-600 text-white">{p.seat}</span></div>)) : <div className="border-t border-slate-200 pt-1.5 text-slate-400">Data penumpang tidak tersedia</div>}
+            <div className="flex justify-between border-t pt-1.5"><span>Jemput</span><b>{pickupText}</b></div>
             <div className="flex justify-between"><span>Travel</span><b>{ag.name} • {ag.phone}</b></div>
             <div className="flex justify-between"><span>Tiket (sopir)</span><span>{fmtRp(_fare.ticket)}</span></div>
             <div className="flex justify-between"><span>Jasa agen</span><span>{fmtRp(_fare.service)}</span></div>
@@ -131,7 +135,7 @@ export default function TicketDetail({ bid }) {
           </div>
           <div className="flex gap-2 mt-4 no-print">
             <button onClick={() => window.print()} className="flex-1 bg-slate-100 font-extrabold text-[13px] py-2.5 rounded-xl flex items-center justify-center gap-2"><Icon name="printer" className="w-4 h-4" />Cetak / PDF</button>
-            <button onClick={() => toast('Tiket dikirim via WhatsApp ke ' + ((b.passengers[0] && b.passengers[0].phone) || 'penumpang'), 'ok')} className="flex-1 bg-green-500 text-white font-extrabold text-[13px] py-2.5 rounded-xl flex items-center justify-center gap-2"><Icon name="message-circle" className="w-4 h-4" />Kirim WA</button>
+            <button onClick={() => toast('Tiket dikirim via WhatsApp ke ' + (firstPax?.phone || 'penumpang'), 'ok')} className="flex-1 bg-green-500 text-white font-extrabold text-[13px] py-2.5 rounded-xl flex items-center justify-center gap-2"><Icon name="message-circle" className="w-4 h-4" />Kirim WA</button>
           </div>
           {b.status === 'pending' ? (canPayBooking(b, s)
             ? <button onClick={repay} className="no-print w-full mt-2 bg-green-500 text-white font-extrabold text-[13px] py-2.5 rounded-xl">Bayar Sekarang</button>
@@ -151,7 +155,7 @@ export default function TicketDetail({ bid }) {
           {tripStatus === 'missed' ? <div className="mt-3 bg-amber-50 border border-amber-200 rounded-2xl p-3 text-[12.5px] font-semibold text-amber-900">Jadwal ini terlewat. Admin akan menindaklanjuti refund sesuai kebijakan travel.</div> : null}
           {tripStatus === 'cancelled' ? <div className="mt-3 bg-red-50 border border-red-200 rounded-2xl p-3 text-[12.5px] font-semibold text-red-800">Perjalanan dibatalkan. Refund, bila ada, diproses sesuai kebijakan travel.</div> : null}
           {b.status === 'cancelled' && Number(b.refundAmount) > 0 ? <div className="mt-3 bg-green-50 border border-green-200 rounded-2xl p-3 text-[12.5px] font-semibold text-green-900">Refund {fmtRp(b.refundAmount)} • {b.refundStatus === 'done' ? 'Selesai' : b.refundStatus === 'diproses' ? 'Sedang diproses' : 'Menunggu diproses'}</div> : null}
-          <div className="mt-3 bg-sky-50 rounded-2xl p-3 text-[12.5px] font-semibold text-sky-900">Titik jemput: <b>{((b.passengers[0] && b.passengers[0].pickup) || '-') + ((b.passengers[0] && b.passengers[0].pickupCoords) ? ' • ' + b.passengers[0].pickupCoords : '')}</b> — harap standby 15 menit sebelum berangkat.</div>
+          <div className="mt-3 bg-sky-50 rounded-2xl p-3 text-[12.5px] font-semibold text-sky-900">Titik jemput: <b>{pickupText}</b> — harap standby 15 menit sebelum berangkat.</div>
         </div>
         {b.status === 'done' && !b.rating ? (
           <div className="bg-white rounded-3xl shadow-card p-5">

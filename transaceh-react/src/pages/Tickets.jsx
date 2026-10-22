@@ -1,6 +1,6 @@
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { schedById, routeById, vehicleById, vehName, canCancelBooking, canPayBooking } from '@/lib/domain.js';
+import { schedById, routeById, vehicleById, vehName, canCancelBooking, canPayBooking, ensureHoldExpiry, bookedPassengers } from '@/lib/domain.js';
 import { fmtRp } from '@/lib/utils.js';
 import { Icon, Empty, BadgeStatus, fmtDate } from '@/components/ui.jsx';
 import { PaymentModal } from './Search.jsx';
@@ -8,7 +8,7 @@ import { PaymentModal } from './Search.jsx';
 export function ticketCardData(b) {
   const s = schedById(b.scheduleId);
   if (!s) return null;
-  const ms = b.status === 'pending' ? new Date(b.holdExpiry).getTime() - Date.now() : 0;
+  const ms = b.status === 'pending' && b.holdExpiry ? new Date(b.holdExpiry).getTime() - Date.now() : 0;
   return { s, ms };
 }
 
@@ -24,8 +24,8 @@ export default function Tickets() {
       refresh();
       return;
     }
-    const nb = { ...b, holdExpiry: new Date(Date.now() + 15 * 60 * 1000).toISOString() };
-    DB.save('bookings', DB.load('bookings', []).map((x) => (x.id === bid ? nb : x)));
+    const nb = ensureHoldExpiry(b);
+    if (nb !== b) DB.save('bookings', DB.load('bookings', []).map((x) => (x.id === bid ? nb : x)));
     refresh();
     openModal(<PaymentModal booking={nb} />);
   };
@@ -67,7 +67,7 @@ export default function Tickets() {
                 <div><div className="font-mono font-extrabold tracking-wider text-[15px]">{b.code}</div><div className="text-[12px] opacity-80 font-semibold">{r.from} → {r.to} • {fmtDate(d.s.date)} {d.s.time}</div></div><div className="flex items-center gap-1.5"><BadgeStatus st={b.status} />{d.s.tripStatus === 'scheduled' && d.s.delayUntil && new Date(d.s.delayUntil).getTime() > Date.now() ? <span className="badge bg-amber-100 text-amber-700">Delay {d.s.delayMinutes}m</span> : null}{b.tripStatus === 'missed' && b.status !== 'cancelled' ? <BadgeStatus st="missed" /> : null}</div>
               </div>
               <div className="p-4"><div className="flex items-center gap-2 text-[13px] font-bold"><Icon name="armchair" className="w-4 h-4 text-sky-600" />Kursi {b.seats.join(', ')} • {vehName(v)}</div>
-                <div className="text-[12px] text-slate-500 font-medium mt-1">{(b.passengers || []).map((p) => p.name).join(', ')}</div>
+                <div className="text-[12px] text-slate-500 font-medium mt-1">{bookedPassengers(b).map((p) => p.name).join(', ') || '-'}</div>
                 <div className="flex items-center justify-between mt-2"><span className="font-extrabold text-[15px]">{fmtRp(b.total)}</span>
                   {b.status === 'pending' ? <span className="text-[11px] font-extrabold text-amber-700">Hold: {d.ms > 0 ? Math.floor(d.ms / 60000) + ' mnt' : 'habis'}</span> : null}</div>
                 <div className="flex gap-2 mt-3">

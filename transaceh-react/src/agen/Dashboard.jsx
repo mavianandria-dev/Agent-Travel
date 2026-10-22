@@ -1,8 +1,9 @@
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { agencyOf, routeById, vehicleById, vehName, driverById, schedById, bookingsOf, takenSeats, schedSeatCap } from '@/lib/domain.js';
+import { agencyOf, routeById, vehicleById, vehName, vehLayout, driverById, schedById, bookingsOf, takenSeats, schedSeatCap } from '@/lib/domain.js';
 import { fmtRp, todayStr } from '@/lib/utils.js';
 import { Icon, StatCard, BadgeStatus, useChart, fmtDate } from '@/components/ui.jsx';
+import { pickupOf } from '@/lib/pickups.js';
 
 export function agenStats(agId) {
   const sch = DB.load('schedules', []).filter((s) => s.agencyId === agId);
@@ -11,7 +12,7 @@ export function agenStats(agId) {
   const rev = paid.filter((b) => schedById(b.scheduleId)?.date === todayStr(0)).reduce((a, b) => a + b.total, 0);
   const totRev = paid.reduce((a, b) => a + b.total, 0);
   const cap = sch.filter((s) => s.date === todayStr(0)).reduce((a, s) => a + schedSeatCap(s.id), 0) || 1;
-  const occ = sch.filter((s) => s.date === todayStr(0)).reduce((a, s) => a + takenSeats(s.id).paid.length, 0);
+  const occ = sch.filter((s) => s.date === todayStr(0)).reduce((a, s) => a + takenSeats(s.id).booked.length, 0);
   return { rev, todayBk: bk.filter((b) => schedById(b.scheduleId)?.date === todayStr(0)).length, occ: Math.round((occ / cap) * 100), totRev, totBk: bk.length, sch };
 }
 
@@ -23,7 +24,7 @@ function ManifestBody({ sid }) {
   const v = vehicleById(s.vehicleId);
   const dr = driverById(s.driverId);
   const bk = bookingsOf(sid);
-  const lay = (() => { try { return (v && Array.isArray(v.layout) && v.layout.length === 28) ? v.layout : []; } catch (e) { return []; } })();
+  const lay = vehLayout(v);
   const order = lay.filter((c) => c.type === 'seat' || c.type === 'off').map((c) => c.sid);
   const bookedExtra = [...new Set(bk.flatMap((b) => b.seats || []))].filter((id) => !order.includes(id));
   const offSet = new Set(lay.filter((c) => c.type === 'off').map((c) => c.sid));
@@ -43,7 +44,7 @@ function ManifestBody({ sid }) {
           return (
             <tr key={st}><td>{st}</td><td className="font-extrabold">{st}</td>
               <td className="font-semibold">{p ? p.name : vehOff ? <span className="text-slate-400">— nonaktif (armada) —</span> : blocked ? <span className="text-slate-400">— diblokir —</span> : <span className="text-slate-300">— kosong —</span>}</td>
-              <td>{p ? p.phone : '-'}</td><td className="text-[12px]">{p ? (p.pickup || '-') + (p.pickupCoords ? ' • ' + p.pickupCoords : '') : '-'}</td>
+              <td>{p ? p.phone : '-'}</td><td className="text-[12px]">{p ? (pickupOf(p,b) || '-') + (p.pickupCoords ? ' • ' + p.pickupCoords : '') : '-'}</td>
               <td>{b ? <BadgeStatus st={b.status} /> : (vehOff || blocked) ? <span className="badge b-cancel">Tutup</span> : <span className="badge b-wait">Kosong</span>}</td></tr>
           );
         })}
@@ -69,7 +70,7 @@ export default function Dashboard({ ag }) {
   const refRev = useChart(() => ({ type: 'bar', data: { labels, datasets: [{ data: vals, backgroundColor: '#0f7ae5', borderRadius: 10 }] }, options: { plugins: { legend: { display: false } }, scales: { y: { ticks: { callback: (v) => 'Rp' + (v / 1000) + 'k' } } }, maintainAspectRatio: false } }));
   const refOcc = useChart(() => ({
     type: 'doughnut',
-    data: { labels: todaySched0.map((s) => s.time + ' ' + (routeById(s.routeId)?.to || '')), datasets: [{ data: todaySched0.map((s) => takenSeats(s.id).paid.length), backgroundColor: ['#0f7ae5', '#22c55e', '#f59e0b', '#8b5cf6', '#ef4444'] }] },
+    data: { labels: todaySched0.map((s) => s.time + ' ' + (routeById(s.routeId)?.to || '')), datasets: [{ data: todaySched0.map((s) => takenSeats(s.id).booked.length), backgroundColor: ['#0f7ae5', '#22c55e', '#f59e0b', '#8b5cf6', '#ef4444'] }] },
     options: { maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } } }
   }));
   if (!agency) return <div className="bg-white rounded-3xl shadow-card p-5 text-center font-bold text-slate-400">Data travel tidak ditemukan</div>;
@@ -100,8 +101,8 @@ export default function Dashboard({ ag }) {
             return (
               <div key={s.id} className="border border-slate-200 rounded-2xl p-3.5 flex items-center gap-3">
                 <div className="bg-[#0b2447] text-white rounded-2xl px-3 py-2 text-center shrink-0"><div className="font-extrabold text-[15px]">{s.time}</div><div className="text-[10px] opacity-70">WIB</div></div>
-                <div className="flex-1 min-w-0"><div className="font-extrabold text-[13.5px]">{r?.from} → {r?.to}</div><div className="text-[12px] text-slate-500 font-medium">{vehName(v)} • {dr?.name} • {tk.paid.length}/{capN} kursi</div>
-                  <div className="h-1.5 bg-slate-100 rounded-full mt-1.5"><div className="h-full bg-green-500 rounded-full" style={{ width: (tk.paid.length / capN) * 100 + '%' }}></div></div></div>
+                <div className="flex-1 min-w-0"><div className="font-extrabold text-[13.5px]">{r?.from} → {r?.to}</div><div className="text-[12px] text-slate-500 font-medium">{vehName(v)} • {dr?.name} • {tk.booked.length}/{capN} kursi{tk.blocked.length ? ` • ${tk.blocked.length} tutup` : ''}</div>
+                  <div className="h-1.5 bg-slate-100 rounded-full mt-1.5"><div className="h-full bg-green-500 rounded-full" style={{ width: (tk.booked.length / capN) * 100 + '%' }}></div></div></div>
                 <button onClick={() => manifest(s.id)} className="bg-sky-50 text-sky-700 text-[11.5px] font-extrabold px-3 py-2 rounded-xl hover:bg-sky-100"><Icon name="printer" className="w-3.5 h-3.5 inline" /> Manifest</button>
               </div>
             );

@@ -60,6 +60,7 @@ export default function Schedules({ ag }) {
           const drvNama = s.driverName || dr?.name || v?.drvName || '—';
           const back = s.backupName || v?.backName || '';
           const tk = takenSeats(s.id);
+          const capN = schedSeatCap(s.id);
           const hasBooking = bookingsOf(s.id).some((b) => ['pending', 'paid'].includes(b.status));
           const hasTransactions = scheduleHasTransactions(s.id);
           const historical = tab === 'history' || ['ontrip', 'arrived', 'missed'].includes(s.tripStatus);
@@ -68,7 +69,7 @@ export default function Schedules({ ag }) {
               <td className="font-semibold">{r?.from} → {r?.to}</td>
               <td className="text-[12.5px] font-medium">{vehName(v)}{v?.plate ? <span className="text-slate-400"> • {v.plate}</span> : null}<br /><span className="text-slate-500">{drvNama}</span><br /><span className="text-[11.5px] text-slate-400">Pengganti: {back || '—'}</span></td>
               <td className="font-extrabold">{fmtRp(s.price)}</td>
-              <td><div className="flex items-center gap-1.5"><div className="w-16 h-2 bg-slate-100 rounded-full"><div className="h-full bg-sky-500 rounded-full" style={{ width: (tk.paid.length / schedSeatCap(s.id)) * 100 + '%' }}></div></div><b className="text-[12px]">{tk.paid.length}/{schedSeatCap(s.id)}</b></div></td>
+              <td><div className="flex items-center gap-1.5"><div className="w-16 h-2 bg-slate-100 rounded-full"><div className="h-full bg-sky-500 rounded-full" style={{ width: (tk.booked.length / capN) * 100 + '%' }}></div></div><b className="text-[12px]">{tk.booked.length}/{capN}</b>{tk.blocked.length ? <span className="badge bg-amber-100 text-amber-700" title="Kursi ditutup">{tk.blocked.length} tutup</span> : null}</div></td>
               <td><div className="flex gap-1.5"><button onClick={() => manifest(s.id)} title="Manifest" className="bg-sky-100 text-sky-700 p-2 rounded-lg"><Icon name="users" className="w-4 h-4" /></button>
                 {!historical ? <button onClick={() => blockSeat(s.id)} title="Tutup/buka kursi" className="bg-amber-100 text-amber-700 p-2 rounded-lg"><Icon name="ban" className="w-4 h-4" /></button> : null}
                 {!historical && hasBooking ? <button onClick={() => cancelTrip(s.id)} title="Batalkan jadwal (refund 100%)" className="bg-red-50 text-red-600 p-2 rounded-lg"><Icon name="calendar-x" className="w-4 h-4" /></button> : null}

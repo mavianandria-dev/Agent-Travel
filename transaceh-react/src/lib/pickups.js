@@ -43,6 +43,14 @@ function regencyOf(origin) {
   return AREA_PARENT[org.toLowerCase()] || org;
 }
 
+/** Titik jemput efektif untuk satu penumpang: data penumpang dulu,
+ *  lalu fallback ke data booking (dipakai chip & manifest agar sama). */
+export function pickupOf(passenger, booking) {
+  const own = String((passenger && passenger.pickup) || '').trim();
+  if (own) return own;
+  return String((booking && booking.pickup) || '').trim();
+}
+
 function areaLabel(point, kab) {
   if (!point) return kab;
   if (!kab) return point;
@@ -59,7 +67,9 @@ function areaLabel(point, kab) {
 export function pickupArea(pickup, origin = '') {
   const raw = String(pickup || '').trim();
   const kab = regencyOf(origin);
-  if (!raw) return { point: '', kab, label: '' };
-  if (/^rumah\b/i.test(raw)) return { point: 'Jemput rumah', kab, label: areaLabel('Jemput rumah', kab) };
+  if (!raw || raw === '-') return { point: '', kab, label: '' };
+  /* Hanya "Rumah" atau "Rumah: ..." yang dianggap jemput rumah.
+     "Rumah Sakit ..." tetap nama titik jemput biasa. */
+  if (/^rumah(?:\s*:|\s*$)/i.test(raw)) return { point: 'Jemput rumah', kab, label: areaLabel('Jemput rumah', kab) };
   return { point: raw, kab, label: areaLabel(raw, kab) };
 }

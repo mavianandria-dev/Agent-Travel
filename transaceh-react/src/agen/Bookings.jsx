@@ -1,8 +1,9 @@
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { agencyOf, routeById, vehicleById, vehName, driverById, schedById, bookingsOf, agencyById, audit, splitFare, createLedger, canCancelBooking, canPayBooking, cancelBooking as cancelBookingDomain, refundRuleFor, refundPolicyText } from '@/lib/domain.js';
+import { agencyOf, routeById, vehicleById, vehName, vehLayout, driverById, schedById, bookingsOf, agencyById, audit, splitFare, createLedger, canCancelBooking, canPayBooking, cancelBooking as cancelBookingDomain, refundRuleFor, refundPolicyText, bookedPassengers } from '@/lib/domain.js';
 import { fmtRp, todayStr } from '@/lib/utils.js';
 import { Icon, BadgeStatus, fmtDate } from '@/components/ui.jsx';
+import { pickupOf } from '@/lib/pickups.js';
 
 export function ManifestModal({ sid }) {
   const { closeModal } = useApp();
@@ -12,8 +13,7 @@ export function ManifestModal({ sid }) {
   const v = vehicleById(s.vehicleId);
   const dr = driverById(s.driverId);
   const bk = bookingsOf(sid);
-  let lay = [];
-  try { lay = (v && Array.isArray(v.layout) && v.layout.length === 28) ? v.layout : []; } catch (e) { lay = []; }
+  const lay = vehLayout(v);
   const order = lay.filter((c) => c.type === 'seat' || c.type === 'off').map((c) => c.sid);
   const bookedExtra = [...new Set(bk.flatMap((b) => b.seats || []))].filter((id) => !order.includes(id));
   const offSet = new Set(lay.filter((c) => c.type === 'off').map((c) => c.sid));
@@ -28,7 +28,7 @@ export function ManifestModal({ sid }) {
           const vehOff = offSet.has(st);
           const blocked = (s.blockedSeats || []).includes(st);
           return (
-            <tr key={st}><td>{st}</td><td className="font-extrabold">{st}</td><td className="font-semibold">{p ? p.name : vehOff ? <span className="text-slate-400">— nonaktif (armada) —</span> : blocked ? <span className="text-slate-400">— diblokir —</span> : <span className="text-slate-300">— kosong —</span>}</td><td>{p ? p.phone : '-'}</td><td className="text-[12px]">{p ? (p.pickup || '-') + (p.pickupCoords ? ' • ' + p.pickupCoords : '') : '-'}</td><td>{b ? <BadgeStatus st={b.status} /> : (vehOff || blocked) ? <span className="badge b-cancel">Tutup</span> : <span className="badge b-wait">Kosong</span>}</td></tr>
+            <tr key={st}><td>{st}</td><td className="font-extrabold">{st}</td><td className="font-semibold">{p ? p.name : vehOff ? <span className="text-slate-400">— nonaktif (armada) —</span> : blocked ? <span className="text-slate-400">— diblokir —</span> : <span className="text-slate-300">— kosong —</span>}</td><td>{p ? p.phone : '-'}</td><td className="text-[12px]">{p ? (pickupOf(p,b) || '-') + (p.pickupCoords ? ' • ' + p.pickupCoords : '') : '-'}</td><td>{b ? <BadgeStatus st={b.status} /> : (vehOff || blocked) ? <span className="badge b-cancel">Tutup</span> : <span className="badge b-wait">Kosong</span>}</td></tr>
           );
         })}
       </tbody></table>
@@ -75,7 +75,7 @@ export default function Bookings({ ag }) {
   const all = DB.load('bookings', []).filter((b) => schIds.includes(b.scheduleId)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const q = (filter.q || '').toLowerCase();
   const list = all.filter((b) => {
-    if (q && !(b.code.toLowerCase().includes(q) || (b.passengers || []).some((p) => (p.name || '').toLowerCase().includes(q)))) return false;
+    if (q && !(b.code.toLowerCase().includes(q) || bookedPassengers(b).some((p) => (p.name || '').toLowerCase().includes(q)))) return false;
     if (filter.date) { const s = schedById(b.scheduleId); if (!s || s.date !== filter.date) return false; }
     if (filter.status && filter.status !== 'all' && b.status !== filter.status) return false;
     return true;
@@ -109,7 +109,7 @@ export default function Bookings({ ag }) {
     const schId2 = DB.load('schedules', []).filter((s) => s.agencyId === agency.id).map((s) => s.id);
     const rows = DB.load('bookings', []).filter((b) => schId2.includes(b.scheduleId));
     let csv = 'Kode,Nama,Kursi,Rute,Tanggal,Jam,Total,Status\n';
-    rows.forEach((b) => { const s = schedById(b.scheduleId); if (!s) return; const r = routeById(s.routeId); csv += `${b.code},"${(b.passengers || []).map((p) => p.name).join(';')}","${(b.seats || []).join(' ')}","${r.from}-${r.to}",${s.date},${s.time},${b.total},${b.status}\n`; });
+    rows.forEach((b) => { const s = schedById(b.scheduleId); if (!s) return; const r = routeById(s.routeId); csv += `${b.code},"${bookedPassengers(b).map((p) => p.name).join(';')}","${(b.seats || []).join(' ')}","${r.from}-${r.to}",${s.date},${s.time},${b.total},${b.status}\n`; });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
     a.download = 'laporan-booking.csv';
@@ -135,8 +135,9 @@ export default function Bookings({ ag }) {
             const s = schedById(b.scheduleId);
             if (!s) return null;
             const r = routeById(s.routeId);
+            const pax = bookedPassengers(b);
             return (
-              <tr key={b.id}><td className="font-mono font-extrabold">{b.code}</td><td className="font-semibold">{(b.passengers || [])[0]?.name} <span className="text-slate-400">+{(b.seats || []).length - 1}</span><br /><span className="text-[12px] text-slate-400">{(b.seats || []).join(', ')}</span></td>
+              <tr key={b.id}><td className="font-mono font-extrabold">{b.code}</td><td className="font-semibold">{pax[0]?.name || '-'} {pax.length > 1 ? <span className="text-slate-400">+{pax.length - 1}</span> : null}<br /><span className="text-[12px] text-slate-400">{(b.seats || []).join(', ')}</span></td>
                 <td className="font-medium">{r.from}→{r.to}<br /><span className="text-slate-400 text-[12px]">{fmtDate(s.date)} {s.time}</span></td><td className="font-extrabold">{fmtRp(b.total)}</td><td><div className="flex items-center gap-1.5 flex-wrap"><BadgeStatus st={b.status} />{b.source === 'driver' ? <span className="badge bg-sky-100 text-sky-700">Pengemudi</span> : null}{b.tripStatus === 'missed' && b.status !== 'cancelled' ? <BadgeStatus st="missed" /> : null}</div></td>
                 <td className="whitespace-nowrap"><div className="flex gap-1.5">
                   {b.status === 'pending' ? <button onClick={() => verifyPay(b.id)} title="Verifikasi manual" className="bg-green-100 text-green-700 p-2 rounded-lg"><Icon name="check-check" className="w-4 h-4" /></button> : null}
