@@ -8,8 +8,9 @@ import Settlement from './Settlement.jsx';
 import Refunds from './Refunds.jsx';
 import { Master } from './Master.jsx';
 import Support from './Support.jsx';
+import Accounts from './Accounts.jsx';
 
-const TABS = [['admin', 'shield-check', 'Overview'], ['admin-tx', 'receipt-text', 'Transaksi'], ['admin-ag', 'building-2', 'Agen'], ['admin-rute', 'route', 'Rute'], ['admin-settle', 'wallet', 'Settlement'], ['admin-refund', 'settings', 'Refund'], ['admin-master', 'database', 'Master'], ['admin-support', 'life-buoy', 'Bantuan']];
+const TABS = [['admin', 'shield-check', 'Overview'], ['admin-tx', 'receipt-text', 'Transaksi'], ['admin-ag', 'building-2', 'Agen'], ['admin-akun', 'users', 'Akun'], ['admin-rute', 'route', 'Rute'], ['admin-settle', 'wallet', 'Settlement'], ['admin-refund', 'settings', 'Refund'], ['admin-master', 'database', 'Master'], ['admin-support', 'life-buoy', 'Bantuan']];
 
 export default function Admin() {
   const { view, go } = useApp();
@@ -17,6 +18,7 @@ export default function Admin() {
   if (view === 'admin') body = <Overview />;
   else if (view === 'admin-tx') body = <Transactions />;
   else if (view === 'admin-ag') body = <Agencies />;
+  else if (view === 'admin-akun') body = <Accounts />;
   else if (view === 'admin-rute') body = <Routes />;
   else if (view === 'admin-settle') body = <Settlement />;
   else if (view === 'admin-refund') body = <Refunds />;

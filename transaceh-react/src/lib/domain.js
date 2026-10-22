@@ -16,9 +16,317 @@ export function simLabel(d){ const s=simParse(d); return 'SIM '+s.type+' • s.d
 
 export function simExpired(d){ return simParse(d).exp<new Date().getFullYear(); }
 
-export function currentUser(){ const s=DB.load('session',null); if(!s) return null; return DB.load('users',[]).find(u=>u.id===s.uid)||null; }
+const ACCOUNT_ROLE_LABELS = { pelanggan: 'Pelanggan', agen: 'Agen', pengemudi: 'Pengemudi', superadmin: 'Admin' };
+const ACCOUNT_STATUS_LABELS = { active: 'Aktif', pending: 'Menunggu', suspended: 'Nonaktif' };
+
+/** Normalisasi status akun lama (active/aktif, suspended/nonaktif, pending). */
+export function accountStatusKind(u){
+  const raw = typeof u === 'string' ? u : (u && u.status);
+  const st = String(raw || 'active').toLowerCase();
+  if (st === 'pending') return 'pending';
+  if (['suspended','nonaktif','inactive','blocked','disabled'].includes(st)) return 'suspended';
+  return 'active';
+}
+
+export function accountStatusLabel(u){ return ACCOUNT_STATUS_LABELS[accountStatusKind(u)] || 'Aktif'; }
+
+export function accountRoleLabel(role){ return ACCOUNT_ROLE_LABELS[role] || role || 'Akun'; }
+
+/** Akun nonaktif tidak boleh dipakai; agen pending tetap boleh masuk untuk melengkapi KYC. */
+export function accountBlocked(u){
+  if (!u) return false;
+  const st = accountStatusKind(u);
+  if (st === 'suspended') return true;
+  if (st === 'pending' && u.role !== 'agen') return true;
+  if (u.role === 'pengemudi' && driverParentIssue(u)) return true;
+  return false;
+}
+
+export function checkAccountAccess(u){
+  if (!u) return 'Akun tidak ditemukan';
+  if (u.role === 'pengemudi') {
+    const parentIssue = driverParentIssue(u);
+    if (parentIssue) return parentIssue;
+  }
+  const st = accountStatusKind(u);
+  if (st === 'suspended') {
+    if (u.role === 'pengemudi') return 'Akun pengemudi dinonaktifkan — hubungi travel Anda';
+    if (u.role === 'agen') return 'Akun agen dinonaktifkan - hubungi super admin';
+    return 'Akun dinonaktifkan — hubungi super admin';
+  }
+  if (st === 'pending' && u.role !== 'agen') return 'Akun belum diaktifkan — hubungi super admin';
+  return null;
+}
+
+export function currentUser(){
+  const s = DB.load('session', null);
+  if (!s) return null;
+  const u = DB.load('users', []).find((x) => x.id === s.uid) || null;
+  if (!u || accountBlocked(u)) {
+    localStorage.removeItem('at_session');
+    return null;
+  }
+  return u;
+}
 
 export function setSession(u){ if(u) DB.save('session',{uid:u.id}); else localStorage.removeItem('at_session'); }
+
+function requireSuperadmin(){
+  const me = currentUser();
+  return me && me.role === 'superadmin' ? null : 'Hanya super admin yang dapat mengelola akun';
+}
+
+function driverHasActiveSchedule(driverId){
+  return DB.load('schedules', []).some((s) => s.driverId === driverId && s.date >= todayStr(0) && s.status !== 'cancelled' && s.tripStatus !== 'cancelled' && !['arrived', 'missed'].includes(s.tripStatus));
+}
+
+/** Satu travel saat ini hanya punya satu akun agen; relasi sub-akun memakai agencyId. */
+export function agentAccountForAgency(agencyId, users){
+  const arr = users || DB.load('users', []);
+  return arr.find((u) => u.role === 'agen' && u.agencyId === agencyId) || null;
+}
+
+function driverRecordForUser(u, drivers){
+  const em = String((u && u.email) || '').toLowerCase();
+  return (drivers || DB.load('drivers', [])).find((d) => String(d.userEmail || '').toLowerCase() === em) || null;
+}
+
+/** Alasan akun pengemudi tidak boleh dipakai karena akun agen/travel induknya bermasalah. */
+export function driverParentIssue(u){
+  if (!u || u.role !== 'pengemudi') return null;
+  const ag = agencyById(u.agencyId);
+  if (!ag) return 'Data travel pengemudi tidak ditemukan — hubungi super admin';
+  const parent = agentAccountForAgency(u.agencyId);
+  if (!parent) return 'Akun agen travel tidak ditemukan — pengemudi tidak bisa masuk';
+  const parentStatus = accountStatusKind(parent);
+  if (parentStatus === 'suspended') return 'Akun pengemudi dinonaktifkan karena akun agen travel nonaktif';
+  if (parentStatus === 'pending') return 'Travel belum aktif — hubungi agen travel';
+  if (ag.status === 'suspended') return 'Travel sedang dinonaktifkan — hubungi agen travel';
+  if (ag.status === 'pending') return 'Travel belum aktif — hubungi agen travel';
+  return null;
+}
+
+function agentActiveScheduleBlocker(agencyId){
+  const drivers = DB.load('drivers', []).filter((d) => d.agencyId === agencyId);
+  return drivers.find((d) => driverHasActiveSchedule(d.id)) || null;
+}
+
+function suspendAgencyChildren(agencyId, users, drivers){
+  users.filter((u) => u.role === 'pengemudi' && u.agencyId === agencyId).forEach((u) => {
+    if (accountStatusKind(u) !== 'active') return;
+    u.status = 'suspended';
+    u.suspendedByParent = true;
+    const d = driverRecordForUser(u, drivers);
+    if (d) {
+      u.parentSuspendedDriverStatus = d.status || 'aktif';
+      d.status = 'nonaktif';
+    }
+  });
+}
+
+function resumeAgencyChildren(agencyId, users, drivers){
+  users.filter((u) => u.role === 'pengemudi' && u.agencyId === agencyId).forEach((u) => {
+    if (u.suspendedByParent !== true) return;
+    u.status = 'active';
+    const d = driverRecordForUser(u, drivers);
+    if (d) d.status = u.parentSuspendedDriverStatus || 'aktif';
+    delete u.suspendedByParent;
+    delete u.parentSuspendedDriverStatus;
+  });
+}
+
+/** Tambah akun dari panel admin. Akun agen/pengemudi harus ditautkan ke data yang sudah ada. */
+export function createManagedAccount({ name, email, phone, password, role, agencyId, driverId, status } = {}){
+  const denied = requireSuperadmin(); if (denied) return { ok: false, msg: denied };
+  const nm = String(name || '').trim();
+  const em = String(email || '').trim().toLowerCase();
+  const ph = String(phone || '').trim();
+  const pw = String(password || '');
+  if (!nm) return { ok: false, msg: 'Nama lengkap wajib diisi' };
+  if (!/.+@.+\..+/.test(em)) return { ok: false, msg: 'Format email belum benar' };
+  if (!ph) return { ok: false, msg: 'No HP wajib diisi' };
+  if (pw.length < 6) return { ok: false, msg: 'Password minimal 6 karakter' };
+  if (!ACCOUNT_ROLE_LABELS[role]) return { ok: false, msg: 'Role akun tidak valid' };
+  const users = DB.load('users', []);
+  if (users.some((u) => String(u.email || '').toLowerCase() === em)) return { ok: false, msg: 'Email sudah terdaftar' };
+  let st = status === 'pending' ? 'pending' : status === 'suspended' ? 'suspended' : 'active';
+  let agId = null;
+  let driver = null;
+  let drivers = null;
+  if (role === 'agen') {
+    const ag = DB.load('agencies', []).find((a) => a.id === agencyId);
+    if (!ag) return { ok: false, msg: 'Pilih travel agen terlebih dahulu' };
+    if (users.some((u) => u.role === 'agen' && u.agencyId === ag.id)) return { ok: false, msg: 'Travel ini sudah punya akun agen' };
+    agId = ag.id;
+    if (ag.status === 'pending' && st === 'active') st = 'pending';
+  } else if (role === 'pengemudi') {
+    drivers = DB.load('drivers', []);
+    driver = drivers.find((d) => d.id === driverId);
+    if (!driver) return { ok: false, msg: 'Pilih data pengemudi terlebih dahulu' };
+    if (driver.userEmail && String(driver.userEmail).toLowerCase() !== em) return { ok: false, msg: 'Email harus sama dengan email pada data pengemudi' };
+    const parent = agentAccountForAgency(driver.agencyId, users);
+    if (!parent) return { ok: false, msg: 'Travel ini belum punya akun agen — buat akun agen terlebih dahulu' };
+    if (accountStatusKind(parent) !== 'active') return { ok: false, msg: 'Akun agen travel belum aktif — aktifkan akun agen terlebih dahulu' };
+    const ag = agencyById(driver.agencyId);
+    if (!ag || ag.status !== 'active') return { ok: false, msg: 'Travel belum aktif — aktifkan travel terlebih dahulu' };
+    if (st !== 'active' && driverHasActiveSchedule(driver.id)) return { ok: false, msg: 'Pengemudi masih punya jadwal aktif — ganti pengemudi pada jadwal tersebut terlebih dahulu' };
+    agId = driver.agencyId;
+  }
+  const u = { id: uid('U'), name: nm, email: em, phone: ph, wa: ph, pass: pw, role, agencyId: agId, status: st, photo: '' };
+  if (role === 'pelanggan') u.favorites = [];
+  if (driver) u.profileStep = 'done';
+  users.push(u);
+  DB.save('users', users);
+  if (driver) {
+    driver.userEmail = em;
+    driver.status = st === 'active' ? 'aktif' : 'nonaktif';
+    DB.save('drivers', drivers);
+  }
+  audit('account_create', em + ' • ' + role + (agId ? ' • ' + agId : ''));
+  notify(em, 'Akun dibuat', 'Akun ' + accountRoleLabel(role) + ' Anda dibuat oleh super admin. Silakan masuk dengan password yang diberikan.', 'app');
+  return { ok: true, user: u };
+}
+
+/** Edit data kontak akun. Email, role, dan tautan travel/pengemudi sengaja tidak diubah. */
+export function updateManagedAccount(id, { name, phone } = {}){
+  const denied = requireSuperadmin(); if (denied) return { ok: false, msg: denied };
+  const users = DB.load('users', []);
+  const u = users.find((x) => x.id === id);
+  if (!u) return { ok: false, msg: 'Akun tidak ditemukan' };
+  const nm = String(name || '').trim();
+  const ph = String(phone || '').trim();
+  if (!nm) return { ok: false, msg: 'Nama lengkap wajib diisi' };
+  if (!ph) return { ok: false, msg: 'No HP wajib diisi' };
+  u.name = nm;
+  u.phone = ph;
+  u.wa = ph;
+  DB.save('users', users);
+  if (u.role === 'pengemudi') {
+    const drivers = DB.load('drivers', []);
+    const d = drivers.find((x) => String(x.userEmail || '').toLowerCase() === String(u.email || '').toLowerCase());
+    if (d) {
+      d.name = nm;
+      d.phone = ph;
+      d.wa = ph;
+      DB.save('drivers', drivers);
+    }
+  }
+  audit('account_update', u.email);
+  return { ok: true };
+}
+
+export function resetManagedAccountPassword(id, password){
+  const denied = requireSuperadmin(); if (denied) return { ok: false, msg: denied };
+  const pw = String(password || '');
+  if (pw.length < 6) return { ok: false, msg: 'Password minimal 6 karakter' };
+  const users = DB.load('users', []);
+  const u = users.find((x) => x.id === id);
+  if (!u) return { ok: false, msg: 'Akun tidak ditemukan' };
+  u.pass = pw;
+  DB.save('users', users);
+  audit('account_password_reset', u.email);
+  notify(u.email, 'Password direset', 'Password akun Anda diubah oleh super admin. Gunakan password baru untuk masuk.', 'app');
+  return { ok: true };
+}
+
+export function setManagedAccountStatus(id, status){
+  const denied = requireSuperadmin(); if (denied) return { ok: false, msg: denied };
+  const me = currentUser();
+  const users = DB.load('users', []);
+  const u = users.find((x) => x.id === id);
+  if (!u) return { ok: false, msg: 'Akun tidak ditemukan' };
+  const next = status === 'active' ? 'active' : 'suspended';
+  if (u.id === me.id && next !== 'active') return { ok: false, msg: 'Tidak bisa menonaktifkan akun sendiri' };
+  if (u.role === 'superadmin' && next !== 'active') {
+    const activeAdmins = users.filter((x) => x.role === 'superadmin' && accountStatusKind(x) === 'active');
+    if (activeAdmins.length <= 1) return { ok: false, msg: 'Admin aktif terakhir tidak bisa dinonaktifkan' };
+  }
+  if (u.role === 'agen' && next === 'suspended') {
+    const blocker = agentActiveScheduleBlocker(u.agencyId);
+    if (blocker) return { ok: false, msg: 'Pengemudi ' + blocker.name + ' masih punya jadwal aktif — ganti pengemudi pada jadwal tersebut terlebih dahulu' };
+  }
+  if (u.role === 'agen' && next === 'active') {
+    const ag = DB.load('agencies', []).find((a) => a.id === u.agencyId);
+    if (ag && ag.status === 'suspended') return { ok: false, msg: 'Travel masih dinonaktifkan — aktifkan travel di menu Agen terlebih dahulu' };
+  }
+  if (u.role === 'pengemudi') {
+    const drivers = DB.load('drivers', []);
+    const d = driverRecordForUser(u, drivers);
+    if (next === 'active') {
+      const parent = agentAccountForAgency(u.agencyId, users);
+      if (!parent || accountStatusKind(parent) !== 'active') return { ok: false, msg: 'Akun agen travel masih nonaktif — aktifkan akun agen terlebih dahulu' };
+      const ag = agencyById(u.agencyId);
+      if (!ag || ag.status !== 'active') return { ok: false, msg: 'Travel belum aktif — aktifkan travel terlebih dahulu' };
+    }
+    if (d) {
+      if (next === 'suspended' && driverHasActiveSchedule(d.id)) return { ok: false, msg: 'Pengemudi masih punya jadwal aktif — ganti pengemudi pada jadwal tersebut terlebih dahulu' };
+      d.status = next === 'active' ? 'aktif' : 'nonaktif';
+      DB.save('drivers', drivers);
+    }
+  }
+  u.status = next;
+  if (u.role === 'agen') {
+    const drivers = DB.load('drivers', []);
+    if (next === 'active') resumeAgencyChildren(u.agencyId, users, drivers);
+    else suspendAgencyChildren(u.agencyId, users, drivers);
+    DB.save('drivers', drivers);
+  }
+  if (u.role === 'pengemudi') {
+    delete u.suspendedByParent;
+    delete u.parentSuspendedDriverStatus;
+  }
+  DB.save('users', users);
+  audit('account_status', u.email + ' → ' + next);
+  notify(u.email, next === 'active' ? 'Akun diaktifkan' : 'Akun dinonaktifkan', next === 'active' ? 'Akun Anda sudah aktif kembali.' : 'Akun Anda dinonaktifkan oleh super admin.', 'app');
+  return { ok: true };
+}
+
+/** Status travel dari menu Agen juga menurun ke akun agen dan seluruh sub-akun pengemudi. */
+export function setAgencyStatusWithAccounts(id, status){
+  const denied = requireSuperadmin(); if (denied) return { ok: false, msg: denied };
+  const agencies = DB.load('agencies', []);
+  const ag = agencies.find((a) => a.id === id);
+  if (!ag) return { ok: false, msg: 'Travel tidak ditemukan' };
+  const next = status === 'active' ? 'active' : 'suspended';
+  if (next === 'suspended') {
+    const blocker = agentActiveScheduleBlocker(id);
+    if (blocker) return { ok: false, msg: 'Pengemudi ' + blocker.name + ' masih punya jadwal aktif — ganti pengemudi pada jadwal tersebut terlebih dahulu' };
+  }
+  ag.status = next;
+  DB.save('agencies', agencies);
+  const users = DB.load('users', []);
+  const drivers = DB.load('drivers', []);
+  users.filter((u) => u.role === 'agen' && u.agencyId === id).forEach((u) => { u.status = next; });
+  if (next === 'active') resumeAgencyChildren(id, users, drivers);
+  else suspendAgencyChildren(id, users, drivers);
+  DB.save('users', users);
+  DB.save('drivers', drivers);
+  audit('agency_status', id + ' → ' + next);
+  return { ok: true };
+}
+
+/** Alasan akun agen tidak boleh dihapus permanen karena sudah punya riwayat. */
+export function agentDeleteBlockReason(agencyId){
+  if (!agencyId) return 'Akun agen belum tertaut ke travel.';
+  if (DB.load('schedules', []).some((s) => s.agencyId === agencyId)) return 'Travel sudah punya riwayat jadwal — gunakan Nonaktifkan, bukan hapus.';
+  if (DB.load('ledger', []).some((l) => l.agencyId === agencyId)) return 'Travel sudah punya riwayat transaksi — gunakan Nonaktifkan, bukan hapus.';
+  return null;
+}
+
+/** Hapus akun agen + seluruh akun login pengemudi di bawahnya. Data travel/pengemudi tetap disimpan. */
+export function deleteManagedAgent(id){
+  const denied = requireSuperadmin(); if (denied) return { ok: false, msg: denied };
+  const users = DB.load('users', []);
+  const u = users.find((x) => x.id === id);
+  if (!u) return { ok: false, msg: 'Akun tidak ditemukan' };
+  if (u.role !== 'agen') return { ok: false, msg: 'Hanya akun agen yang bisa dihapus dari halaman ini' };
+  const reason = agentDeleteBlockReason(u.agencyId);
+  if (reason) return { ok: false, msg: reason };
+  const removed = users.filter((x) => x.agencyId === u.agencyId && (x.role === 'agen' || x.role === 'pengemudi'));
+  DB.save('users', users.filter((x) => !removed.includes(x)));
+  audit('account_delete_agent', u.email + ' + ' + Math.max(0, removed.length - 1) + ' sub-akun');
+  return { ok: true, removed: removed.length };
+}
 
 export function agencyOf(u){ if(!u) return null; return DB.load('agencies',[]).find(a=>a.id===u.agencyId); }
 

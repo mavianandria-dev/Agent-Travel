@@ -76,7 +76,7 @@ function Router() {
     else if (view === 'agen-vehform') page = <VehForm />;
     else page = <Agen />;
   } else if (view.startsWith('driver')) page = user ? <DriverPanel /> : <Login />;
-  else if (view.startsWith('admin')) page = user ? <Admin /> : <Login />;
+  else if (view.startsWith('admin')) page = user ? (user.role === 'superadmin' ? <Admin /> : <Home />) : <Login />;
   else page = <Home />;
 
   return (

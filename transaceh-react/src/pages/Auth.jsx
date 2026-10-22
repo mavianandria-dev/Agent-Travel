@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { setSession, agencyById, audit, notify, schedById, routeById, agencyPending, checkAgenAccess } from '@/lib/domain.js';
+import { setSession, audit, notify, schedById, routeById, agencyPending, checkAgenAccess, checkAccountAccess } from '@/lib/domain.js';
 import { uid, inC } from '@/lib/utils.js';
 import { Icon, fmtDate, Sec } from '@/components/ui.jsx';
 import { peekCheckoutDraft, resumeCheckout } from '@/lib/checkoutDraft.js';
@@ -81,6 +81,8 @@ function useDemoLogin() {
   return (email, pass) => {
     const u = DB.load('users', []).find((x) => x.email === email && x.pass === pass);
     if (!u) return;
+    const blocked = checkAccountAccess(u);
+    if (blocked) { toast(blocked, 'warn'); return; }
     setSession(u);
     audit('login', u.email + ' (demo)');
     refresh();
@@ -99,7 +101,8 @@ export function Login() {
     const e = email.trim().toLowerCase();
     const u = DB.load('users', []).find((x) => x.email.toLowerCase() === e && x.pass === pass);
     if (!u) { toast('Email / password salah', 'err'); return; }
-    if (u.role === 'pengemudi' && (u.status || 'active') !== 'active') { toast('Akun pengemudi dinonaktifkan — hubungi travel Anda', 'warn'); return; }
+    const accountBlock = checkAccountAccess(u);
+    if (accountBlock) { toast(accountBlock, 'warn'); return; }
     if (u.role === 'agen') {
       const blocked = checkAgenAccess(u);
       if (blocked) { toast(blocked, 'warn'); return; }

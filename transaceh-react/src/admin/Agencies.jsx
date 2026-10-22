@@ -1,26 +1,16 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { agencyById, audit, kycSummary, kycDocGroups, platformFeeOf } from '@/lib/domain.js';
+import { agencyById, audit, kycSummary, kycDocGroups, platformFeeOf, setAgencyStatusWithAccounts } from '@/lib/domain.js';
 import { formatBytes } from '@/lib/upload.js';
 import { fmtRp, uid } from '@/lib/utils.js';
 import { Icon } from '@/components/ui.jsx';
 
 export function agSetStatus(id, st, toast, refresh) {
-  const arr = DB.load('agencies', []);
-  const a = arr.find((x) => x.id === id);
-  if (!a) return;
-  a.status = st;
-  DB.save('agencies', arr);
+  const res = setAgencyStatusWithAccounts(id, st);
+  if (!res.ok) { toast(res.msg, 'err'); return; }
   refresh();
-  const us = DB.load('users', []);
-  let ch = false;
-  us.filter((x) => x.role === 'agen' && x.agencyId === id).forEach((x) => { const ns = st === 'active' ? 'active' : 'suspended'; if (x.status !== ns) { x.status = ns; ch = true; } });
-  if (ch) DB.save('users', us);
-  refresh();
-  audit('agency_status', id + ' → ' + st);
   toast('Agen ' + st);
-  refresh();
 }
 
 function AgFormModal() {
@@ -182,7 +172,7 @@ export function Agencies() {
     if (!window.confirm('Tolak & hapus pengajuan ' + a.name + '?')) return;
     DB.save('agencies', DB.load('agencies', []).filter((x) => x.id !== id));
     refresh();
-    DB.save('users', DB.load('users', []).filter((x) => !(x.role === 'agen' && x.agencyId === id)));
+    DB.save('users', DB.load('users', []).filter((x) => !((x.role === 'agen' || x.role === 'pengemudi') && x.agencyId === id)));
     refresh();
     audit('agency_reject', a.name);
     toast('Pengajuan ' + a.name + ' ditolak', 'info');
