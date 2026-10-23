@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { agencyOf, vehicleById, driverById, vehLayout, drvBlocks, seatBookedFuture, bookingsOf, schedSeatCap, audit, notify } from '@/lib/domain.js';
+import { agencyOf, vehicleById, driverById, driverForVehicle, backupDriverForVehicle, sameDriver, driverOptionLabel, vehLayout, drvBlocks, seatBookedFuture, bookingsOf, schedSeatCap, audit, notify } from '@/lib/domain.js';
 import { todayStr, uid, SEAT_LABELS, V_OWN, V_TYPES, V_FAC, V_SERVICES, VTOOLS, VCELLCLS, VCELLICON, inC } from '@/lib/utils.js';
 import { Icon, Sec, PillRadios, CheckPills, UpBox } from '@/components/ui.jsx';
 
@@ -42,10 +42,21 @@ export default function VehForm() {
 
 function VehFormInner({ agId, oldV, vid }) {
   const { setVehEdit, setAgenTab, go, toast, refresh } = useApp();
-  const v = Object.assign({ brand: '', model: '', year: '', color: '', plate: '', chassis: '', engine: '', vtype: '', vtypeOther: '', baggage: 'Sedang', tax: 'Aktif', stnkExp: '', kir: '', condition: 'Baik', photo: '', facilities: [], status: '', ownerName: '', ownerBiz: '', ownerNik: '', ownerAddr: '', ownerPhone: '', ownerEmail: '', ownership: '', docs: [], docOther: '', stnkPhoto: '', ktpOwnerPhoto: '', mainRoute: '', origin: '', dest: '', freq: 'Setiap hari', freqOther: '', services: [], opSchedule: '', coopTariff: '', coopSys: 'Bagi hasil', coopOther: '', fleetCount: 1, hasDriver: 'Ya', drvName: '', drvPhone: '', drvSim: '', drvSimExp: '', drvExp: '', hasBackup: '' }, oldV || {});
+  const v = Object.assign({ brand: '', model: '', year: '', color: '', plate: '', chassis: '', engine: '', vtype: '', vtypeOther: '', baggage: 'Sedang', tax: 'Aktif', stnkExp: '', kir: '', condition: 'Baik', photo: '', facilities: [], status: '', ownerName: '', ownerBiz: '', ownerNik: '', ownerAddr: '', ownerPhone: '', ownerEmail: '', ownership: '', docs: [], docOther: '', stnkPhoto: '', ktpOwnerPhoto: '', mainRoute: '', origin: '', dest: '', freq: 'Setiap hari', freqOther: '', services: [], opSchedule: '', coopTariff: '', coopSys: 'Bagi hasil', coopOther: '', fleetCount: 1, hasDriver: 'Ya', driverId: '', backDriverId: '', drvName: '', drvPhone: '', drvSim: '', drvSimExp: '', drvExp: '', hasBackup: '' }, oldV || {});
   const agDrivers = DB.load('drivers', []).filter((d) => d.agencyId === agId);
-
-  const drvIdForName = (nm) => (agDrivers.find((x) => x.name === (nm || '')) || {}).id || '';
+  const otherVehicles = DB.load('vehicles', []).filter((x) => x.agencyId === agId && x.id !== vid);
+  const usedPeople = [];
+  otherVehicles.forEach((x) => {
+    const d = driverForVehicle(x);
+    if (d) usedPeople.push({ driver: d, plate: x.plate || x.id });
+    const b = backupDriverForVehicle(x);
+    if (b) usedPeople.push({ driver: b, plate: x.plate || x.id });
+  });
+  const usedPlateFor = (d) => (usedPeople.find((x) => sameDriver(x.driver, d)) || {}).plate || '';
+  const driverOptions = agDrivers.map((d) => {
+    const usedAt = usedPlateFor(d);
+    return <option key={d.id} value={d.id} disabled={!!usedAt}>{driverOptionLabel(d)}{usedAt ? ' • sudah dipakai ' + usedAt : ''}</option>;
+  });
   const [ownership, setOwnership] = useState(v.ownership || '');
   const [ownerName, setOwnerName] = useState(v.ownerName || '');
   const [ownerBiz, setOwnerBiz] = useState(v.ownerBiz || '');
@@ -68,8 +79,8 @@ function VehFormInner({ agId, oldV, vid }) {
   const [photo, setPhoto] = useState(v.photo || '');
   const [services, setServices] = useState(v.services || []);
   const [drvSelId, setDrvSelId] = useState(() => {
-    const hit = drvIdForName(v.drvName);
-    if (hit) return hit;
+    const hit = driverForVehicle({ ...v, agencyId: v.agencyId || agId });
+    if (hit) return hit.id;
     if (v.drvName) return '__custom__';
     return '';
   });
@@ -78,8 +89,8 @@ function VehFormInner({ agId, oldV, vid }) {
   const [drvSimExp, setDrvSimExp] = useState(v.drvSimExp || '');
   const [hasBackup, setHasBackup] = useState(v.hasBackup || '');
   const [backSelId, setBackSelId] = useState(() => {
-    const hit = drvIdForName(v.backName);
-    if (hit) return hit;
+    const hit = backupDriverForVehicle({ ...v, agencyId: v.agencyId || agId });
+    if (hit) return hit.id;
     if (v.backName) return '__custom__';
     return '';
   });
@@ -263,29 +274,49 @@ function VehFormInner({ agId, oldV, vid }) {
     if (!pho) { toast('Isi URL foto armada dulu', 'err'); return; }
     if (!services.length) { toast('Pilih minimal 1 sistem layanan', 'err'); return; }
     const drvRef = (drvSelId && drvSelId !== '__custom__') ? driverById(drvSelId) : null;
-    const drvNameSel = drvRef ? drvRef.name : (drvSelId === '__custom__' ? (old?.drvName || '') : '');
-    if (!drvNameSel) { toast('Pilih nama pengemudi dulu', 'err'); return; }
-    const dph = gv(drvPhone);
-    if (!dph || dph.replace(/\D/g, '').length < 9) { toast('No HP pengemudi minimal 9 digit', 'err'); return; }
-    const dsim = gv(drvSim);
-    if (!dsim) { toast('Isi nomor & jenis SIM pengemudi dulu', 'err'); return; }
-    const dsimExp = gv(drvSimExp);
-    if (!dsimExp) { toast('Isi masa berlaku SIM pengemudi dulu', 'err'); return; }
+    if (!drvRef || drvRef.agencyId !== agId) { toast('Pilih pengemudi dari daftar pengemudi agen dulu', 'err'); return; }
+    const usedPlate = usedPlateFor(drvRef);
+    if (usedPlate) { toast('Pengemudi ' + drvRef.name + ' sudah dipakai armada ' + usedPlate, 'err'); return; }
     if (!hasBackup) { toast('Pilih ketersediaan pengemudi pengganti dulu', 'err'); return; }
-    const backRef = (backSelId && backSelId !== '__custom__') ? driverById(backSelId) : null;
-    const backNameSel = hasBackup === 'Ya' ? (backRef ? backRef.name : (backSelId === '__custom__' ? (old?.backName || '') : '')) : '';
-    if (hasBackup === 'Ya' && !backNameSel) { toast('Pilih nama pengemudi pengganti dulu', 'err'); return; }
+    const backRef = hasBackup === 'Ya' && backSelId && backSelId !== '__custom__' ? driverById(backSelId) : null;
+    if (hasBackup === 'Ya' && (!backRef || backRef.agencyId !== agId)) { toast('Pilih pengemudi pengganti dari daftar agen', 'err'); return; }
+    if (backRef) {
+      if (sameDriver(drvRef, backRef)) { toast('Pengemudi utama dan pengganti tidak boleh orang yang sama', 'err'); return; }
+      const backPlate = usedPlateFor(backRef);
+      if (backPlate) { toast('Pengemudi pengganti ' + backRef.name + ' sudah dipakai armada ' + backPlate, 'err'); return; }
+    }
+    if (own === 'Milik Pengemudi') {
+      const coop = driverById(coopDriverId);
+      if (!coop || !sameDriver(coop, drvRef)) { toast('Pengemudi pemilik harus sama dengan pengemudi utama', 'err'); return; }
+    }
+    const phoneOf = (d, fallback) => gv(d && d.phone) || gv(fallback);
+    const simOf = (d, fallback) => [d && d.simType, d && d.simNumber].filter(Boolean).join(' - ') || gv(fallback);
+    const simExpOf = (d, fallback) => {
+      const y = String((d && d.simExp) || '').slice(0, 4);
+      return /^\d{4}$/.test(y) ? y + '-01-01' : gv(fallback);
+    };
+    const dph = phoneOf(drvRef, drvPhone);
+    if (!dph || dph.replace(/\D/g, '').length < 9) { toast('No HP pengemudi minimal 9 digit', 'err'); return; }
+    const dsim = simOf(drvRef, drvSim);
+    if (!dsim) { toast('Isi nomor & jenis SIM pengemudi dulu', 'err'); return; }
+    const dsimExp = simExpOf(drvRef, drvSimExp);
+    if (!dsimExp) { toast('Isi masa berlaku SIM pengemudi dulu', 'err'); return; }
+    const bph = backRef ? phoneOf(backRef, backPhone) : '';
+    const bsim = backRef ? simOf(backRef, backSim) : '';
+    const bsimExp = backRef ? simExpOf(backRef, backSimExp) : '';
+    if (backRef && (!bph || bph.replace(/\D/g, '').length < 9)) { toast('No HP pengemudi pengganti minimal 9 digit', 'err'); return; }
     const data = {
       brand: br, model: md, year: vYear, color: col, plate: pl.toUpperCase(), chassis: old?.chassis || '', engine: old?.engine || '',
       vtype: vtype === 'Lainnya' ? (gv(vtypeOther) || 'Lainnya') : vtype, vtypeOther: gv(vtypeOther), baggage: old?.baggage || 'Sedang', tax: old?.tax || 'Aktif',
       stnkExp: stk, kir: old?.kir || '', condition: old?.condition || 'Baik', status, photo: pho, facilities,
       layout: VLAY.map((cc) => ({ sid: cc.sid, type: cc.type })), inactiveSeats: off, capacity: seats.length, seatSeq: VSEQ,
-      ownerName: onm, ownerBiz: biz, ownerNik: nik, ownerAddr: addr, ownerPhone: oph, ownerEmail: oEm, ownership: own, coopDriverId, hasEmail: hEm,
+      ownerName: onm, ownerBiz: biz, ownerNik: nik, ownerAddr: addr, ownerPhone: oph, ownerEmail: oEm, ownership: own, coopDriverId: own === 'Milik Pengemudi' ? drvRef.id : '', hasEmail: hEm,
       docs: ['STNK', 'KTP pemilik'], docOther: old?.docOther || '', stnkPhoto, ktpOwnerPhoto,
       mainRoute: old?.mainRoute || '', origin: old?.origin || '', dest: old?.dest || '', freq: old?.freq || 'Setiap hari', freqOther: old?.freqOther || '',
       services, opSchedule: old?.opSchedule || '', coopTariff: old?.coopTariff || 0, coopSys: old?.coopSys || 'Bagi hasil', coopOther: old?.coopOther || '', fleetCount: old?.fleetCount || 1,
-      hasDriver: drvNameSel ? 'Ya' : (old?.hasDriver || 'Tidak'), drvName: drvNameSel, drvPhone: dph, drvSim: dsim, drvSimExp: dsimExp, drvExp: old?.drvExp || '',
-      hasBackup, backName: backNameSel, backPhone: hasBackup === 'Ya' ? gv(backPhone) : '', backSim: hasBackup === 'Ya' ? gv(backSim) : '', backSimExp: hasBackup === 'Ya' ? gv(backSimExp) : ''
+      driverId: drvRef.id, backDriverId: backRef ? backRef.id : '', driverConflict: false,
+      hasDriver: 'Ya', drvName: drvRef.name, drvPhone: dph, drvSim: dsim, drvSimExp: dsimExp, drvExp: old?.drvExp || '',
+      hasBackup, backName: backRef ? backRef.name : '', backPhone: backRef ? bph : '', backSim: backRef ? bsim : '', backSimExp: backRef ? bsimExp : ''
     };
     const reopened = vid ? ((old?.inactiveSeats || []).filter((s) => newSeatSids.includes(s))) : [];
     const opened = [...reopened, ...addedIds];
@@ -340,7 +371,7 @@ function VehFormInner({ agId, oldV, vid }) {
         <div><label className="text-[12px] font-extrabold">STATUS KEPEMILIKAN KENDARAAN <span className="text-red-500">*</span></label><PillRadios options={V_OWN} value={ownership} onChange={handleOwn} /></div>
         <div className={(!ownership || ownership === 'Milik Pengemudi') ? 'hidden' : ''}><label className="text-[12px] font-extrabold">NAMA LENGKAP PEMILIK <span className="text-red-500">*</span></label><input value={ownerName} onChange={(e) => setOwnerName(e.target.value)} placeholder="cth: H. Muhammad Nur" className={'w-full mt-1 ' + inC} /></div>
         <div className={(!ownership || ownership === 'Milik pribadi' || ownership === 'Milik Pengemudi') ? 'hidden' : ''}><label className="text-[12px] font-extrabold">NAMA USAHA / PERUSAHAAN <span className="text-red-500">*</span></label><input value={ownerBiz} onChange={(e) => setOwnerBiz(e.target.value)} placeholder="cth: Barakah Travel" className={'w-full mt-1 ' + inC} /></div>
-        <div className={ownership === 'Milik Pengemudi' ? '' : 'hidden'}><label className="text-[12px] font-extrabold">PILIH PENGEMUDI (MILIK PENGEMUDI) <span className="text-red-500">*</span></label><select value={coopDriverId} onChange={(e) => vehCoopFill(e.target.value)} className={'w-full mt-1 ' + inC}><option value="">— Pilih pengemudi —</option>{agDrivers.map((d) => <option key={d.id} value={d.id}>{d.name} • {d.phone}</option>)}</select></div>
+        <div className={ownership === 'Milik Pengemudi' ? '' : 'hidden'}><label className="text-[12px] font-extrabold">PILIH PENGEMUDI (MILIK PENGEMUDI) <span className="text-red-500">*</span></label><select value={coopDriverId} onChange={(e) => vehCoopFill(e.target.value)} className={'w-full mt-1 ' + inC}><option value="">— Pilih pengemudi —</option>{driverOptions}</select></div>
         <div className="grid grid-cols-2 gap-2.5"><div><label className="text-[12px] font-extrabold">NOMOR KTP / NIK <span className="text-red-500">*</span></label><input value={ownerNik} onChange={(e) => setOwnerNik(e.target.value)} inputMode="numeric" maxLength={16} placeholder="16 digit" className={'w-full mt-1 ' + inC} /></div>
           <div><label className="text-[12px] font-extrabold">NO HP / WHATSAPP <span className="text-red-500">*</span></label><input value={ownerPhone} onChange={(e) => setOwnerPhone(e.target.value)} inputMode="tel" placeholder="cth: 0812xxxxxxx" className={'w-full mt-1 ' + inC} /></div></div>
         <div><label className="text-[12px] font-extrabold">ALAMAT LENGKAP <span className="text-red-500">*</span></label><input value={ownerAddr} onChange={(e) => setOwnerAddr(e.target.value)} placeholder="cth: Jl. Merdeka No.12, Calang" className={'w-full mt-1 ' + inC} /></div>
@@ -372,13 +403,15 @@ function VehFormInner({ agId, oldV, vid }) {
       </div>
       <Sec index="E" title="E. DATA PENGEMUDI" />
       <div className="space-y-2.5">
-        <div><label className="text-[12px] font-extrabold">NAMA PENGEMUDI <span className="text-red-500">*</span></label><select value={drvSelId} onChange={(e) => vehDrvFill(e.target.value)} className={'w-full mt-1 ' + inC}><option value="">— Pilih pengemudi —</option>{agDrivers.map((d) => <option key={d.id} value={d.id}>{d.name} • {d.phone}</option>)}{drvSelId === '__custom__' ? <option value="__custom__">{oldV?.drvName}</option> : null}</select></div>
+        <div className="text-[11.5px] text-slate-500 font-medium bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">Nama boleh sama. Pilih berdasarkan HP/SIM. Satu pengemudi hanya boleh terpasang di satu armada, baik sebagai pengemudi utama maupun pengganti.</div>
+        {oldV?.driverConflict ? <div className="text-[11.5px] font-bold text-red-700 bg-red-50 border-2 border-red-200 rounded-xl px-3 py-2">Data pengemudi armada ini bentrok dengan armada lain. Pilih pengemudi pengganti yang belum dipakai untuk memperbaiki data.</div> : null}
+        <div><label className="text-[12px] font-extrabold">NAMA PENGEMUDI <span className="text-red-500">*</span></label><select value={drvSelId} onChange={(e) => vehDrvFill(e.target.value)} className={'w-full mt-1 ' + inC}><option value="">— Pilih pengemudi —</option>{driverOptions}{drvSelId === '__custom__' ? <option value="__custom__">{oldV?.drvName} • data lama perlu dipilih ulang</option> : null}</select></div>
         <div className="grid grid-cols-2 gap-2.5"><div><label className="text-[12px] font-extrabold">NO HP / WHATSAPP PENGEMUDI <span className="text-red-500">*</span></label><input value={drvPhone} onChange={(e) => setDrvPhone(e.target.value)} inputMode="tel" placeholder="cth: 0812xxxxxxx" className={'w-full mt-1 ' + inC} /></div>
           <div><label className="text-[12px] font-extrabold">NOMOR & JENIS SIM <span className="text-red-500">*</span></label><input value={drvSim} onChange={(e) => setDrvSim(e.target.value)} placeholder="cth: A - 123456" className={'w-full mt-1 ' + inC} /></div></div>
         <div><label className="text-[12px] font-extrabold">MASA BERLAKU SIM <span className="text-red-500">*</span></label><input type="date" value={drvSimExp} onChange={(e) => setDrvSimExp(e.target.value)} className={'w-full mt-1 ' + inC} /></div>
         <div><label className="text-[12px] font-extrabold">TERSEDIA PENGEMUDI PENGGANTI? <span className="text-red-500">*</span></label><PillRadios options={['Ya', 'Tidak']} value={hasBackup} onChange={setHasBackup} /></div>
         <div className={(hasBackup || '') === 'Ya' ? 'space-y-2.5' : 'hidden space-y-2.5'}>
-          <div><label className="text-[12px] font-extrabold">NAMA PENGEMUDI PENGGANTI <span className="text-red-500">*</span></label><select value={backSelId} onChange={(e) => vehBackFill(e.target.value)} className={'w-full mt-1 ' + inC}><option value="">— Pilih pengemudi —</option>{agDrivers.map((d) => <option key={d.id} value={d.id}>{d.name} • {d.phone}</option>)}{backSelId === '__custom__' ? <option value="__custom__">{oldV?.backName}</option> : null}</select></div>
+          <div><label className="text-[12px] font-extrabold">NAMA PENGEMUDI PENGGANTI <span className="text-red-500">*</span></label><select value={backSelId} onChange={(e) => vehBackFill(e.target.value)} className={'w-full mt-1 ' + inC}><option value="">— Pilih pengemudi —</option>{driverOptions}{backSelId === '__custom__' ? <option value="__custom__">{oldV?.backName} • data lama perlu dipilih ulang</option> : null}</select></div>
           <div className="grid grid-cols-2 gap-2.5"><div><label className="text-[12px] font-extrabold">NO HP / WHATSAPP PENGGANTI</label><input value={backPhone} onChange={(e) => setBackPhone(e.target.value)} inputMode="tel" placeholder="cth: 0812xxxxxxx" className={'w-full mt-1 ' + inC} /></div>
             <div><label className="text-[12px] font-extrabold">NOMOR & JENIS SIM</label><input value={backSim} onChange={(e) => setBackSim(e.target.value)} placeholder="cth: A - 123456" className={'w-full mt-1 ' + inC} /></div></div>
           <div><label className="text-[12px] font-extrabold">MASA BERLAKU SIM PENGGANTI</label><input type="date" value={backSimExp} onChange={(e) => setBackSimExp(e.target.value)} className={'w-full mt-1 ' + inC} /></div>

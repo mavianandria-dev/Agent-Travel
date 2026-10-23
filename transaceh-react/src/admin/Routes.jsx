@@ -100,6 +100,7 @@ function RequestSection() {
   const approve = (id) => {
     const r = decideRouteRequest(id, true, '');
     refresh();
+    if (r?.error) { toast(r.error, 'err'); return; }
     toast(r?.createdRouteId ? 'Rute baru dibuat untuk agen pengusul' : 'Titik jemput ditambahkan ke rute');
   };
   const reject = (id) => {

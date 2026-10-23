@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { agencyOf, driverById, simLabel, simExpired, audit, todayStr, driverProfileStatus, approveDriverProfile, rejectDriverProfile, driverFieldLabel } from '@/lib/domain.js';
+import { agencyOf, driverById, driverForVehicle, backupDriverForVehicle, simLabel, simExpired, audit, todayStr, driverProfileStatus, approveDriverProfile, rejectDriverProfile, driverFieldLabel } from '@/lib/domain.js';
 import { Icon, DocRow, DocPreview } from '@/components/ui.jsx';
 
 const fmtVal = (v) => {
@@ -90,6 +90,12 @@ export default function Drivers({ ag }) {
   const ds = DB.load('drivers', []).filter((d) => d.agencyId === agency.id);
 
   const delDrv = (id) => {
+    const assigned = DB.load('vehicles', []).find((v) => {
+      const d = driverForVehicle(v);
+      const b = backupDriverForVehicle(v);
+      return (d && d.id === id) || (b && b.id === id);
+    });
+    if (assigned) { toast('Pengemudi masih terpasang di armada ' + (assigned.plate || assigned.id) + ' — lepas dulu', 'err'); return; }
     if (DB.load('schedules', []).some((s) => s.driverId === id && s.date >= todayStr(0))) { toast('Pengemudi punya jadwal aktif — tidak bisa dihapus', 'err'); return; }
     if (!window.confirm('Hapus pengemudi + akun loginnya?')) return;
     const d = driverById(id);

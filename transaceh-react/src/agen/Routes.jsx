@@ -24,8 +24,9 @@ function RequestRouteModal({ ag }) {
   const [dist, setDist] = useState('');
   const [dur, setDur] = useState('');
   const [armada, setArmada] = useState([]);
-  const activeV = DB.load('vehicles', []).filter((v) => v.agencyId === ag.id && v.status === 'aktif');
-  const availV = fleetAvailable(ag.id);
+  const availV = fleetAvailable(ag.id, { includeUsed: true });
+  const usedV = availV.filter((v) => (v.routeUsage || []).length > 0);
+  const selectedUsed = availV.filter((v) => armada.includes(v.id) && (v.routeUsage || []).length > 0);
   const chips = [...new Set(PICKUP_ORIGIN[from] || [])];
   const pickChip = (p) => { setCustom(''); setPicks((ps) => (ps.includes(p) ? ps.filter((x) => x !== p) : [...ps, p])); };
   const addCustom = () => { const v = custom.trim(); if (!v) return; if (!picks.includes(v)) setPicks((ps) => [...ps, v]); setCustom(''); };
@@ -44,7 +45,7 @@ function RequestRouteModal({ ag }) {
   return (
     <div className="p-6">
       <h3 className="font-extrabold text-[16px]">Usulkan Rute</h3>
-      <div className="mt-2 text-[12px] font-bold bg-slate-50 text-slate-600 rounded-xl px-3 py-2">DARI/KE yang sama boleh diusulkan — pembeda: harga, armada, dan titik jemput.</div>
+      <div className="mt-2 text-[12px] font-bold bg-slate-50 text-slate-600 rounded-xl px-3 py-2">Satu armada boleh dipakai di beberapa rute. DARI/KE yang sama tetap boleh diusulkan dengan harga, titik jemput, atau armada yang berbeda.</div>
       <div className="grid grid-cols-2 gap-2.5 mt-3">
         <div><label className="text-[12px] font-extrabold">DARI <span className="text-red-500">*</span></label>
           <select value={from} onChange={(e) => pickFrom(e.target.value)} className="w-full mt-1 font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring"><option value="" disabled>— Pilih kota asal —</option>{REGIONS.map((g) => (<optgroup key={g.p} label={g.p}>{g.c.map((n) => (<option key={n}>{n}</option>))}</optgroup>))}</select></div>
@@ -80,16 +81,26 @@ function RequestRouteModal({ ag }) {
       </div>
       <div className="mt-3"><label className="text-[12px] font-extrabold">PILIH ARMADA (wajib, boleh banyak) <span className="text-red-500">*</span></label>
         {availV.length ? (
-          <div className="flex flex-wrap gap-1.5 mt-1.5">
-            {availV.map((v) => (
-              <button key={v.id} type="button" onClick={() => pickV(v.id)} className={`px-3 py-2 rounded-xl border-2 text-[12px] font-extrabold transition ${armada.includes(v.id) ? 'bg-sky-600 border-sky-600 text-white' : 'bg-white border-slate-200 text-slate-500'}`}>{armada.includes(v.id) ? '✓ ' : ''}{vehName(v)} • {v.plate}</button>
-            ))}
-          </div>
+          <>
+            <div className="flex flex-wrap gap-1.5 mt-1.5">
+              {availV.map((v) => {
+                const usage = v.routeUsage || [];
+                const used = usage.length > 0;
+                const routeNames = usage.map((r) => r.from + ' → ' + r.to);
+                return (
+                  <button key={v.id} type="button" data-vehicle-id={v.id} title={used ? 'Sudah dipakai di ' + routeNames.join(', ') + '. Tetap bisa dipilih untuk rute baru.' : 'Belum dipakai rute lain.'} onClick={() => pickV(v.id)} className={`px-3 py-2 rounded-xl border-2 text-[12px] font-extrabold transition ${armada.includes(v.id) ? 'bg-sky-600 border-sky-600 text-white' : 'bg-white border-slate-200 text-slate-500'}`}>
+                    {armada.includes(v.id) ? '✓ ' : ''}{vehName(v)} • {v.plate}{used ? <span className="ml-1 text-[10px] font-bold opacity-80">• {usage.length} rute</span> : null}
+                  </button>
+                );
+              })}
+            </div>
+            {usedV.length ? <div className="text-[11.5px] text-slate-500 font-medium bg-slate-50 rounded-xl px-3 py-2 mt-1.5">{usedV.length} armada sudah dipakai rute lain — tetap bisa dipilih untuk rute baru. Rute pemakaian terlihat saat armada dipilih.</div> : null}
+          </>
         ) : (
-          <div className="text-[12px] font-bold text-amber-700 bg-amber-50 border-2 border-amber-200 rounded-xl px-3 py-2 mt-1.5">{activeV.length ? 'Semua armada aktif sudah dipakai rute lain — tambah armada baru di halaman Armada.' : 'Belum ada armada aktif — tambah armada dulu di halaman Armada.'}</div>
+          <div className="text-[12px] font-bold text-amber-700 bg-amber-50 border-2 border-amber-200 rounded-xl px-3 py-2 mt-1.5">Belum ada armada aktif — tambah armada dulu di halaman Armada.</div>
         )}
         {armada.length ? <div className="text-[11.5px] font-semibold text-sky-700 mt-1.5">{armada.length} armada dipilih untuk rute ini.</div> : null}
-        {availV.length && activeV.length > availV.length ? <div className="text-[11.5px] text-slate-400 font-semibold mt-1.5">{activeV.length - availV.length} armada dipakai rute lain dan tidak ditampilkan.</div> : null}
+        {selectedUsed.length ? <div className="text-[11.5px] text-amber-700 font-semibold bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mt-1.5">{selectedUsed.map((v) => vehName(v) + ': ' + (v.routeUsage || []).map((r) => r.from + ' → ' + r.to).join(', ')).join('; ')}. Armada ini tetap bisa dipakai — pastikan jadwalnya tidak bentrok.</div> : null}
       </div>
       <div className="mt-3"><label className="flex items-center gap-2.5 bg-sky-50 border-2 border-sky-200 rounded-2xl px-3.5 py-2.5 cursor-pointer text-[12.5px] font-bold text-sky-800"><input type="checkbox" checked={homePickup} onChange={(e) => setHomePickup(e.target.checked)} className="w-5 h-5 accent-sky-600 shrink-0" />Sediakan jemput ke rumah (pelanggan pin lokasi via peta)</label></div>
       <div className="mt-3"><label className="text-[12px] font-extrabold">CATATAN (opsional)</label>

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { agencyOf, driverById, simParse, audit, uid } from '@/lib/domain.js';
+import { agencyOf, driverById, simParse, audit, uid, todayStr } from '@/lib/domain.js';
 import { SIM_TYPES, GENDERS, MARITALS, EDUCATIONS, inC } from '@/lib/utils.js';
 import { Icon, Sec, PillRadios, UpBox } from '@/components/ui.jsx';
 
@@ -92,6 +92,12 @@ function DrvFormInner({ agId, raw, did }) {
     if (!simSame && !simNumber) { toast('Isi nomor SIM (atau centang sesuai KTP)', 'err'); return; }
     if (!(sExp >= cur && sExp <= 2100)) { toast('Tahun expired SIM minimal ' + cur, 'err'); return; }
     if (!m || !/.+@.+\..+/.test(m)) { toast('Email akun login wajib diisi', 'err'); return; }
+    const identity = (v) => String(v == null ? '' : v).replace(/\D/g, '');
+    const clashIdentity = arr.find((x) => x.id !== did && x.agencyId === agId && (
+      (nk && identity(x.nik) === nk) ||
+      (simNumber && identity(x.simNumber) === identity(simNumber))
+    ));
+    if (clashIdentity) { toast('NIK atau nomor SIM sudah dipakai pengemudi lain (' + clashIdentity.name + ')', 'err'); return; }
     const clashUser = DB.load('users', []).find((x) => x.email === m && !(x.role === 'pengemudi' && x.agencyId === agId));
     if (clashUser) { toast('Email dipakai akun lain', 'err'); return; }
     const clashDrv = arr.find((x) => x.userEmail && x.userEmail.toLowerCase() === m && x.agencyId === agId && x.id !== did);
@@ -121,7 +127,30 @@ function DrvFormInner({ agId, raw, did }) {
       arr.push(d);
       if (!syncDrvUser(d, pass, '')) { DB.save('drivers', arr.filter((x) => x.id !== d.id)); refresh(); return; }
     }
-    DB.save('drivers', arr); refresh();
+    DB.save('drivers', arr);
+    const linkedVehicles = DB.load('vehicles', []);
+    let vch = false;
+    const simText = [d.simType, d.simNumber].filter(Boolean).join(' - ');
+    const simExpText = d.simExp ? String(d.simExp).slice(0, 4) + '-01-01' : '';
+    linkedVehicles.forEach((v) => {
+      if (String(v.driverId || '') === String(d.id)) {
+        v.drvName = d.name; v.drvPhone = d.phone; v.drvSim = simText; v.drvSimExp = simExpText; vch = true;
+      }
+      if (String(v.backDriverId || '') === String(d.id)) {
+        v.backName = d.name; v.backPhone = d.phone; v.backSim = simText; v.backSimExp = simExpText; vch = true;
+      }
+    });
+    if (vch) DB.save('vehicles', linkedVehicles);
+    const linkedSchedules = DB.load('schedules', []);
+    const today = todayStr(0);
+    let sch = false;
+    linkedSchedules.forEach((s) => {
+      if (s.date < today) return;
+      if (s.driverId === d.id && s.driverName !== d.name) { s.driverName = d.name; sch = true; }
+      if (s.backupDriverId === d.id && s.backupName !== d.name) { s.backupName = d.name; sch = true; }
+    });
+    if (sch) DB.save('schedules', linkedSchedules);
+    refresh();
     audit('driver_save', nm);
     setDrvEdit(null);
     toast('Data pengemudi + akun login disimpan');

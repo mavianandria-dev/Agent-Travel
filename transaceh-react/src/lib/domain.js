@@ -412,14 +412,86 @@ export function vehicleById(id){ return DB.load('vehicles',[]).find(v=>v.id===id
 
 export function vehName(v){ return v?(((v.brand||'')+(v.model?' '+v.model:'')).trim()||'Armada'):''; }
 
-/* Armada agen yang tersedia untuk rute baru: status aktif & belum dipakai rute mana pun. */
-export function fleetAvailable(agencyId){
-  const used=new Set();
-  DB.load('routes',[]).forEach(r=>(r.vehicleIds||[]).forEach(id=>used.add(id)));
-  return DB.load('vehicles',[]).filter(v=>v.agencyId===agencyId&&v.status==='aktif'&&!used.has(v.id));
+/* Armada agen untuk rute baru. Default: aktif & belum dipakai rute mana pun.
+   includeUsed=true dipakai saat armada yang sama boleh melayani beberapa rute;
+   routeUsage berisi rute yang sudah memakai armada tersebut. */
+export function fleetAvailable(agencyId, { includeUsed = false } = {}){
+  const usage=new Map();
+  DB.load('routes',[]).forEach(r=>(r.vehicleIds||[]).forEach(id=>{
+    if(!usage.has(id)) usage.set(id,[]);
+    usage.get(id).push(r);
+  }));
+  return DB.load('vehicles',[])
+    .filter(v=>v.agencyId===agencyId&&v.status==='aktif'&&(includeUsed||!usage.has(v.id)))
+    .map(v=>({...v,routeUsage:usage.get(v.id)||[]}));
 }
 
 export function driverById(id){ return DB.load('drivers',[]).find(d=>d.id===id); }
+
+/* Identitas pengemudi tidak memakai nama sebagai kunci. Nama boleh sama,
+   selama NIK/SIM/HP berbeda. */
+const identityDigits = (v) => String(v == null ? '' : v).replace(/\D/g, '');
+
+/** True bila dua record pengemudi adalah orang yang sama. */
+export function sameDriver(a, b) {
+  if (!a || !b) return false;
+  if (a.id && b.id && a.id === b.id) return true;
+  const aNik = identityDigits(a.nik);
+  const bNik = identityDigits(b.nik);
+  if (aNik.length === 16 && bNik.length === 16) return aNik === bNik;
+  const aSim = identityDigits(a.simNumber);
+  const bSim = identityDigits(b.simNumber);
+  if (aSim.length >= 6 && bSim.length >= 6) return aSim === bSim;
+  const aPhone = identityDigits(a.phone);
+  const bPhone = identityDigits(b.phone);
+  if (aPhone.length >= 9 && bPhone.length >= 9) return aPhone === bPhone;
+  return false;
+}
+
+/** Label dropdown: nama + data pembeda agar nama kembar tidak tertukar. */
+export function driverOptionLabel(d) {
+  if (!d) return '';
+  const sim = [d.simType, d.simNumber].filter(Boolean).join(' ');
+  return [d.name || '', d.phone || '', sim ? 'SIM ' + sim : ''].filter(Boolean).join(' • ');
+}
+
+/** Cari record pengemudi dari snapshot nama/HP/SIM. Nama hanya dipakai bila tunggal. */
+export function driverBySnapshot(agencyId, snap = {}) {
+  const ds = DB.load('drivers', []).filter((d) => d.agencyId === agencyId);
+  const phone = identityDigits(snap.phone ?? snap.drvPhone ?? snap.backPhone);
+  const sim = identityDigits(snap.sim ?? snap.drvSim ?? snap.backSim);
+  const pick = (hits) => hits.find((d) => d.status === 'aktif') || hits[0] || null;
+  if (phone.length >= 9) {
+    const hits = ds.filter((d) => identityDigits(d.phone) === phone);
+    if (hits.length) return pick(hits);
+  }
+  if (sim.length >= 6) {
+    const hits = ds.filter((d) => identityDigits(d.simNumber) === sim);
+    if (hits.length) return pick(hits);
+  }
+  return null;
+}
+
+/** Pengemudi utama armada: utamakan tautan ID, lalu snapshot data lama. */
+export function driverForVehicle(v) {
+  if (!v) return null;
+  if (v.driverId) {
+    const d = driverById(v.driverId);
+    if (d && d.agencyId === v.agencyId) return d;
+  }
+  return driverBySnapshot(v.agencyId, { name: v.drvName, phone: v.drvPhone, sim: v.drvSim });
+}
+
+/** Pengemudi pengganti armada (opsional). */
+export function backupDriverForVehicle(v) {
+  if (!v) return null;
+  if (v.hasBackup !== 'Ya' && !v.backDriverId && !v.backName) return null;
+  if (v.backDriverId) {
+    const d = driverById(v.backDriverId);
+    if (d && d.agencyId === v.agencyId) return d;
+  }
+  return driverBySnapshot(v.agencyId, { name: v.backName, phone: v.backPhone, sim: v.backSim });
+}
 
 /* ---------- Profil driver: isi sendiri + verifikasi agen ----------
    Field yang langsung berlaku: kontak, alamat, rekening, foto profil.
@@ -605,37 +677,13 @@ export function schedReady(s){
   return (!v||v.status==='aktif')&&(!d||d.status==='aktif');
 }
 
-/* Pemetaan nama pengemudi dari data armada → data pengemudi agen (penjadwalan otomatis). */
+/* Fallback nama lama: hanya aman bila namanya tunggal. Nama kembar harus
+   diselesaikan lewat driverId / NIK / SIM / HP. */
 export function driverByName(agencyId, name){
   const n=String(name||'').trim().toLowerCase();
   if(!n||!agencyId) return null;
   const ds=DB.load('drivers',[]).filter(d=>d.agencyId===agencyId&&String(d.name||'').trim().toLowerCase()===n);
-  return ds.find(d=>d.status==='aktif')||ds[0]||null;
-}
-/* Bentrok jadwal: tanggal sama + (armada/pengemudi sama, ID atau nama) + jeda keberangkatan < 4 jam. */
-export function schedConflict(date,time,vehicleId,driverId,driverName){
-  const nm=String(driverName||'').trim().toLowerCase();
-  return DB.load('schedules',[]).find(s=>{
-    if(s.date!==date) return false;
-    if(Math.abs(hm(s.time)-hm(time))>=240) return false;
-    if(vehicleId&&s.vehicleId===vehicleId) return true;
-    if(driverId&&s.driverId===driverId) return true;
-    const dd=s.driverId?driverById(s.driverId):null;
-    const sn=String(s.driverName||(dd?dd.name:'')||'').trim().toLowerCase();
-    return !!(nm&&sn&&nm===sn);
-  })||null;
-}
-/* Jam kembar: di koridor (DARI→KE) yang sama, satu tanggal tidak boleh punya 2 jadwal dengan jam sama.
-   Dicek per agen travel — jadwal agen lain tidak saling mengunci. */
-export function corridorClash(date,time,routeId,agencyId){
-  const r=routeById(routeId);
-  if(!r) return null;
-  return DB.load('schedules',[]).find(s=>{
-    if(s.agencyId!==agencyId) return false;
-    if(s.date!==date||s.time!==time) return false;
-    const r2=routeById(s.routeId);
-    return !!(r2&&r2.from===r.from&&r2.to===r.to);
-  })||null;
+  return ds.length===1?ds[0]:null;
 }
 
 export function drvBlocks(L){ let n=0; for(let r=0;r<7;r++){ const a=L[r*4+2],b=L[r*4+3]; if(a&&b&&a.type==='driver'&&b.type==='driver') n++; } return n; }
@@ -695,22 +743,92 @@ export function scheduleNeedsReview(s) {
 }
 
 /** Durasi rute ("±3 jam", "2,5 jam", "90 menit") → menit.
- *  Fallback: estimasi geo antar kota, lalu 180 menit. */
-export function durMinutes(route) {
+ *  Mengembalikan 0 bila durasi tidak diketahui. */
+export function routeDurationMinutes(route) {
   const parse = (txt) => {
     if (!txt || txt === '-') return 0;
+    let total = 0;
     let m = /([\d.,]+)\s*jam/i.exec(txt);
-    if (m) return Math.round(parseFloat(m[1].replace(',', '.')) * 60);
+    if (m) total += parseFloat(m[1].replace(',', '.')) * 60;
     m = /([\d.,]+)\s*menit/i.exec(txt);
-    if (m) return Math.round(parseFloat(m[1].replace(',', '.')));
-    return 0;
+    if (m) total += parseFloat(m[1].replace(',', '.'));
+    return Math.round(total);
   };
   let mins = parse(route && route.duration);
   if (!mins) {
     const est = estimateRoute(route && route.from, route && route.to);
     mins = parse(est && est.duration);
   }
-  return mins || 180;
+  return mins || 0;
+}
+
+/** Durasi untuk tampilan/progres; fallback lama 180 menit. */
+export function durMinutes(route) {
+  return routeDurationMinutes(route) || 180;
+}
+
+/* Jeda aman setelah tiba sebelum armada boleh berangkat lagi. */
+export const SCHEDULE_BUFFER_MINUTES = 30;
+
+/* Jadwal yang masih dihitung untuk kapasitas armada.
+   Jadwal batal dan missed tidak menghabiskan slot. */
+export function countedSchedule(s) {
+  return !!s && s.status !== 'cancelled' && s.tripStatus !== 'cancelled' && s.tripStatus !== 'missed';
+}
+
+const localDateKeyOf = (ms) => {
+  if (!Number.isFinite(ms)) return '';
+  const d = new Date(ms);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+};
+
+/**
+ * Status satu tanggal untuk armada + rute + jam yang sedang dipilih.
+ * Aturan: maksimal 2 keberangkatan aktif per tanggal (00:00–23:59),
+ * semua rute, ditambah cek durasi perjalanan + jeda 30 menit.
+ */
+export function scheduleDateStatus({ vehicleId, routeId, date, time, schedules = DB.load('schedules', []), routes = DB.load('routes', []), selectedDates = [], now = Date.now() }) {
+  if (!vehicleId) return { state: 'blocked', count: 0, reason: 'Pilih armada dulu' };
+  const route = routes.find((r) => r.id === routeId);
+  if (!route) return { state: 'blocked', count: 0, reason: 'Pilih rute dulu' };
+  const durationMin = routeDurationMinutes(route);
+  if (!durationMin) return { state: 'blocked', count: 0, reason: 'Durasi rute belum diketahui — jadwal tidak bisa disimpan' };
+
+  const start = new Date(date + 'T' + (time || '00:00') + ':00').getTime();
+  if (!Number.isFinite(start)) return { state: 'blocked', count: 0, reason: 'Tanggal atau jam tidak valid' };
+  if (String(date) < localDateKeyOf(now)) return { state: 'past', count: 0, reason: 'Tanggal sudah lewat' };
+  if (start <= now) return { state: 'past-time', count: 0, reason: 'Jam keberangkatan sudah lewat' };
+
+  const routeMap = new Map(routes.map((r) => [r.id, r]));
+  const active = schedules.filter(countedSchedule).filter((s) => s.vehicleId === vehicleId);
+  const count = active.filter((s) => localDateKeyOf(scheduleEffectiveDepartureMs(s)) === date).length;
+  if (count >= 2) return { state: 'full', count, reason: 'Sudah ' + count + ' keberangkatan pada tanggal ini' };
+
+  const spans = active.map((s) => {
+    const r = routeMap.get(s.routeId);
+    const dep = scheduleEffectiveDepartureMs(s);
+    if (!Number.isFinite(dep) || !r) return null;
+    const mins = routeDurationMinutes(r) || durMinutes(r);
+    return { dep, end: dep + (mins + SCHEDULE_BUFFER_MINUTES) * 60000, s };
+  }).filter(Boolean);
+
+  const candStart = start;
+  const candEnd = start + (durationMin + SCHEDULE_BUFFER_MINUTES) * 60000;
+  const clash = spans.find((x) => candStart < x.end && x.dep < candEnd);
+  if (clash) {
+    return { state: 'duration', count, reason: 'Durasi perjalanan bertabrakan dengan jadwal ' + clash.s.date + ' ' + clash.s.time };
+  }
+
+  const selectedClash = selectedDates.filter((d) => d !== date).find((d) => {
+    const ms = new Date(d + 'T' + (time || '00:00') + ':00').getTime();
+    if (!Number.isFinite(ms)) return false;
+    const end = ms + (durationMin + SCHEDULE_BUFFER_MINUTES) * 60000;
+    return candStart < end && ms < candEnd;
+  });
+  if (selectedClash) return { state: 'selected-conflict', count, reason: 'Bentrok dengan tanggal ' + selectedClash + ' yang juga dipilih' };
+
+  if (count === 1) return { state: 'limited', count, reason: 'Sudah 1 keberangkatan; masih bisa tambah 1' };
+  return { state: 'available', count, reason: 'Belum ada keberangkatan' };
 }
 
 /** Progres perjalanan berbasis waktu: berangkat → estimasi tiba.
@@ -1744,9 +1862,9 @@ export function saveRouteRequest({ agencyId, type, routeId, from, to, pickup, pi
   const arr=DB.load('routeRequests',[]);
   const list=normalizePoints(pickups);
   if(!list.length&&(pickup||'').trim()) list.push((pickup||'').trim());
-  /* armada hanya milik agen pengusul — id armada agen lain dibuang */
+  /* armada hanya milik agen pengusul dan harus aktif — id lain dibuang */
   const fleet=DB.load('vehicles',[]);
-  const vids=Array.isArray(vehicleIds)?vehicleIds.filter(vid=>fleet.some(v=>v.id===vid&&v.agencyId===agencyId)):[];
+  const vids=Array.isArray(vehicleIds)?vehicleIds.filter(vid=>fleet.some(v=>v.id===vid&&v.agencyId===agencyId&&v.status==='aktif')):[];
   const r={id:uid('RQ'),agencyId,type,routeId:routeId||null,from,to,pickup:list[0]||'',pickups:list,note:(note||'').trim(),price:Number(price)||0,homePickup:homePickup!==false,distance:(distance||'').trim(),duration:(duration||'').trim(),vehicleIds:vids,status:'pending',adminNote:'',createdAt:new Date().toISOString(),decidedAt:null};
   arr.unshift(r); DB.save('routeRequests',arr);
   audit('route_request',type+' '+from+' → '+to+' • '+agencyId);
@@ -1757,6 +1875,12 @@ export function decideRouteRequest(id,approve,adminNote){
   const arr=DB.load('routeRequests',[]);
   const r=arr.find(x=>x.id===id);
   if(!r||r.status!=='pending') return null;
+  let validVehicleIds=null;
+  if(approve&&r.type==='rute-baru'){
+    const fleet=DB.load('vehicles',[]);
+    validVehicleIds=(Array.isArray(r.vehicleIds)?r.vehicleIds:[]).filter(vid=>fleet.some(v=>v.id===vid&&v.agencyId===r.agencyId&&v.status==='aktif'));
+    if(!validVehicleIds.length) return {error:'Armada usulan tidak valid untuk agen ini'};
+  }
   r.status=approve?'approved':'rejected';
   r.adminNote=(adminNote||'').trim();
   r.decidedAt=new Date().toISOString();
@@ -1767,7 +1891,7 @@ export function decideRouteRequest(id,approve,adminNote){
       const pts=normalizePoints(Array.isArray(r.pickups)&&r.pickups.length?r.pickups:(r.pickup?[r.pickup]:[]));
       const allPts=normalizePoints(pts.length?['Terminal '+r.from,...pts]:['Terminal '+r.from,'Terminal '+r.to]);
       const est=estimateRoute(r.from,r.to)||{};
-      const nr={id:uid('R'),from:r.from,to:r.to,distance:(r.distance||'').trim()||est.distance||'-',duration:(r.duration||'').trim()||est.duration||'-',basePrice:Number(r.price)>0?Number(r.price):0,prices:Number(r.price)>0?{[r.agencyId]:Number(r.price)}:{},homePickup:r.homePickup!==false,pickups:allPts,vehicleIds:Array.isArray(r.vehicleIds)?r.vehicleIds.filter(Boolean):[],active:true,agencyId:r.agencyId,agencyIds:[r.agencyId],driverId:null,driverIds:[]};
+      const nr={id:uid('R'),from:r.from,to:r.to,distance:(r.distance||'').trim()||est.distance||'-',duration:(r.duration||'').trim()||est.duration||'-',basePrice:Number(r.price)>0?Number(r.price):0,prices:Number(r.price)>0?{[r.agencyId]:Number(r.price)}:{},homePickup:r.homePickup!==false,pickups:allPts,vehicleIds:validVehicleIds||[],active:true,agencyId:r.agencyId,agencyIds:[r.agencyId],driverId:null,driverIds:[]};
       routes.push(nr); DB.save('routes',routes);
       createdRouteId=nr.id;
     }else if(r.type==='ubah-harga'){
