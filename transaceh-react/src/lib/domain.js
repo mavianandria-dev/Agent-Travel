@@ -187,19 +187,22 @@ export function createManagedAccount({ name, email, phone, password, role, agenc
   return { ok: true, user: u };
 }
 
-/** Edit data kontak akun. Email, role, dan tautan travel/pengemudi sengaja tidak diubah. */
-export function updateManagedAccount(id, { name, phone } = {}){
+/** Edit data kontak akun + password opsional. Email, role, dan tautan travel/pengemudi sengaja tidak diubah. */
+export function updateManagedAccount(id, { name, phone, password } = {}){
   const denied = requireSuperadmin(); if (denied) return { ok: false, msg: denied };
   const users = DB.load('users', []);
   const u = users.find((x) => x.id === id);
   if (!u) return { ok: false, msg: 'Akun tidak ditemukan' };
   const nm = String(name || '').trim();
   const ph = String(phone || '').trim();
+  const pw = String(password || '');
   if (!nm) return { ok: false, msg: 'Nama lengkap wajib diisi' };
   if (!ph) return { ok: false, msg: 'No HP wajib diisi' };
+  if (pw && pw.length < 6) return { ok: false, msg: 'Password minimal 6 karakter' };
   u.name = nm;
   u.phone = ph;
   u.wa = ph;
+  if (pw) u.pass = pw;
   DB.save('users', users);
   if (u.role === 'pengemudi') {
     const drivers = DB.load('drivers', []);
@@ -211,7 +214,8 @@ export function updateManagedAccount(id, { name, phone } = {}){
       DB.save('drivers', drivers);
     }
   }
-  audit('account_update', u.email);
+  audit('account_update', u.email + (pw ? ' • password diubah' : ''));
+  if (pw) notify(u.email, 'Password direset', 'Password akun Anda diubah oleh super admin. Gunakan password baru untuk masuk.', 'app');
   return { ok: true };
 }
 

@@ -10,7 +10,6 @@ import {
   createManagedAccount,
   deleteManagedAgent,
   driverParentIssue,
-  resetManagedAccountPassword,
   setManagedAccountStatus,
   updateManagedAccount,
 } from '@/lib/domain.js';
@@ -222,20 +221,16 @@ function AccountManageModal({ id }) {
   const canToggle = (!isSelf || st !== 'active') && !parentLocked;
 
   const save = () => {
-    const res = updateManagedAccount(u.id, { name, phone });
-    if (!res.ok) { toast(res.msg, 'err'); return; }
-    refresh();
-    toast('Data akun disimpan');
-  };
-  const resetPassword = () => {
-    if (!pw || !pw2) { toast('Isi password baru dan ulanginya', 'err'); return; }
-    if (pw !== pw2) { toast('Ulangi password tidak sama', 'err'); return; }
-    const res = resetManagedAccountPassword(u.id, pw);
+    const changePassword = !!(pw || pw2);
+    if (changePassword && (!pw || !pw2)) { toast('Isi password baru dan ulanginya', 'err'); return; }
+    if (changePassword && pw !== pw2) { toast('Ulangi password tidak sama', 'err'); return; }
+    if (changePassword && pw.length < 6) { toast('Password minimal 6 karakter', 'err'); return; }
+    const res = updateManagedAccount(u.id, { name, phone, password: changePassword ? pw : '' });
     if (!res.ok) { toast(res.msg, 'err'); return; }
     setPw('');
     setPw2('');
     refresh();
-    toast('Password akun direset');
+    toast(changePassword ? 'Data akun dan password disimpan' : 'Data akun disimpan');
   };
   const toggleStatus = () => {
     if (nextStatus === 'suspended' && !window.confirm('Nonaktifkan akun ' + u.email + '? Pengguna tidak bisa masuk sampai akun diaktifkan kembali.')) return;
@@ -284,15 +279,12 @@ function AccountManageModal({ id }) {
         <Field label="NAMA LENGKAP"><input value={name} onChange={(e) => setName(e.target.value)} className={inC + ' mt-1'} /></Field>
         <Field label="NO HP / WHATSAPP"><input value={phone} onChange={(e) => setPhone(e.target.value)} className={inC + ' mt-1'} inputMode="tel" /></Field>
       </div>
-      <div className="text-[10.5px] text-slate-400 font-medium mt-2">Email dan role tidak dapat diubah karena dipakai sebagai identitas login dan tautan data.</div>
-      <button onClick={save} className="mt-3 w-full bg-[#0b2447] text-white font-extrabold text-[13px] py-2.5 rounded-xl">Simpan Data Akun</button>
-
-      <h4 className="font-extrabold text-[13px] mt-5">Reset Password</h4>
-      <div className="grid sm:grid-cols-2 gap-2.5 mt-1.5">
-        <Field label="PASSWORD BARU"><input value={pw} onChange={(e) => setPw(e.target.value)} type="password" className={inC + ' mt-1'} placeholder="Minimal 6 karakter" autoComplete="new-password" /></Field>
-        <Field label="ULANGI PASSWORD"><input value={pw2} onChange={(e) => setPw2(e.target.value)} type="password" className={inC + ' mt-1'} placeholder="Ketik ulang" autoComplete="new-password" /></Field>
+      <div className="grid sm:grid-cols-2 gap-2.5 mt-2.5">
+        <Field label="PASSWORD BARU" hint="Kosongkan jika tidak ingin mengganti password."><input value={pw} onChange={(e) => setPw(e.target.value)} type="password" className={inC + ' mt-1'} placeholder="Minimal 6 karakter" autoComplete="new-password" /></Field>
+        <Field label="ULANGI PASSWORD BARU"><input value={pw2} onChange={(e) => setPw2(e.target.value)} type="password" className={inC + ' mt-1'} placeholder="Ketik ulang password baru" autoComplete="new-password" /></Field>
       </div>
-      <button onClick={resetPassword} className="mt-3 w-full bg-amber-50 text-amber-700 font-extrabold text-[13px] py-2.5 rounded-xl flex items-center justify-center gap-1.5"><Icon name="lock" className="w-4 h-4" />Reset Password</button>
+      <div className="text-[10.5px] text-slate-400 font-medium mt-2">Email dan role tidak dapat diubah karena dipakai sebagai identitas login dan tautan data. Password baru berlaku saat pengguna login berikutnya.</div>
+      <button onClick={save} className="mt-3 w-full bg-[#0b2447] text-white font-extrabold text-[13px] py-2.5 rounded-xl">Simpan Perubahan</button>
 
       {u.role === 'agen' ? (
         <>
