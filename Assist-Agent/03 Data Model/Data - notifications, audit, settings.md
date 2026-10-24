@@ -77,7 +77,8 @@ Saat ini fee platform aktif memakai `settings`, bukan `fees`. Jangan menambahkan
 
 ## Sumber
 
-- `transaceh-react/src/lib/domain.js:1063-1097` — audit, notify, fee platform.
+- `transaceh-react/src/lib/domain.js:1754-1790` — audit, notify, fee platform.
+- `transaceh-react/src/lib/domain.js:1002-1120` — notifikasi approval/rejection maintenance.
 - `transaceh-react/src/lib/seed.js:127-129` — contoh notifikasi, fees, audit.
 - `transaceh-react/src/lib/seed.js:130` — banner (contoh koleksi lain).
 

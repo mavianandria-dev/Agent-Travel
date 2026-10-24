@@ -6,10 +6,11 @@ tags:
   - type/reference
   - area/data
 status: aktif
-updated: 2026-10-23
+updated: 2026-10-24
 source:
   - transaceh-react/src/lib/db.js
   - transaceh-react/src/lib/seed.js
+  - transaceh-react/src/lib/domain.js
   - transaceh-react/src/lib/checkoutDraft.js
   - transaceh-react/src/lib/support.js
 ---
@@ -32,6 +33,7 @@ source:
 | `at_vehicles` | array | Armada |
 | `at_drivers` | array | Pengemudi |
 | `at_schedules` | array | Jadwal |
+| `at_maintenanceRequests` | array | Pengajuan maintenance armada berbasis periode |
 | `at_bookings` | array | Booking |
 | `at_payments` | array | Pembayaran |
 | `at_ledger` | array | Ledger pendapatan |
@@ -87,6 +89,7 @@ Menghapus semua `at_*` akan:
 
 - `transaceh-react/src/lib/db.js:1-6`
 - `transaceh-react/src/lib/seed.js:70-132`
+- `transaceh-react/src/lib/domain.js:748-780` — pembacaan request maintenance.
 - `transaceh-react/src/lib/checkoutDraft.js:11-30`
 - `transaceh-react/src/lib/support.js:6-7`
 

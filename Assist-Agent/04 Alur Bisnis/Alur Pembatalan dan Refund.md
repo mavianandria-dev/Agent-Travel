@@ -6,11 +6,13 @@ tags:
   - type/note
   - area/alur
 status: aktif
-updated: 2026-10-23
+updated: 2026-10-24
 source:
   - transaceh-react/src/lib/domain.js
   - transaceh-react/src/admin/Refunds.jsx
   - transaceh-react/src/admin/Settlement.jsx
+  - transaceh-react/src/pages/TicketDetail.jsx
+  - transaceh-react/src/agen/MaintenanceReview.jsx
 ---
 
 # Alur Pembatalan dan Refund
@@ -72,7 +74,28 @@ Dipakai dari `admin/Settlement.jsx`.
 - Jadwal `reviewResult = 'no_show'`.
 
 > [!important] Dasar refund berbeda
-> Pembatalan pelanggan = hanya tiket. Pembatalan operator / no-show = total pembayaran (tiket + jasa + fee).
+> Pembatalan pelanggan = hanya tiket. Pembatalan operator / no-show / maintenance = total pembayaran (tiket + jasa + fee).
+
+## 4. Maintenance armada
+
+Pengajuan driver → persetujuan agen. Approval tidak membatalkan jadwal secara hard; jadwal pada periode ditandai maintenance dan tidak bisa dijual. Resolusi booking:
+
+| Kondisi booking | Tindakan |
+| :--- | :--- |
+| `pending` | `cancelled`, refund 0, payment `cancelled` |
+| `paid`, ada pengganti valid + akun pelanggan | `choice_pending`; pelanggan memilih refund 100% atau pindah |
+| `paid`, tidak ada pengganti / tanpa akun | refund 100% total otomatis |
+| `boarded` / trip berjalan | tidak disentuh; perjalanan lanjut |
+| `done` / sudah lampau | tidak disentuh |
+
+Aturan pengganti:
+
+- Agensi, arah rute, tanggal, dan harga harus sama.
+- Kursi cukup, bukan armada asal, jadwal `open`, belum berjalan, dan bukan maintenance.
+- Pelanggan memilih langsung dari tiket; tidak ada approval agen per tiket karena kandidat sudah divalidasi domain.
+- Deadline: 24 jam sebelum keberangkatan efektif, minimal 2 jam setelah approval, dan paling lambat 30 menit sebelum berangkat. Jika lewat/no candidate → refund 100% otomatis. Approval yang terjadi kurang dari 30 menit sebelum berangkat langsung memicu refund.
+- Refund memakai `refundScope = 'total'`; ledger belum cair di-void. Pindah armada memindahkan kursi, penumpang, dan ledger ke jadwal tujuan.
+- Notifikasi pelanggan memuat jadwal, nominal refund, detail pengganti, deadline, dan fallback. Booking tanpa akun mengirim notifikasi ke pengemudi pengaju.
 
 ## Status refund
 
@@ -103,11 +126,12 @@ Disimpan di `agencies.refundPolicy`, dinormalisasi `normalizeRefundPolicy()`.
 
 ## Sumber
 
-- `transaceh-react/src/lib/domain.js:1114-1184` — kebijakan refund.
-- `transaceh-react/src/lib/domain.js:1256-1314` — batal pelanggan.
-- `transaceh-react/src/lib/domain.js:1316-1378` — proses refund.
-- `transaceh-react/src/lib/domain.js:1384-1486` — batal operator.
-- `transaceh-react/src/lib/domain.js:1715-1812` — no-show admin.
+- `transaceh-react/src/lib/domain.js:1810-1877` — kebijakan refund.
+- `transaceh-react/src/lib/domain.js:1962-2080` — batal pelanggan dan proses refund.
+- `transaceh-react/src/lib/domain.js:2081-2189` — batal operator.
+- `transaceh-react/src/lib/domain.js:2421-2518` — no-show admin.
+- `transaceh-react/src/lib/domain.js:1002-1296` — approval maintenance, refund/pindah.
 - `transaceh-react/src/admin/Refunds.jsx` — UI refund.
+- `transaceh-react/src/pages/TicketDetail.jsx:47-52, 119-133, 176-223` — panel maintenance pelanggan.
 
 Lihat [[Alur Ledger dan Settlement]] dan [[Data - payments dan ledger]].

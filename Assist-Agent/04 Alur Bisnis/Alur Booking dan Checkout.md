@@ -6,11 +6,12 @@ tags:
   - type/note
   - area/alur
 status: aktif
-updated: 2026-10-23
+updated: 2026-10-24
 source:
   - transaceh-react/src/pages/Search.jsx
   - transaceh-react/src/lib/checkoutDraft.js
   - transaceh-react/src/pages/Auth.jsx
+  - transaceh-react/src/lib/domain.js
 ---
 
 # Alur Booking dan Checkout
@@ -38,12 +39,14 @@ Wizard 5 langkah di `Search.jsx`:
 - Loop `todayStr(0)` sampai `todayStr(30)`.
 - Menghitung jumlah jadwal `schedReady()` dan `seatsLeft() > 0`.
 - Rute yang disuspend untuk agen tertentu tidak dihitung.
+- Jadwal pada tanggal maintenance tidak dianggap tersedia.
 - Tanggal tanpa armada tetap tampil merah.
 
 ### 3. Armada
 
 - `stepSchedules()` memfilter jadwal pada tanggal terpilih.
 - Menampilkan armada, jam, harga, sisa kursi, fasilitas.
+- Jadwal maintenance tetap tampil sebagai kartu abu-abu, gambar blur, border merah, dan label miring **MAINTENANCE**; kartu tidak bisa dipilih.
 - Memilih jadwal mengisi `bw.scheduleId`.
 
 ### 4. Kursi dan penumpang
@@ -69,6 +72,7 @@ Wizard 5 langkah di `Search.jsx`:
   - Cek bentrok kursi sekali lagi.
   - Buat booking `pending` + payment `pending`.
   - Buka `PaymentModal`.
+- `PaymentModal` memantau booking tiap detik; jika booking dibatalkan atau jadwal masuk maintenance, modal ditutup dan pelanggan diarahkan ke **Tiket Saya**.
 
 ## Urutan data
 
@@ -93,13 +97,16 @@ sequenceDiagram
 - Tamu belum login → draft disimpan, bukan booking.
 - Voucher tidak valid → diskon 0.
 - Kapasitas penuh → tidak bisa memilih kursi baru.
+- Jadwal terkena maintenance setelah booking dibuat → booking pending dibatalkan tanpa refund, modal bayar ditutup.
 
 ## Sumber
 
 - `transaceh-react/src/pages/Search.jsx:19` — label langkah.
+- `transaceh-react/src/pages/Search.jsx:53-90` — `PaymentModal` dan pemantauan maintenance.
 - `transaceh-react/src/pages/Search.jsx:207-234` — kursi dan voucher.
-- `transaceh-react/src/pages/Search.jsx:236-286` — checkout.
-- `transaceh-react/src/pages/Search.jsx:315-476` — langkah 2–5.
+- `transaceh-react/src/pages/Search.jsx:244-293` — checkout.
+- `transaceh-react/src/pages/Search.jsx:315-497` — langkah 2–5 dan kartu maintenance.
+- `transaceh-react/src/lib/domain.js:689-790` — cek maintenance jadwal/armada.
 - `transaceh-react/src/lib/checkoutDraft.js:17-65` — draft tamu.
 - `transaceh-react/src/pages/Auth.jsx:12-30` — resume setelah auth.
 

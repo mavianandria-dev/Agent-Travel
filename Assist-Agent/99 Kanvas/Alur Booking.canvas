@@ -3,7 +3,7 @@
 		{"id":"b-start","type":"text","text":"**Mulai**\n\n`Home` → pilih rute → `Search`\n\nWizard 5 langkah","x":0,"y":100,"width":260,"height":140,"color":"2"},
 		{"id":"b-step1","type":"text","text":"**1. Rute**\n\n`groupRoutes()`\n\nHanya rute aktif dan bookable","x":340,"y":100,"width":260,"height":140},
 		{"id":"b-step2","type":"text","text":"**2. Tanggal**\n\n0–30 hari\n\nHitung jadwal siap + kursi tersisa","x":680,"y":100,"width":260,"height":140},
-		{"id":"b-step3","type":"text","text":"**3. Armada**\n\nPilih jadwal\n\n`bw.scheduleId`","x":1020,"y":100,"width":260,"height":140},
+		{"id":"b-step3","type":"text","text":"**3. Armada**\n\nPilih jadwal\n\n`bw.scheduleId`\n\nKartu maintenance tidak bisa dipilih","x":1020,"y":100,"width":260,"height":160},
 		{"id":"b-step4","type":"text","text":"**4. Kursi**\n\n`CabinGrid`\n\nPenumpang + pickup + voucher","x":1360,"y":100,"width":260,"height":140},
 		{"id":"b-step5","type":"text","text":"**5. Bayar**\n\nRingkasan\n\nGuest → draft login","x":1700,"y":100,"width":260,"height":140},
 		{"id":"b-booking","type":"text","text":"**Booking dibuat**\n\n`status: pending`\n\n`holdExpiry: +15 menit`\n\nPayment `pending`","x":1700,"y":340,"width":260,"height":180,"color":"5"},
@@ -12,7 +12,7 @@
 		{"id":"b-ledger","type":"text","text":"**Ledger**\n\n`status: ditahan`\n\nTiket + jasa + fee","x":680,"y":340,"width":260,"height":180,"color":"6"},
 		{"id":"b-ticket","type":"text","text":"**E-tiket**\n\nQR + manifest\n\nBoarding oleh pengemudi","x":340,"y":340,"width":260,"height":180},
 		{"id":"b-expire","type":"text","text":"**Hold habis**\n\n`cleanupHolds()`\n\nBooking & payment `cancelled`\n\nVoucher kembali","x":1700,"y":600,"width":260,"height":180,"color":"3"},
-		{"id":"b-cancel","type":"text","text":"**Batal / refund**\n\nPelanggan: tiket saja\n\nOperator/no-show: total\n\nLedger `void`","x":1360,"y":600,"width":260,"height":180,"color":"3"},
+		{"id":"b-cancel","type":"text","text":"**Batal / refund**\n\nPelanggan: tiket saja\n\nOperator/no-show/maintenance: total\n\nMaintenance: refund 100% / pindah\n\nLedger `void`","x":1360,"y":600,"width":260,"height":200,"color":"3"},
 		{"id":"b-notes","type":"file","file":"04 Alur Bisnis/Alur Booking dan Checkout.md","x":0,"y":600,"width":300,"height":140},
 		{"id":"b-ledger-note","type":"file","file":"04 Alur Bisnis/Alur Ledger dan Settlement.md","x":340,"y":600,"width":300,"height":140}
 	],

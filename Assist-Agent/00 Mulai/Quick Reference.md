@@ -72,7 +72,7 @@ Data seed akan dibuat ulang saat halaman dimuat. Rute, jadwal, dan booking tetap
 - `service` — jasa agen per kursi
 - `fee` — fee platform (global, default 8%)
 
-Sumber: `transaceh-react/src/lib/domain.js:1099`.
+Sumber: `transaceh-react/src/lib/domain.js:1791`.
 
 ## Dokumentasi terkait
 

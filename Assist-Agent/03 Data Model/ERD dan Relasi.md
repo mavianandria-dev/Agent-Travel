@@ -6,7 +6,7 @@ tags:
   - type/note
   - area/data
 status: aktif
-updated: 2026-10-23
+updated: 2026-10-24
 source:
   - transaceh-react/src/lib/seed.js
   - transaceh-react/src/lib/domain.js
@@ -26,6 +26,11 @@ erDiagram
   ROUTES ||--o{ SCHEDULES : "dijadwalkan"
   VEHICLES ||--o{ SCHEDULES : "dipakai"
   DRIVERS ||--o{ SCHEDULES : "mengemudi"
+  AGENCIES ||--o{ MAINTENANCE_REQUESTS : "mengajukan"
+  VEHICLES ||--o{ MAINTENANCE_REQUESTS : "dirawat"
+  DRIVERS ||--o{ MAINTENANCE_REQUESTS : "mengajukan"
+  SCHEDULES }o--o{ MAINTENANCE_REQUESTS : "terdampak"
+  BOOKINGS }o--o{ MAINTENANCE_REQUESTS : "riwayat"
   SCHEDULES ||--o{ BOOKINGS : "berisi kursi"
   USERS ||--o{ BOOKINGS : "memesan"
   BOOKINGS ||--o{ PAYMENTS : "dibayar"
@@ -49,6 +54,10 @@ erDiagram
 | `schedules` | `vehicles` | `vehicleId` | satu armada banyak jadwal |
 | `schedules` | `drivers` | `driverId`, `backupDriverId` | pengemudi utama + cadangan |
 | `bookings` | `schedules` | `scheduleId` | satu jadwal banyak booking |
+| `bookings` | `schedules` | `maintenanceOriginalScheduleId`, `replacementScheduleId` | riwayat pindah maintenance |
+| `bookings` | `maintenanceRequests` | `maintenanceRequestId` | request yang sedang/terakhir menangani booking |
+| `schedules` | `maintenanceRequests` | `maintenanceRequestId` | request yang memblokir jadwal |
+| `maintenanceRequests` | `vehicles`, `drivers`, `agencies` | `vehicleId`, `driverId`, `agencyId` | pemohon dan armada |
 | `bookings` | `users` | `userEmail` | booking pelanggan; `null` untuk booking driver |
 | `payments` | `bookings` | `bookingId` | satu-satu |
 | `ledger` | `bookings` | `bookingId` | satu-satu |
@@ -61,7 +70,8 @@ erDiagram
 ## Relasi yang mudah putus
 
 - Menghapus `users` tidak menghapus `bookings`, `ledger`, atau `supportTickets`.
-- Menghapus `vehicles` tidak membersihkan `schedules` dan `routes.vehicleIds`.
+- Menghapus `vehicles` tidak membersihkan `schedules`, `routes.vehicleIds`, atau `maintenanceRequests`.
+- Menghapus `schedules` setelah booking dipindahkan maintenance meninggalkan `maintenanceOriginalScheduleId` yang dangling.
 - Menghapus `routes` tidak membersihkan `schedules`, `routeRequests`, atau `ledger`.
 - Mengganti `email` user membuat booking lama tidak lagi cocok dengan `userEmail`.
 - `bookings.fare` adalah snapshot; jika tarif berubah, data lama tetap memakai snapshot.
@@ -69,8 +79,10 @@ erDiagram
 ## Sumber
 
 - `transaceh-react/src/lib/seed.js:74-132` — objek awal.
-- `transaceh-react/src/lib/domain.js:1861-1916` — pembuatan rute dari request.
+- `transaceh-react/src/lib/domain.js:2567-2638` — pembuatan rute dari request.
 - `transaceh-react/src/pages/Search.jsx:263-277` — booking + payment.
-- `transaceh-react/src/lib/domain.js:1186-1194` — ledger.
+- `transaceh-react/src/lib/domain.js:1878-1886` — ledger.
+- `transaceh-react/src/lib/domain.js:833-883` — pembuatan maintenance request.
+- `transaceh-react/src/lib/domain.js:938-1001` — relasi booking ↔ request.
 
 Lihat [[00 Data Model MOC]].

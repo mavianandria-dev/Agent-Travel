@@ -55,6 +55,7 @@ Vault ini membantu memahami **TransAceh**, aplikasi travel antar kota berbasis R
 
 - [[2026-10-23 - Sesi 1]] — sesi pembuatan vault dan pemetaan awal.
 - [[2026-10-24 - Sesi 2]] — validasi tautan dan koreksi perilaku KYC, boarding, settlement.
+- [[2026-10-24 - Sesi 3]] — maintenance armada berbasis tanggal, refund/pindah, dan guard UI.
 - [[Pertanyaan Terbuka]] — hal yang masih perlu diverifikasi.
 - [[Jurnal Belajar]] — indeks sesi belajar berikutnya.
 
@@ -63,7 +64,7 @@ Vault ini membantu memahami **TransAceh**, aplikasi travel antar kota berbasis R
 - Setiap catatan punya frontmatter: `type`, `area`, `tags`, `status`, `updated`, `source`.
 - Hub memakai tag `#type/moc`.
 - Catatan teknis memakai tag area, misalnya `#area/arsitektur`, `#area/data`, `#area/alur`.
-- Tautan sumber ditulis sebagai path relatif dari root project, contoh `transaceh-react/src/lib/domain.js:1099`.
+- Tautan sumber ditulis sebagai path relatif dari root project, contoh `transaceh-react/src/lib/domain.js:1791`.
 
 > [!warning] Dokumen bisa usang
 > Kode berubah lebih cepat daripada catatan. Selalu verifikasi ke file sumber, lalu perbarui catatan jika berbeda.

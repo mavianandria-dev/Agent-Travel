@@ -100,7 +100,7 @@ function CalGrid({ cal, atCur, dates, today, statusFor, onShift, onToggle }) {
           const st = statusFor(key);
           const state = st?.state || 'available';
           const sel = dates.has(key);
-          const blocked = ['full', 'duration', 'selected-conflict', 'blocked'].includes(state);
+          const blocked = ['full', 'duration', 'selected-conflict', 'blocked', 'maintenance'].includes(state);
           const past = state === 'past' || state === 'past-time';
           const isToday = key === today;
           const cls = sel
@@ -337,7 +337,7 @@ export function SchedFormModal({ agId, onDone }) {
             <div className="mt-2 grid grid-cols-2 gap-1.5 text-[10.5px] font-bold text-slate-500">
               <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-emerald-100 ring-1 ring-emerald-300" />Hijau — belum ada jadwal</span>
               <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-amber-100 ring-1 ring-amber-300" />Kuning — masih boleh 1</span>
-              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-red-100 ring-1 ring-red-300" />Merah — penuh/bentrok durasi</span>
+              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-red-100 ring-1 ring-red-300" />Merah — penuh/bentrok/maintenance</span>
               <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-sky-600" />Biru — tanggal dipilih</span>
             </div>
             <div className="text-[11px] text-slate-400 font-medium mt-1.5">Dihitung semua rute untuk armada ini • maksimal 2 keberangkatan aktif per tanggal • jeda 30 menit setelah tiba.</div>

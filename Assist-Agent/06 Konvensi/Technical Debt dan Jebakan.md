@@ -40,9 +40,10 @@ source:
 
 ### 4. Monolit `domain.js`
 
-- ±2.089 baris, banyak domain.
+- ±2.795 baris, banyak domain.
 - Sulit dites dan ditelusuri.
 - Perubahan kecil bisa memengaruhi booking, refund, dan ledger.
+- Alur maintenance menambah tulisan lintas `maintenanceRequests`, `schedules`, `bookings`, `payments`, `ledger`, dan `vehicles`.
 
 ## Prioritas sedang
 
@@ -94,7 +95,12 @@ source:
 - `settleLedger()` tidak mengecek kliring 24 jam; UI hanya menandai `Kliring <24 jam`, tetapi checkbox tetap bisa dipilih.
 - `setScheduleTripStatus('ontrip')` membatalkan booking pending termasuk yang sudah boarding; sedangkan `syncScheduleLifecycle()` bisa mengubah booking boarding menjadi `ontrip`.
 - `Tasks` memfilter `s.driverId` saja; pengemudi cadangan (`backupDriverId`) tidak melihat jadwal di daftar tugas.
-- Ledger `dicairkan` tidak bisa di-void; refund harus manual.
+- `vehicleMaintenanceOn()` menggabungkan request tanggal dengan status armada legacy. Status `maintenance` lama memblokir **semua** tanggal; jangan dipakai untuk maintenance baru.
+- Status `maintenance` tidak lagi ditawarkan untuk armada baru di `VehForm`; opsi hanya muncul jika data lama memang sudah maintenance.
+- `drvOfUser()` (tugas lama) memakai fallback driver pertama agen, sedangkan `driverForUser()` untuk maintenance **tidak**. Jangan menukar keduanya.
+- Keputusan maintenance memakai user login untuk cek agen, tetapi guard tetap client-only dan bisa dilewati lewat DevTools.
+- Pindah armada maintenance memilih kandidat berdasarkan grup arah rute, bukan selalu `routeId` identik; titik jemput ikut disalin. Jika rute satu grup punya pickup berbeda, perlu validasi tambahan.
+- Ledger `dicairkan` tidak bisa di-void; refund harus manual. Pindah armada hanya memindahkan ledger yang belum dicairkan.
 - `localStorage` penuh membuat `DB.save` melempar error; sebagian besar pemanggil tidak menangkapnya.
 - `DB.load` mengembalikan fallback diam-diam jika JSON rusak; korupsi data tidak terlihat.
 - `CabinGrid` memakai layout 28 sel; menambah kursi harus mengubah layout dan kapasitas.
@@ -119,5 +125,9 @@ source:
 - `transaceh-react/src/lib/seed.js`
 - `transaceh-react/src/store/AppContext.jsx`
 - `transaceh-react/src/lib/utils.js:12-16`
+- `transaceh-react/src/lib/domain.js:689-1297` — maintenance armada.
+- `transaceh-react/src/lib/domain.js:1470-1535` — sync maintenance.
+- `transaceh-react/src/agen/VehForm.jsx:311-314, 394-395` — status legacy dan pembersihan cache periode.
+- `transaceh-react/src/driver/Maintenance.jsx` — pengajuan pengemudi.
 
 Lihat [[Pertanyaan Terbuka]].

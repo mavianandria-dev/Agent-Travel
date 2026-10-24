@@ -18,7 +18,7 @@ source:
 
 ## Pembagian tarif
 
-`splitFare(schedule, nSeats, discount, source)` di `domain.js:1099`.
+`splitFare(schedule, nSeats, discount, source)` di `domain.js:1791`.
 
 ```text
 paid    = harga × kursi − diskon
@@ -79,6 +79,8 @@ Aturan:
 - `settleLedger(ids)` hanya mencairkan yang `layak`.
 - `ledgerEligible(e)` butuh 24 jam sejak `arrivedAt`/`releasedAt`.
 - Ledger `dicairkan` tidak bisa dibatalkan otomatis.
+- Pindah armada maintenance memindahkan ledger `ditahan`/`layak` ke booking dan jadwal tujuan; `agencyId`, `driverId`, kursi, dan nominal ikut disesuaikan.
+- Refund maintenance 100% memakai `voidLedger`; ledger yang sudah cair tetap harus manual.
 
 ## Siapa melihat apa
 
@@ -103,14 +105,16 @@ Aturan:
 
 - Refund pelanggan → ledger `void` (jika belum cair).
 - Pembatalan operator/no-show → semua ledger jadwal `void`.
+- Refund maintenance 100% → ledger booking `void`; pindah armada → ledger dipindahkan ke jadwal tujuan.
 - Jika ledger sudah `dicairkan`, refund otomatis ditolak dan harus diselesaikan manual.
 
 ## Sumber
 
-- `transaceh-react/src/lib/domain.js:1099-1112` — `splitFare`.
-- `transaceh-react/src/lib/domain.js:1185-1207` — create/release/void.
-- `transaceh-react/src/lib/domain.js:1813-1827` — settle/eligibility.
-- `transaceh-react/src/lib/domain.js:1656` — release saat arrived.
+- `transaceh-react/src/lib/domain.js:1791-1830` — `splitFare`.
+- `transaceh-react/src/lib/domain.js:1878-1932` — create/release/void.
+- `transaceh-react/src/lib/domain.js:2519-2535` — settle/eligibility.
+- `transaceh-react/src/lib/domain.js:2362` — release saat arrived.
+- `transaceh-react/src/lib/domain.js:1187-1296` — refund dan pindah ledger maintenance.
 - `transaceh-react/src/admin/Settlement.jsx` — UI settlement.
 - `transaceh-react/src/agen/Finance.jsx` — ringkasan agen.
 - `transaceh-react/src/driver/Wallet.jsx` — dompet pengemudi.

@@ -6,7 +6,7 @@ tags:
   - type/journal
   - area/jurnal
 status: aktif
-updated: 2026-10-23
+updated: 2026-10-24
 source: []
 ---
 
@@ -37,6 +37,18 @@ Gunakan daftar ini untuk investigasi berikutnya. Centang jika sudah terjawab dan
 - [ ] Apakah pengemudi cadangan bisa memulai trip?
 - [ ] Apa yang terjadi jika armada dihapus saat masih punya jadwal?
 - [ ] Apakah delay melewati tengah malam ditangani dengan benar?
+
+## Maintenance armada
+
+- [x] Apakah pindah armada perlu konfirmasi agen per tiket? **Tidak.** Pelanggan memilih langsung; domain memvalidasi agensi, arah rute, tanggal, harga, kapasitas, dan armada berbeda. Lihat [[Alur Pembatalan dan Refund]].
+- [x] Berapa batas waktu memilih? **24 jam sebelum berangkat, minimal 2 jam setelah approval, maksimal 30 menit sebelum berangkat.**
+- [x] Apakah jadwal maintenance dianggap `missed`? **Tidak.** `syncScheduleLifecycle()` melewatinya; `syncMaintenanceResolutions()` menutup setelah periode.
+- [x] Apakah pengemudi bisa menyetujui request sendiri? **Tidak.** Hanya agen pemilik agensi atau superadmin.
+- [x] Apakah status armada berubah saat approval? **Tidak.** Armada tetap `aktif`; hanya tanggal yang diblokir.
+- [ ] Apakah kandidat pengganti harus `routeId` identik, bukan hanya grup arah? Saat ini grup arah dipakai dan pickup lama disalin.
+- [ ] Apakah status `maintenance` legacy masih perlu dipertahankan jangka panjang, atau dimigrasikan ke request?
+- [ ] Bagaimana menangani ledger yang sudah `dicairkan` sebelum booking maintenance dipindahkan/direfund?
+- [ ] Apakah refund maintenance perlu prioritas antrean terpisah di admin?
 
 ## AI dan support
 

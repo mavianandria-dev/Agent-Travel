@@ -6,7 +6,7 @@ tags:
   - type/reference
   - area/referensi
 status: aktif
-updated: 2026-10-23
+updated: 2026-10-24
 source: []
 ---
 
@@ -56,11 +56,15 @@ Cek status akun dan status agen induk. `driverParentIssue()` memblokir jika agen
 
 ### Di mana rumus pembagian uang?
 
-`splitFare()` di `domain.js:1099`. Lihat [[Alur Ledger dan Settlement]].
+`splitFare()` di `domain.js:1791`. Lihat [[Alur Ledger dan Settlement]].
 
 ### Kenapa refund hanya sebagian?
 
-Refund pelanggan hanya komponen tiket sesuai kebijakan agen. Refund operator/no-show memakai total. Lihat [[Alur Pembatalan dan Refund]].
+Refund pelanggan hanya komponen tiket sesuai kebijakan agen. Refund operator/no-show/maintenance memakai total. Lihat [[Alur Pembatalan dan Refund]].
+
+### Bagaimana alur maintenance armada?
+
+Pengemudi mengajukan periode maksimal 2 hari dari tab **Maintenance**. Agen menyetujui di **Armada**. Booking lunas memilih refund 100% atau pindah armada lewat detail tiket; booking pending dibatalkan tanpa refund. Lihat [[Alur Pembatalan dan Refund]] dan [[Peran dan Hak Akses]].
 
 ### Di mana API key AI?
 

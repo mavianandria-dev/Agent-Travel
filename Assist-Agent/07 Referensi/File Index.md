@@ -6,14 +6,14 @@ tags:
   - type/reference
   - area/referensi
 status: aktif
-updated: 2026-10-23
+updated: 2026-10-24
 source:
   - transaceh-react/src
 ---
 
 # File Index
 
-Jumlah baris adalah total baris file saat catatan dibuat (2026-10-23).
+Jumlah baris adalah total baris file saat catatan dibuat (2026-10-24).
 
 ## Entry dan store
 
@@ -21,19 +21,19 @@ Jumlah baris adalah total baris file saat catatan dibuat (2026-10-23).
 | :--- | ---: | :--- |
 | `src/main.jsx` | 10 | Entry React |
 | `src/App.jsx` | 106 | Router view, layout, modal |
-| `src/store/AppContext.jsx` | 137 | State global, navigasi, timer |
+| `src/store/AppContext.jsx` | 140 | State global, navigasi, timer |
 
 ## Halaman pelanggan
 
 | File | Baris | Isi |
 | :--- | ---: | :--- |
 | `src/pages/Home.jsx` | 90 | Beranda |
-| `src/pages/Search.jsx` | 496 | Wizard booking + payment |
-| `src/pages/Tickets.jsx` | 85 | Tiket aktif |
-| `src/pages/TicketDetail.jsx` | 172 | Detail e-tiket |
+| `src/pages/Search.jsx` | 515 | Wizard booking + payment |
+| `src/pages/Tickets.jsx` | 90 | Tiket aktif |
+| `src/pages/TicketDetail.jsx` | 246 | Detail e-tiket |
 | `src/pages/History.jsx` | 43 | Riwayat |
 | `src/pages/Profile.jsx` | 76 | Profil |
-| `src/pages/Notif.jsx` | 27 | Notifikasi |
+| `src/pages/Notif.jsx` | 40 | Notifikasi |
 | `src/pages/Help.jsx` | 91 | Pusat bantuan |
 | `src/pages/Auth.jsx` | 234 | Login/daftar/daftar agen |
 
@@ -54,11 +54,12 @@ Jumlah baris adalah total baris file saat catatan dibuat (2026-10-23).
 | `src/agen/Agen.jsx` | 41 | Tab panel |
 | `src/agen/Dashboard.jsx` | 115 | Statistik |
 | `src/agen/Bookings.jsx` | 155 | Pesanan |
-| `src/agen/Schedules.jsx` | 85 | Daftar jadwal |
+| `src/agen/Schedules.jsx` | 86 | Daftar jadwal |
 | `src/agen/SchedForm.jsx` | 359 | Form jadwal |
 | `src/agen/Routes.jsx` | 213 | Rute dan usulan |
-| `src/agen/Fleet.jsx` | 66 | Daftar armada |
-| `src/agen/VehForm.jsx` | 432 | Form armada |
+| `src/agen/Fleet.jsx` | 101 | Daftar armada + antrean maintenance |
+| `src/agen/MaintenanceReview.jsx` | 118 | Review maintenance |
+| `src/agen/VehForm.jsx` | 436 | Form armada |
 | `src/agen/Drivers.jsx` | 136 | Daftar pengemudi |
 | `src/agen/DrvForm.jsx` | 201 | Form pengemudi |
 | `src/agen/Finance.jsx` | 69 | Keuangan |
@@ -69,8 +70,9 @@ Jumlah baris adalah total baris file saat catatan dibuat (2026-10-23).
 
 | File | Baris | Isi |
 | :--- | ---: | :--- |
-| `src/driver/DriverPanel.jsx` | 36 | Tab |
-| `src/driver/Tasks.jsx` | 562 | Tugas |
+| `src/driver/DriverPanel.jsx` | 39 | Tab |
+| `src/driver/Maintenance.jsx` | 172 | Pengajuan/riwayat maintenance |
+| `src/driver/Tasks.jsx` | 574 | Tugas |
 | `src/driver/Trips.jsx` | 31 | Riwayat |
 | `src/driver/Wallet.jsx` | 59 | Dompet |
 | `src/driver/Profile.jsx` | 174 | Profil |
@@ -95,7 +97,7 @@ Jumlah baris adalah total baris file saat catatan dibuat (2026-10-23).
 | File | Baris | Isi |
 | :--- | ---: | :--- |
 | `src/lib/db.js` | 6 | localStorage wrapper |
-| `src/lib/domain.js` | 2.089 | Logika bisnis |
+| `src/lib/domain.js` | 2795 | Logika bisnis |
 | `src/lib/seed.js` | 816 | Seed + migrasi |
 | `src/lib/utils.js` | 52 | Util dan konstanta |
 | `src/lib/geo.js` | 77 | Koordinat dan estimasi |

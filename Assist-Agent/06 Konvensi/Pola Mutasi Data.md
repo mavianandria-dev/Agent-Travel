@@ -6,7 +6,7 @@ tags:
   - type/note
   - area/konvensi
 status: aktif
-updated: 2026-10-23
+updated: 2026-10-24
 source:
   - transaceh-react/src/lib/db.js
   - transaceh-react/src/lib/domain.js
@@ -76,9 +76,10 @@ Tidak ada transaksi. Jika satu `DB.save` gagal, data bisa setengah jadi.
 ## Sumber
 
 - `transaceh-react/src/lib/db.js:1-6`
-- `transaceh-react/src/lib/domain.js:1063-1071` — audit/notify.
-- `transaceh-react/src/lib/domain.js:1186-1207` — ledger.
-- `transaceh-react/src/store/AppContext.jsx:48-56` — refresh.
-- `transaceh-react/src/store/AppContext.jsx:107-118` — storage event.
+- `transaceh-react/src/lib/domain.js:1754-1769` — audit/notify.
+- `transaceh-react/src/lib/domain.js:1878-1896` — ledger.
+- `transaceh-react/src/lib/domain.js:689-1297` — mutasi multi-koleksi maintenance.
+- `transaceh-react/src/store/AppContext.jsx:49-51` — refresh.
+- `transaceh-react/src/store/AppContext.jsx:111-121` — storage event.
 
 Lihat [[Lapisan Data dan Seed]] dan [[Technical Debt dan Jebakan]].

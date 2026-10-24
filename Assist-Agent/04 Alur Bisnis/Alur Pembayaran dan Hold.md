@@ -6,7 +6,7 @@ tags:
   - type/note
   - area/alur
 status: aktif
-updated: 2026-10-23
+updated: 2026-10-24
 source:
   - transaceh-react/src/pages/Search.jsx
   - transaceh-react/src/lib/domain.js
@@ -74,15 +74,16 @@ Di `agen/Bookings.jsx`:
 
 - Menampilkan sisa waktu hold.
 - Jika jadwal dibatalkan/berjalan, modal ditutup dan user diarahkan ke tiket.
+- Jika jadwal masuk maintenance atau booking dibatalkan, modal juga ditutup dan user diarahkan ke tiket.
 - Jika hold habis, pembayaran ditutup.
 
 ## Sumber
 
-- `transaceh-react/src/pages/Search.jsx:53-145` — modal pembayaran.
-- `transaceh-react/src/pages/Search.jsx:275-277` — payment awal.
-- `transaceh-react/src/lib/domain.js:1035-1061` — cleanup hold.
-- `transaceh-react/src/lib/domain.js:1239-1253` — hold dan `canPayBooking`.
-- `transaceh-react/src/lib/domain.js:1186-1194` — ledger.
+- `transaceh-react/src/pages/Search.jsx:53-90` — modal pembayaran dan pemantauan maintenance.
+- `transaceh-react/src/pages/Search.jsx:283-285` — payment awal.
+- `transaceh-react/src/lib/domain.js:1724-1751` — cleanup hold.
+- `transaceh-react/src/lib/domain.js:1933-1961` — hold dan `canPayBooking`.
+- `transaceh-react/src/lib/domain.js:1878-1886` — ledger.
 - `transaceh-react/src/agen/Bookings.jsx:84-106` — verifikasi manual.
 
 Lihat [[Alur Booking dan Checkout]] dan [[Alur Ledger dan Settlement]].

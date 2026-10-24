@@ -2,11 +2,12 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { T } from '@/lib/i18n.js';
 import { todayStr } from '@/lib/utils.js';
 import { initDB } from '@/lib/seed.js';
-import { currentUser, setSession, cleanupHolds, syncScheduleLifecycle, audit, agencyPending } from '@/lib/domain.js';
+import { currentUser, setSession, cleanupHolds, syncScheduleLifecycle, syncMaintenanceResolutions, audit, agencyPending } from '@/lib/domain.js';
 import { clearCheckoutDraft } from '@/lib/checkoutDraft.js';
 
 initDB();
 syncScheduleLifecycle();
+syncMaintenanceResolutions();
 
 const AppCtx = createContext(null);
 export const useApp = () => useContext(AppCtx);
@@ -100,7 +101,9 @@ export function AppProvider({ children }) {
     cleanupHolds();
     const holdIv = setInterval(cleanupHolds, 10000);
     const scheduleIv = setInterval(() => {
-      if (syncScheduleLifecycle()) setTick((x) => x + 1);
+      const lifecycleChanged = syncScheduleLifecycle();
+      const maintenanceChanged = syncMaintenanceResolutions();
+      if (lifecycleChanged || maintenanceChanged) setTick((x) => x + 1);
     }, 60000);
     return () => { clearInterval(holdIv); clearInterval(scheduleIv); };
   }, []);
@@ -109,7 +112,7 @@ export function AppProvider({ children }) {
     const onStorage = (e) => {
       if (!e.key || !e.key.startsWith('at_')) return;
       setTick((x) => x + 1);
-      if (['at_vehicles', 'at_schedules', 'at_bookings'].includes(e.key)) {
+      if (['at_vehicles', 'at_schedules', 'at_bookings', 'at_maintenanceRequests'].includes(e.key)) {
         toast('Data terbaru diterima (sinkron antar pengguna)', 'info');
       }
     };

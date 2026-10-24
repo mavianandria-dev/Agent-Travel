@@ -6,7 +6,7 @@ tags:
   - type/note
   - area/data
 status: aktif
-updated: 2026-10-23
+updated: 2026-10-24
 source:
   - transaceh-react/src/lib/seed.js
   - transaceh-react/src/pages/Search.jsx
@@ -70,7 +70,7 @@ Admin dapat mengaktifkan/menonaktifkan banner di `Master`.
 - `transaceh-react/src/lib/seed.js:125-130` — contoh voucher, review, banner.
 - `transaceh-react/src/pages/Search.jsx:41-51` — `calcDiscount`.
 - `transaceh-react/src/pages/Search.jsx:279-281` — increment `used`.
-- `transaceh-react/src/lib/domain.js:1209-1222` — `restoreVoucher`.
+- `transaceh-react/src/lib/domain.js:1902-1915` — `restoreVoucher`.
 - `transaceh-react/src/pages/TicketDetail.jsx:48-61` — submit review.
 - `transaceh-react/src/admin/Master.jsx:44` — toggle banner.
 

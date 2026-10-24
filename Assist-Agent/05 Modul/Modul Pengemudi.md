@@ -7,10 +7,11 @@ tags:
   - area/modul
   - role/pengemudi
 status: aktif
-updated: 2026-10-23
+updated: 2026-10-24
 source:
   - transaceh-react/src/driver/DriverPanel.jsx
   - transaceh-react/src/driver/Tasks.jsx
+  - transaceh-react/src/driver/Maintenance.jsx
   - transaceh-react/src/driver/Trips.jsx
   - transaceh-react/src/driver/Wallet.jsx
   - transaceh-react/src/driver/Profile.jsx
@@ -23,6 +24,7 @@ source:
 | Tab | Komponen | Fungsi |
 | :--- | :--- | :--- |
 | `driver` | `Tasks` | Tugas hari ini dan mendatang |
+| `driver-maintenance` | `Maintenance` | Ajukan/kelola maintenance armada |
 | `driver-trips` | `Trips` | Riwayat trip |
 | `driver-wallet` | `Wallet` | Pendapatan |
 | `driver-profile` | `Profile` | Data pribadi dan dokumen |
@@ -37,6 +39,15 @@ source:
 - Blokir/buka kursi dengan alasan.
 - Jual tiket offline.
 - Selesaikan trip (`arrived`).
+
+## Maintenance
+
+- Pilih armada yang terhubung sebagai pengemudi utama/cadangan.
+- Periode maksimal 2 hari, alasan minimal 10 karakter.
+- Pratinjau dampak jadwal, booking lunas/pending, refund 100%, dan ketersediaan pengganti.
+- Kirim ke agen; status armada tetap `aktif` sampai approval.
+- Batalkan request yang masih `menunggu`.
+- Riwayat semua status dan ringkasan hasil approval.
 
 ## Trip
 
@@ -66,10 +77,14 @@ source:
 
 ## Sumber
 
-- `transaceh-react/src/driver/DriverPanel.jsx:10-23`
-- `transaceh-react/src/driver/Tasks.jsx:11-16, 200-250`
+- `transaceh-react/src/driver/DriverPanel.jsx:11-26`
+- `transaceh-react/src/driver/Tasks.jsx:11-16, 200-250, 468-546`
+- `transaceh-react/src/driver/Maintenance.jsx:27-172`
 - `transaceh-react/src/driver/Wallet.jsx:15-25`
-- `transaceh-react/src/lib/domain.js:95-107` — `driverParentIssue`.
-- `transaceh-react/src/lib/domain.js:1636-1708` — status trip.
+- `transaceh-react/src/lib/domain.js:95-107` - `driverParentIssue`.
+- `transaceh-react/src/lib/domain.js:433-443` - `driverForUser`.
+- `transaceh-react/src/lib/domain.js:833-883` - `createMaintenanceRequest`.
+- `transaceh-react/src/lib/domain.js:1152-1186` - `cancelMaintenanceRequest`.
+- `transaceh-react/src/lib/domain.js:2341-2420` - status trip.
 
 Lihat [[Alur Pengemudi]] dan [[Alur Boarding dan No-show]].

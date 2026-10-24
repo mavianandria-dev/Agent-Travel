@@ -6,7 +6,7 @@ tags:
   - type/note
   - area/arsitektur
 status: aktif
-updated: 2026-10-23
+updated: 2026-10-24
 source:
   - transaceh-react/src/App.jsx
   - transaceh-react/src/store/AppContext.jsx
@@ -34,7 +34,7 @@ Tidak ada React Router. Navigasi adalah **state string** `view` di `AppContext`.
 | `login`, `register`, `register-agen` | `Auth` | publik |
 | `agen`, `agen-book`, `agen-sched`, `agen-fleet`, `agen-fin` | `Agen` | agen |
 | `agen-pending`, `agen-drvform`, `agen-vehform` | `KycWizard`, `DrvForm`, `VehForm` | agen |
-| `driver`, `driver-trips`, `driver-wallet`, `driver-profile` | `DriverPanel` | pengemudi |
+| `driver`, `driver-maintenance`, `driver-trips`, `driver-wallet`, `driver-profile` | `DriverPanel` | pengemudi |
 | `admin`, `admin-tx`, `admin-ag`, `admin-akun`, `admin-rute`, `admin-settle`, `admin-refund`, `admin-master`, `admin-support` | `Admin` | superadmin |
 
 ## Cara pindah halaman
@@ -74,6 +74,6 @@ Tidak ada React Router. Navigasi adalah **state string** `view` di `AppContext`.
 - `transaceh-react/src/components/Header.jsx:100-111` — tab per peran.
 - `transaceh-react/src/agen/Agen.jsx:13-28` — tab agen.
 - `transaceh-react/src/admin/Admin.jsx:13-27` — tab admin.
-- `transaceh-react/src/driver/DriverPanel.jsx:10-23` — tab driver.
+- `transaceh-react/src/driver/DriverPanel.jsx:11-26` - tab driver.
 
 Lihat [[Peta Layar dan View]].

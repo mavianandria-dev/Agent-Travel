@@ -7,7 +7,7 @@ import {
   LayoutDashboard, LayoutGrid, LifeBuoy, Lock, LogOut, Luggage, Mail, MapPin, MessageCircle, MessagesSquare, MousePointerClick,
   MoveVertical, Navigation, Pencil, Percent, Phone, Plus, Printer, QrCode, ReceiptText, Repeat, Route,
   ScanLine, ScrollText, Search, Send, Settings, ShieldCheck, Square, Star, Ticket, Timer, Trash2,
-  TriangleAlert, Upload, User, UserRound, Users, Wallet, X,
+  TriangleAlert, Upload, User, UserRound, Users, Wallet, Wrench, X,
 } from 'lucide-react';
 import Chart from 'chart.js/auto';
 import { useApp } from '@/store/AppContext.jsx';
@@ -29,7 +29,7 @@ const MAP = {
   'receipt-text': ReceiptText, repeat: Repeat, route: Route, 'scan-line': ScanLine,
   'scroll-text': ScrollText, search: Search, send: Send, settings: Settings, 'shield-check': ShieldCheck,
   square: Square, star: Star, ticket: Ticket, timer: Timer, 'trash-2': Trash2, 'triangle-alert': TriangleAlert,
-  upload: Upload, user: User, 'user-round': UserRound, users: Users, wallet: Wallet, x: X,
+  upload: Upload, user: User, 'user-round': UserRound, users: Users, wallet: Wallet, wrench: Wrench, x: X,
 };
 
 export function Icon({ name, className }) {

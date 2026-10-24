@@ -6,11 +6,13 @@ tags:
   - type/note
   - area/data
 status: aktif
-updated: 2026-10-23
+updated: 2026-10-24
 source:
   - transaceh-react/src/lib/domain.js
   - transaceh-react/src/agen/SchedForm.jsx
   - transaceh-react/src/pages/Search.jsx
+  - transaceh-react/src/agen/MaintenanceReview.jsx
+  - transaceh-react/src/pages/TicketDetail.jsx
 ---
 
 # Data — `schedules` dan `bookings`
@@ -47,6 +49,12 @@ Satu jadwal = satu keberangkatan untuk satu rute, armada, dan pengemudi.
 ### Field pembatalan/review
 
 `cancelReason`, `cancelledBy`, `cancelledAt`, `reviewedAt`, `reviewResult`, `refundPct` (untuk no-show).
+
+### Field maintenance
+
+`maintenanceRequestId`, `maintenanceFrom`, `maintenanceUntil`, `maintenanceStatus` (`active`/`done`), `maintenanceReason`, `maintenanceUpdatedAt`.
+
+Jadwal yang terkena maintenance tetap `status = 'open'` dan `tripStatus = 'scheduled'` selama periode berjalan, tetapi tidak bisa dijual. `scheduleMaintenance()` membaca request yang disetujui atau status armada legacy. Setelah periode lewat, `syncMaintenanceResolutions()` menandai request `selesai`; jadwal lampau yang belum berangkat ditutup dan `tripStatus = 'cancelled'`.
 
 ### Status jadwal
 
@@ -98,6 +106,17 @@ stateDiagram-v2
 
 `refundPct`, `refundAmount`, `refundScope` (`ticket`), `refundStatus` (`none`, `pending`, `diproses`, `done`), `refundPaidAt`, `refundProcessedAt`, `refundProcessedBy`, `cancelReason`, `cancelledBy`, `cancelledAt`.
 
+### Field maintenance booking
+
+- `maintenanceRequestId`, `maintenanceOriginalScheduleId`, `maintenanceFrom`, `maintenanceUntil`.
+- `maintenanceState`: `choice_pending`, `replaced`, `refunded`, atau `cancelled_unpaid`.
+- `maintenanceRefundAmount` — 100% dari `total` saat approval.
+- `maintenanceChoiceDeadline` — batas refund/pindah; dihitung dari keberangkatan efektif.
+- `maintenanceResolvedAt`.
+- `replacementScheduleId`, `replacementAt`, `replacementBy`.
+
+Booking `pending` yang terkena maintenance langsung `cancelled` tanpa refund. Booking `paid` mendapat `choice_pending` bila ada pengganti valid dan akun pelanggan; jika tidak, refund 100% otomatis. Booking yang sudah `replaced` tetap dihitung pada maintenance berikutnya dan boleh diproses lagi.
+
 ### Status booking
 
 ```mermaid
@@ -125,9 +144,11 @@ stateDiagram-v2
 
 - `transaceh-react/src/agen/SchedForm.jsx:223-248` — pembuatan jadwal.
 - `transaceh-react/src/pages/Search.jsx:257-285` — pembuatan booking pelanggan.
-- `transaceh-react/src/lib/domain.js:640-655` — kursi terpakai.
-- `transaceh-react/src/lib/domain.js:1520-1551` — booking driver.
-- `transaceh-react/src/lib/domain.js:1636-1708` — status trip.
-- `transaceh-react/src/lib/domain.js:1035-1061` — cleanup hold.
+- `transaceh-react/src/lib/domain.js:648-655` — kursi terpakai.
+- `transaceh-react/src/lib/domain.js:689-1296` — maintenance armada dan resolusi booking.
+- `transaceh-react/src/lib/domain.js:1470-1535` — sync maintenance.
+- `transaceh-react/src/lib/domain.js:2191-2294` — booking driver dan konfirmasi bayar.
+- `transaceh-react/src/lib/domain.js:2341-2420` — status trip.
+- `transaceh-react/src/lib/domain.js:1724-1751` — cleanup hold.
 
 Lihat [[Alur Booking dan Checkout]] dan [[Alur Siklus Jadwal]].

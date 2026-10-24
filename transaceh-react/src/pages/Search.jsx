@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { schedById, schedReady, takenSeats, seatsLeft, routeById, vehicleById, driverById, vehLayout, schedSeatCap, audit, notify, vehName, splitFare, createLedger, routeBookable, isRouteSuspended, canPayBooking, scheduleIsPast, ensureHoldExpiry, agencyById, routeGroupKey, groupRoutes, routesInRouteGroup } from '@/lib/domain.js';
+import { schedById, schedReady, takenSeats, seatsLeft, routeById, vehicleById, driverById, vehLayout, schedSeatCap, audit, notify, vehName, splitFare, createLedger, routeBookable, isRouteSuspended, canPayBooking, scheduleIsPast, ensureHoldExpiry, agencyById, routeGroupKey, groupRoutes, routesInRouteGroup, scheduleMaintenance, maintenancePeriodLabel } from '@/lib/domain.js';
 import { fmtRp, todayStr, uid, fmtClock } from '@/lib/utils.js';
 import { Icon, CabinGrid, fmtDate } from '@/components/ui.jsx';
 import { HOME_PICKUP, pickupOptions } from '@/lib/pickups.js';
@@ -58,6 +58,14 @@ export function PaymentModal({ booking, onDone }) {
     const iv = setInterval(() => {
       const b = DB.load('bookings', []).find((x) => x.id === booking.id);
       if (!b) { clearInterval(iv); return; }
+      if (b.status === 'cancelled' || b.maintenanceState) {
+        clearInterval(iv);
+        closeModal();
+        toast(b.maintenanceState ? 'Jadwal maintenance — booking dibatalkan sesuai kebijakan.' : 'Pembayaran ditutup — booking sudah dibatalkan.', 'err');
+        refresh();
+        go('tickets');
+        return;
+      }
       const s = schedById(b.scheduleId);
       if (!s || s.status === 'cancelled' || ['ontrip', 'arrived', 'missed', 'cancelled'].includes(s.tripStatus)) {
         clearInterval(iv);
@@ -362,17 +370,28 @@ export default function Search() {
           const left = seatsLeft(s.id);
           const sel = bw.scheduleId === s.id;
           const ready = schedReady(s);
-          const selectable = ready && left > 0;
-          const why = !ready ? ((v && v.status !== 'aktif') ? 'Armada maintenance' : (dr && dr.status !== 'aktif') ? 'Pengemudi nonaktif' : 'Jadwal ditutup') : '';
+          const mt = scheduleMaintenance(s);
+          const selectable = ready && left > 0 && !mt;
+          const why = mt ? 'Armada maintenance' : !ready ? ((v && v.status !== 'aktif') ? 'Armada maintenance' : (dr && dr.status !== 'aktif') ? 'Pengemudi nonaktif' : 'Jadwal ditutup') : '';
+          const cardCls = mt
+            ? 'opacity-90 border-red-300 bg-slate-100 cursor-not-allowed'
+            : (selectable ? 'cursor-pointer card-hover active:scale-[.99]' : 'opacity-70');
           return (
-            <div key={s.id} data-schedule-id={s.id} aria-disabled={!selectable} onClick={() => { if (selectable) setBw({ ...bw, routeId: s.routeId, scheduleId: s.id, seats: [], passengers: [], pickup: '', pickupAddr: '', pickupCoords: '', voucher: '', discount: 0 }); }} className={(selectable ? 'cursor-pointer card-hover active:scale-[.99]' : 'opacity-70') + ' rounded-2xl border-2 p-3 sm:p-3.5 flex flex-col xs:flex-row sm:flex-row gap-3 transition ' + (sel && selectable ? 'border-sky-500 shadow-lg bg-sky-50/50' : 'border-slate-100 hover:border-sky-200 bg-white')}>
-              <img src={v.photo} onError={(e) => { e.currentTarget.src = 'https://picsum.photos/seed/' + v.id + '/400/250'; }} className="w-full h-36 xs:w-28 xs:h-24 sm:w-40 sm:h-28 object-cover rounded-2xl shrink-0" loading="lazy" alt={vehName(v)} />
-              <div className="flex-1 min-w-0"><div className="flex items-center gap-2 flex-wrap"><span className="font-extrabold text-[15px]">{vehName(v)}</span><span className="badge bg-slate-100 text-slate-600">{v.plate}</span>{ag ? <span className="badge bg-indigo-50 text-indigo-700">{ag.name}</span> : null}{routeById(s.routeId)?.homePickup !== false ? <span className="badge bg-green-100 text-green-700">Jemput rumah</span> : null}{s.tripStatus === 'scheduled' && s.delayUntil && new Date(s.delayUntil).getTime() > Date.now() ? <span className="badge bg-amber-100 text-amber-700">Delay {s.delayMinutes} mnt • {fmtClock(s.delayUntil)}</span> : null}{!ready ? <span className="badge bg-amber-100 text-amber-700">{why}</span> : left <= 2 && left > 0 ? <span className="badge bg-red-100 text-red-700">Sisa {left}</span> : null}{ready && left === 0 ? <span className="badge bg-red-500 text-white">PENUH</span> : null}</div>
+            <div key={s.id} data-schedule-id={s.id} aria-disabled={!selectable} onClick={() => {
+              if (selectable) setBw({ ...bw, routeId: s.routeId, scheduleId: s.id, seats: [], passengers: [], pickup: '', pickupAddr: '', pickupCoords: '', voucher: '', discount: 0 });
+              else if (mt) toast('Armada maintenance pada tanggal ini — pilih jadwal lain.', 'warn');
+            }} className={cardCls + ' rounded-2xl border-2 p-3 sm:p-3.5 flex flex-col xs:flex-row sm:flex-row gap-3 transition ' + (sel && selectable ? 'border-sky-500 shadow-lg bg-sky-50/50' : mt ? 'border-red-300' : 'border-slate-100 hover:border-sky-200 bg-white')}>
+              <div className="relative shrink-0 overflow-hidden rounded-2xl">
+                <img src={v.photo} onError={(e) => { e.currentTarget.src = 'https://picsum.photos/seed/' + v.id + '/400/250'; }} className={'w-full h-36 xs:w-28 xs:h-24 sm:w-40 sm:h-28 object-cover ' + (mt ? 'grayscale blur-[2px]' : '')} loading="lazy" alt={vehName(v)} />
+                {mt ? <div className="absolute inset-0 bg-slate-900/10"></div> : null}
+              </div>
+              <div className="flex-1 min-w-0"><div className="flex items-center gap-2 flex-wrap"><span className="font-extrabold text-[15px]">{vehName(v)}</span><span className="badge bg-slate-100 text-slate-600">{v.plate}</span>{ag ? <span className="badge bg-indigo-50 text-indigo-700">{ag.name}</span> : null}{routeById(s.routeId)?.homePickup !== false ? <span className="badge bg-green-100 text-green-700">Jemput rumah</span> : null}{s.tripStatus === 'scheduled' && s.delayUntil && new Date(s.delayUntil).getTime() > Date.now() ? <span className="badge bg-amber-100 text-amber-700">Delay {s.delayMinutes} mnt • {fmtClock(s.delayUntil)}</span> : null}{mt ? <span className="badge bg-red-100 text-red-700 italic">MAINTENANCE</span> : !ready ? <span className="badge bg-amber-100 text-amber-700">{why}</span> : left <= 2 && left > 0 ? <span className="badge bg-red-100 text-red-700">Sisa {left}</span> : null}{!mt && ready && left === 0 ? <span className="badge bg-red-500 text-white">PENUH</span> : null}</div>
                 <div className="text-[12.5px] font-bold text-sky-700 mt-1 flex items-center gap-2"><Icon name="clock" className="w-3.5 h-3.5" />Berangkat {s.time} WIB • <Icon name="user" className="w-3.5 h-3.5" />{dr.name} ★{dr.rating}</div>
+                {mt ? <div className="mt-2 text-[12px] font-semibold text-red-800 bg-red-50 border border-red-200 rounded-xl px-2.5 py-1.5">Tidak dapat dipesan • {mt.legacy ? 'Status armada sedang maintenance.' : 'Maintenance ' + maintenancePeriodLabel(mt) + '.'} Pilih tanggal/jadwal lain.</div> : null}
                 <div className="flex flex-wrap gap-1.5 mt-2">{(v.facilities || []).map((f) => (<span key={f} className="badge bg-slate-100 text-slate-600 !font-semibold"><Icon name="check" className="w-3 h-3" />{f}</span>))}</div>
                 <div className="flex items-center justify-between mt-2.5"><div className="font-extrabold text-[17px] text-[#0b2447]">{fmtRp(s.price)}<span className="text-[11px] font-semibold text-slate-400">/kursi</span></div>
-                  <span className={'badge ' + (left > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700')}>{left} kursi tersisa</span></div></div>
-              <div className="hidden sm:flex items-center"><div className={'w-6 h-6 rounded-full flex items-center justify-center ' + (sel ? 'bg-sky-500 text-white' : 'border-2 border-slate-200 text-transparent')}><Icon name="check" className="w-4 h-4" /></div></div>
+                  <span className={'badge ' + (mt ? 'bg-red-100 text-red-700' : left > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700')}>{mt ? 'Tutup' : left + ' kursi tersisa'}</span></div></div>
+              <div className="hidden sm:flex items-center"><div className={'w-6 h-6 rounded-full flex items-center justify-center ' + (sel && selectable ? 'bg-sky-500 text-white' : 'border-2 border-slate-200 text-transparent')}><Icon name="check" className="w-4 h-4" /></div></div>
             </div>
           );
         })}</div>

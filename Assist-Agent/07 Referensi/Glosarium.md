@@ -6,7 +6,7 @@ tags:
   - type/reference
   - area/referensi
 status: aktif
-updated: 2026-10-23
+updated: 2026-10-24
 source: []
 ---
 
@@ -41,6 +41,11 @@ source: []
 | **SSE** | Server-Sent Events, streaming jawaban AI |
 | **RTO** | Rute/armada yang siap dijual |
 | **Grace period** | Toleransi 3 jam sebelum jadwal dianggap terlewat |
+| **Maintenance armada** | Periode armada tidak dipakai, diajukan pengemudi dan disetujui agen, maksimal 2 hari |
+| **Request maintenance** | Pengajuan periode maintenance dengan status `menunggu`, `disetujui`, `ditolak`, `dibatalkan`, `selesai` |
+| **Armada pengganti** | Jadwal lain dengan agensi, arah rute, tanggal, dan harga sama yang dipakai untuk memindahkan booking |
+| **Choice pending** | Booking lunas yang menunggu pilihan refund 100% atau pindah armada |
+| **Legacy maintenance** | `vehicles.status = 'maintenance'` lama yang memblokir semua tanggal; bukan alur baru |
 
 ## Istilah status
 
@@ -54,6 +59,13 @@ source: []
 | `ontrip` | trip | Sedang berjalan |
 | `arrived` | trip | Sudah tiba |
 | `missed` | trip | Terlewat |
+| `choice_pending` | maintenance booking | Menunggu pilihan refund/pindah |
+| `replaced` | maintenance booking | Sudah pindah armada |
+| `refunded` | maintenance booking | Sudah direfund 100% |
+| `cancelled_unpaid` | maintenance booking | Booking pending dibatalkan tanpa refund |
+| `menunggu` | maintenance request | Menunggu review agen |
+| `disetujui` | maintenance request | Periode aktif |
+| `selesai` | maintenance request | Periode selesai |
 | `ditahan` | ledger | Dana ditahan |
 | `layak` | ledger | Siap dicairkan |
 | `dicairkan` | ledger | Sudah dicairkan |

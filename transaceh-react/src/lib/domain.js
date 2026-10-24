@@ -428,6 +428,14 @@ export function fleetAvailable(agencyId, { includeUsed = false } = {}){
 
 export function driverById(id){ return DB.load('drivers',[]).find(d=>d.id===id); }
 
+/** Record pengemudi yang tertaut ke akun login. Tidak memakai fallback agen
+ *  supaya akun agen/admin tidak dianggap sebagai pengemudi. */
+export function driverForUser(u){
+  if(!u||!u.email) return null;
+  const email=String(u.email).toLowerCase();
+  return DB.load('drivers',[]).find(d=>d.userEmail&&String(d.userEmail).toLowerCase()===email)||null;
+}
+
 /* Identitas pengemudi tidak memakai nama sebagai kunci. Nama boleh sama,
    selama NIK/SIM/HP berbeda. */
 const identityDigits = (v) => String(v == null ? '' : v).replace(/\D/g, '');
@@ -673,12 +681,620 @@ export function schedReady(s){
   if(!s||s.status!=='open') return false;
   if(['ontrip','arrived','missed','cancelled'].includes(s.tripStatus)) return false;
   if(scheduleIsPast(s,0)) return false;
+  if(scheduleMaintenance(s)) return false;
   const v=s.vehicleId?vehicleById(s.vehicleId):null, d=s.driverId?driverById(s.driverId):null;
   return (!v||v.status==='aktif')&&(!d||d.status==='aktif');
 }
 
-/* Fallback nama lama: hanya aman bila namanya tunggal. Nama kembar harus
-   diselesaikan lewat driverId / NIK / SIM / HP. */
+/* ---------- Maintenance armada berbasis periode ----------
+   Pengajuan dibuat pengemudi, disetujui agen. Periode hanya memblokir
+   jadwal pada tanggal tersebut; tanggal lain tetap normal. */
+export const MAINTENANCE_MAX_DAYS = 2;
+const MAINT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+const maintKey = (v) => String(v || '').slice(0, 10);
+const maintMs = (v) => {
+  const k = maintKey(v);
+  return /^\d{4}-\d{2}-\d{2}$/.test(k) ? new Date(k + 'T00:00:00').getTime() : NaN;
+};
+export function maintenanceDateLabel(value) {
+  const k = maintKey(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(k)) return '-';
+  const [y, m, d] = k.split('-');
+  return Number(d) + ' ' + (MAINT_MONTHS[Number(m) - 1] || m) + ' ' + y;
+}
+
+export function maintenancePeriodLabel(req) {
+  if (!req) return '';
+  if (!req.from && !req.until) return 'Maintenance';
+  return req.from === req.until
+    ? maintenanceDateLabel(req.from)
+    : maintenanceDateLabel(req.from) + ' – ' + maintenanceDateLabel(req.until);
+}
+
+export function maintenanceRequestStatusLabel(status) {
+  return ({
+    menunggu: 'Menunggu persetujuan',
+    disetujui: 'Disetujui',
+    ditolak: 'Ditolak',
+    dibatalkan: 'Dibatalkan',
+    selesai: 'Selesai',
+  })[status] || status || '-';
+}
+
+export function maintenanceRequestById(id) {
+  return DB.load('maintenanceRequests', []).find((r) => r.id === id) || null;
+}
+
+export function maintenanceRequestsForVehicle(vehicleId) {
+  return DB.load('maintenanceRequests', [])
+    .filter((r) => r.vehicleId === vehicleId)
+    .sort((a, b) => String(b.requestedAt || '').localeCompare(String(a.requestedAt || '')));
+}
+
+export function maintenanceRequestsForAgency(agencyId) {
+  return DB.load('maintenanceRequests', [])
+    .filter((r) => r.agencyId === agencyId)
+    .sort((a, b) => String(b.requestedAt || '').localeCompare(String(a.requestedAt || '')));
+}
+
+export function maintenanceRequestsForDriver(driverId, vehicleIds = []) {
+  const vids = new Set(vehicleIds || []);
+  return DB.load('maintenanceRequests', [])
+    .filter((r) => r.driverId === driverId || vids.has(r.vehicleId))
+    .sort((a, b) => String(b.requestedAt || '').localeCompare(String(a.requestedAt || '')));
+}
+
+/** Request maintenance yang aktif pada satu tanggal untuk kendaraan. */
+export function vehicleMaintenanceOn(vehicleId, date) {
+  const d = maintKey(date);
+  if (!vehicleId || !d) return null;
+  const hit = DB.load('maintenanceRequests', []).find(
+    (r) => r.vehicleId === vehicleId && r.status === 'disetujui' && r.from <= d && r.until >= d
+  );
+  if (hit) return hit;
+  const v = vehicleById(vehicleId);
+  if (!v || v.status !== 'maintenance') return null;
+  /* Status legacy memblokir semua tanggal; field periode lama diabaikan. */
+  return {
+    id: 'LEGACY-' + v.id, legacy: true, vehicleId, from: v.maintenanceFrom || '', until: v.maintenanceUntil || '',
+    status: 'disetujui', reason: 'Status armada sedang maintenance',
+  };
+}
+
+/** Maintenance yang berlaku untuk satu jadwal (period-aware). */
+export function scheduleMaintenance(s) {
+  if (!s) return null;
+  if (s.maintenanceRequestId) {
+    const r = maintenanceRequestById(s.maintenanceRequestId);
+    if (r && r.status === 'disetujui' && (!r.from || (s.date >= r.from && s.date <= r.until))) return r;
+  }
+  return vehicleMaintenanceOn(s.vehicleId, s.date);
+}
+
+export function vehicleMaintenancePeriods(vehicleId) {
+  return DB.load('maintenanceRequests', [])
+    .filter((r) => r.vehicleId === vehicleId && r.status === 'disetujui' && r.until >= todayStr(0))
+    .sort((a, b) => String(a.from).localeCompare(String(b.from)));
+}
+
+/** Ringkasan label maintenance untuk kartu armada. */
+export function vehicleMaintenanceLabel(v) {
+  if (!v) return '';
+  if (v.status === 'maintenance') return 'Maintenance';
+  const list = vehicleMaintenancePeriods(v.id);
+  const today = todayStr(0);
+  const hit = list.find((r) => r.from <= today && r.until >= today) || list[0];
+  return hit ? maintenancePeriodLabel(hit) : '';
+}
+
+/** Jadwal yang akan terkena dampak periode maintenance (trip berjalan tidak diikutkan). */
+export function maintenanceAffectedSchedules({ vehicleId, from, until }) {
+  const f = maintKey(from), t = maintKey(until);
+  if (!vehicleId || !f || !t) return [];
+  return DB.load('schedules', [])
+    .filter((s) => s.vehicleId === vehicleId
+      && s.date >= f && s.date <= t
+      && s.status !== 'cancelled'
+      && !['cancelled', 'missed', 'arrived', 'ontrip'].includes(s.tripStatus || 'scheduled')
+      && !scheduleIsPast(s, 0))
+    .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+}
+
+/** Dampak nyata sebelum/sesudah approval, dipakai halaman driver & agen. */
+export function maintenanceImpact({ vehicleId, from, until }) {
+  const f = maintKey(from), t = maintKey(until);
+  const schedules = maintenanceAffectedSchedules({ vehicleId, from: f, until: t });
+  const ids = new Set(schedules.map((s) => s.id));
+  const allBookings = DB.load('bookings', []);
+  /* Booking yang pernah dipindahkan tetap dihitung: jadwal barunya bisa
+     terkena maintenance berikutnya. Booking yang sudah refund/batal berstatus
+     cancelled sehingga otomatis tidak ikut. */
+  const paidBookings = allBookings.filter((b) => ids.has(b.scheduleId) && b.status === 'paid' && !b.boarded);
+  const pendingBookings = allBookings.filter((b) => ids.has(b.scheduleId) && b.status === 'pending');
+  const refundTotal = paidBookings.reduce((n, b) => n + Math.max(0, Number(b.total) || 0), 0);
+  const replacementCount = paidBookings.filter((b) => maintenanceReplacementCandidatesForBooking(b).length > 0).length;
+  return {
+    from: f, until: t, schedules, paidBookings, pendingBookings,
+    paid: paidBookings.length, pending: pendingBookings.length,
+    refundTotal, replacementCount,
+  };
+}
+
+export function maintenanceRequestImpact(req) {
+  if (!req) return null;
+  if (req.status === 'menunggu') return maintenanceImpact(req);
+  return {
+    ...maintenanceImpact(req),
+    ...(req.summary || {}),
+  };
+}
+
+/** Pengemudi mengajukan maintenance untuk armadanya sendiri (utama/pengganti). */
+export function createMaintenanceRequest({ vehicleId, from, until, reason } = {}) {
+  const u = currentUser();
+  if (!u || u.role !== 'pengemudi') return { ok: false, msg: 'Hanya pengemudi yang bisa mengajukan maintenance' };
+  const me = driverForUser(u);
+  if (!me) return { ok: false, msg: 'Data pengemudi tidak ditemukan' };
+  const v = vehicleById(vehicleId);
+  if (!v || v.agencyId !== me.agencyId) return { ok: false, msg: 'Armada tidak ditemukan di agensi Anda' };
+  const main = driverForVehicle(v), backup = backupDriverForVehicle(v);
+  if (!sameDriver(me, main) && !sameDriver(me, backup)) {
+    return { ok: false, msg: 'Anda bukan pengemudi armada ini' };
+  }
+
+  const f = maintKey(from), t = maintKey(until);
+  if (!Number.isFinite(maintMs(f)) || !Number.isFinite(maintMs(t))) return { ok: false, msg: 'Tanggal maintenance tidak valid' };
+  if (f > t) return { ok: false, msg: 'Tanggal selesai harus setelah tanggal mulai' };
+  if (f < todayStr(0)) return { ok: false, msg: 'Tanggal maintenance sudah lewat' };
+  const dayCount = Math.round((maintMs(t) - maintMs(f)) / 86400000) + 1;
+  if (dayCount > MAINTENANCE_MAX_DAYS) return { ok: false, msg: 'Maintenance maksimal ' + MAINTENANCE_MAX_DAYS + ' hari per pengajuan' };
+  const why = String(reason || '').trim();
+  if (why.length < 10) return { ok: false, msg: 'Alasan maintenance wajib diisi minimal 10 karakter' };
+  if (vehicleMaintenanceOn(vehicleId, f) || vehicleMaintenanceOn(vehicleId, t)) {
+    return { ok: false, msg: 'Armada sudah memiliki maintenance pada tanggal tersebut' };
+  }
+
+  const requests = DB.load('maintenanceRequests', []);
+  const overlap = requests.find((r) => r.vehicleId === vehicleId
+    && ['menunggu', 'disetujui'].includes(r.status)
+    && !(r.until < f || r.from > t));
+  if (overlap) return { ok: false, msg: 'Sudah ada pengajuan maintenance yang beririsan pada armada ini' };
+
+  const impact = maintenanceImpact({ vehicleId, from: f, until: t });
+  const req = {
+    id: uid('MT'), agencyId: v.agencyId, vehicleId, vehicleName: vehName(v), vehiclePlate: v.plate || '',
+    driverId: me.id, driverName: me.name, from: f, until: t, reason: why,
+    status: 'menunggu', requestedAt: new Date().toISOString(), requestedBy: u.email,
+    decidedAt: null, decidedBy: null, decisionNote: '',
+    affectedScheduleIds: [], summary: null,
+  };
+  requests.unshift(req);
+  DB.save('maintenanceRequests', requests);
+
+  DB.load('users', [])
+    .filter((x) => x.role === 'agen' && x.agencyId === v.agencyId)
+    .forEach((x) => notify(x.email, 'Pengajuan maintenance armada',
+      me.name + ' mengajukan maintenance ' + vehName(v) + ' (' + v.plate + ') ' + maintenancePeriodLabel(req) + '. Alasan: ' + why + '.', 'app', { requestId: req.id, kind: 'maintenance_request' }));
+  audit('maintenance_request', req.id + ' • ' + vehName(v) + ' ' + maintenancePeriodLabel(req) + ' • ' + me.name);
+  return { ok: true, request: req, impact };
+}
+
+/** Batas memilih refund / pindah armada. Minimal 2 jam sejak approval,
+ *  tetapi tidak melewati 30 menit sebelum keberangkatan. */
+export function maintenanceDeadlineFor(s, now = Date.now()) {
+  if (!s) return new Date(now + 24 * 3600 * 1000).toISOString();
+  const dep = scheduleEffectiveDepartureMs(s);
+  let deadline = Number.isFinite(dep) ? dep - 24 * 3600 * 1000 : now + 24 * 3600 * 1000;
+  if (deadline < now + 2 * 3600 * 1000) deadline = now + 2 * 3600 * 1000;
+  if (Number.isFinite(dep) && deadline > dep - 30 * 60 * 1000) deadline = dep - 30 * 60 * 1000;
+  // Jika batas 30 menit sebelum berangkat sudah lewat, approval langsung refund.
+  return new Date(deadline).toISOString();
+}
+
+export function maintenanceDeadlineLabel(value) {
+  const ms = value ? new Date(value).getTime() : NaN;
+  return Number.isFinite(ms)
+    ? new Date(ms).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+    : '-';
+}
+
+function maintenanceCandidateLabel(t) {
+  if (!t) return '';
+  const v = vehicleById(t.vehicleId);
+  return vehName(v) + (v && v.plate ? ' (' + v.plate + ')' : '') + ' • ' + (t.time || '-') + ' WIB';
+}
+
+/** Armada pengganti valid: agensi, arah rute, tanggal, dan harga sama,
+ *  kursi cukup, bukan armada yang maintenance. */
+export function maintenanceReplacementCandidatesForBooking(bookingOrId) {
+  const b = typeof bookingOrId === 'string'
+    ? DB.load('bookings', []).find((x) => x.id === bookingOrId)
+    : bookingOrId;
+  if (!b || b.status !== 'paid') return [];
+  /* Pencarian pengganti selalu mengikuti jadwal booking saat ini. Untuk booking
+     yang pernah dipindahkan, jadwal lama hanya dipakai sebagai riwayat tampilan. */
+  const orig = schedById(b.scheduleId);
+  if (!orig) return [];
+  const origRoute = routeById(orig.routeId);
+  const key = routeGroupKey(origRoute);
+  if (!key || key === '|') return [];
+  const need = Math.max(1, (b.seats || []).length);
+  return DB.load('schedules', [])
+    .filter((t) => t.id !== orig.id
+      && t.vehicleId !== orig.vehicleId
+      && t.agencyId === orig.agencyId
+      && t.date === orig.date
+      && t.status === 'open'
+      && (t.tripStatus || 'scheduled') === 'scheduled'
+      && Number(t.price) === Number(orig.price)
+      && routeGroupKey(routeById(t.routeId)) === key
+      && !isRouteSuspended(routeById(t.routeId), t.agencyId)
+      && !scheduleMaintenance(t)
+      && schedReady(t)
+      && seatsLeft(t.id) >= need)
+    .sort((a, b2) => String(a.time).localeCompare(String(b2.time)) || String(a.vehicleId).localeCompare(String(b2.vehicleId)));
+}
+
+export function maintenanceBookingInfo(b) {
+  if (!b) return null;
+  const request = b.maintenanceRequestId ? maintenanceRequestById(b.maintenanceRequestId) : null;
+  const current = schedById(b.scheduleId);
+  const fallbackRequest = request || scheduleMaintenance(current);
+  if (!b.maintenanceState && !fallbackRequest) return null;
+  const original = schedById(b.maintenanceOriginalScheduleId || b.scheduleId) || current;
+  return {
+    request: fallbackRequest,
+    state: b.maintenanceState || 'active',
+    originalSchedule: original,
+    currentSchedule: current,
+    deadline: b.maintenanceChoiceDeadline || null,
+    candidates: b.maintenanceState === 'choice_pending' ? maintenanceReplacementCandidatesForBooking(b) : [],
+    refundAmount: Math.max(0, Number(b.maintenanceRefundAmount ?? b.total) || 0),
+  };
+}
+
+function applyMaintenanceCancelPending(b, payments, nowIso) {
+  b.status = 'cancelled';
+  b.tripStatus = 'cancelled';
+  b.refundPct = 0;
+  b.refundAmount = 0;
+  b.refundScope = 'total';
+  b.refundStatus = 'none';
+  b.refundPaidAt = null;
+  b.cancelReason = 'Jadwal maintenance armada (booking belum dibayar)';
+  b.cancelledBy = 'sistem';
+  b.cancelledAt = nowIso;
+  b.maintenanceState = 'cancelled_unpaid';
+  b.maintenanceResolvedAt = nowIso;
+  restoreVoucher(b);
+  updatePaymentRefund(payments, b, { refund: 0, pct: 0, scope: 'total', status: 'cancelled' });
+}
+
+function applyMaintenanceRefundRecord(b, payments, ledger, reason, by, nowIso) {
+  const wasPaid = b.status === 'paid';
+  const refund = wasPaid ? Math.max(0, Number(b.total) || 0) : 0;
+  b.status = 'cancelled';
+  b.tripStatus = 'cancelled';
+  b.refundPct = wasPaid ? 100 : 0;
+  b.refundAmount = refund;
+  b.refundScope = 'total';
+  b.refundStatus = refund > 0 ? 'pending' : 'none';
+  b.refundPaidAt = null;
+  b.cancelReason = 'Maintenance armada' + (reason ? ': ' + reason : '');
+  b.cancelledBy = by;
+  b.cancelledAt = nowIso;
+  b.maintenanceState = 'refunded';
+  b.maintenanceResolvedAt = nowIso;
+  b.maintenanceChoiceDeadline = null;
+  restoreVoucher(b);
+  updatePaymentRefund(payments, b, { refund, pct: wasPaid ? 100 : 0, scope: 'total', status: wasPaid ? undefined : 'cancelled' });
+  (ledger || []).forEach((e) => {
+    if (e.bookingId === b.id && e.status !== 'dicairkan') {
+      e.status = 'void';
+      e.voidedAt = nowIso;
+    }
+  });
+  return refund;
+}
+
+/** Agen menyetujui / menolak pengajuan maintenance. Approval hanya mengubah
+ *  jadwal pada periode; jadwal di luar periode tetap normal. */
+export function decideMaintenanceRequest(requestId, approve, { note = '', by = 'agen' } = {}) {
+  const u = currentUser();
+  if (u && !['agen', 'superadmin'].includes(u.role)) return { ok: false, msg: 'Hanya agen yang bisa memutuskan maintenance' };
+  const requests = DB.load('maintenanceRequests', []);
+  const req = requests.find((r) => r.id === requestId);
+  if (!req) return { ok: false, msg: 'Pengajuan maintenance tidak ditemukan' };
+  if (req.status !== 'menunggu') return { ok: false, msg: 'Pengajuan sudah diputuskan' };
+  if (approve && req.until < todayStr(0)) return { ok: false, msg: 'Periode maintenance sudah lewat — tolak pengajuan ini' };
+  if (u && u.role === 'agen' && u.agencyId !== req.agencyId) return { ok: false, msg: 'Pengajuan milik agensi lain' };
+
+  const nowIso = new Date().toISOString();
+  const driver = driverById(req.driverId);
+  if (!approve) {
+    req.status = 'ditolak';
+    req.decidedAt = nowIso;
+    req.decidedBy = u ? u.email : by;
+    req.decisionNote = String(note || '').trim() || 'Tidak disetujui agen';
+    DB.save('maintenanceRequests', requests);
+    if (driver && driver.userEmail) {
+      notify(driver.userEmail, 'Pengajuan maintenance ditolak',
+        'Pengajuan maintenance ' + req.vehicleName + ' ' + maintenancePeriodLabel(req) + ' ditolak. Catatan: ' + req.decisionNote, 'app', { requestId: req.id, kind: 'maintenance_request' });
+    }
+    audit('maintenance_rejected', req.id + ' • ' + req.vehicleName + ' • ' + req.decisionNote);
+    return { ok: true, request: req };
+  }
+
+  const v = vehicleById(req.vehicleId);
+  if (!v || v.agencyId !== req.agencyId) return { ok: false, msg: 'Armada pengajuan tidak ditemukan' };
+  const overlap = requests.find((r) => r.id !== req.id && r.vehicleId === req.vehicleId
+    && ['menunggu', 'disetujui'].includes(r.status) && !(r.until < req.from || r.from > req.until));
+  if (overlap) return { ok: false, msg: 'Sudah ada maintenance disetujui pada periode yang sama' };
+
+  const schedules = DB.load('schedules', []);
+  const bookings = DB.load('bookings', []);
+  const payments = DB.load('payments', []);
+  const ledger = DB.load('ledger', []);
+  const affectedIds = new Set(maintenanceAffectedSchedules({ vehicleId: req.vehicleId, from: req.from, until: req.until }).map((s) => s.id));
+  const affected = schedules.filter((s) => affectedIds.has(s.id));
+  const rp = (n) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(Number(n) || 0);
+  let paidCount = 0, pendingCount = 0, refundedCount = 0, choiceCount = 0, totalRefund = 0, replacementOffers = 0;
+
+  affected.forEach((s) => {
+    s.maintenanceRequestId = req.id;
+    s.maintenanceFrom = req.from;
+    s.maintenanceUntil = req.until;
+    s.maintenanceStatus = 'active';
+    s.maintenanceReason = req.reason;
+    s.maintenanceUpdatedAt = nowIso;
+  });
+
+  affected.forEach((s) => {
+    bookings.forEach((b) => {
+      if (b.scheduleId !== s.id || b.boarded) return;
+      if (b.status === 'pending') {
+        b.maintenanceRequestId = req.id;
+        b.maintenanceOriginalScheduleId = b.scheduleId;
+        b.maintenanceFrom = req.from;
+        b.maintenanceUntil = req.until;
+        b.maintenanceRefundAmount = 0;
+        applyMaintenanceCancelPending(b, payments, nowIso);
+        pendingCount += 1;
+        notify(b.userEmail || driver?.userEmail, 'Booking dibatalkan — ' + b.code,
+          'Jadwal ' + s.date + ' ' + s.time + ' dibatalkan karena maintenance armada. Booking belum dibayar sehingga tidak ada refund.',
+          'WA', { bookingId: b.id, kind: 'maintenance' });
+        return;
+      }
+      if (b.status !== 'paid') return;
+      paidCount += 1;
+      b.maintenanceRequestId = req.id;
+      b.maintenanceOriginalScheduleId = b.scheduleId;
+      b.maintenanceFrom = req.from;
+      b.maintenanceUntil = req.until;
+      b.maintenanceRefundAmount = Math.max(0, Number(b.total) || 0);
+      b.replacementScheduleId = null;
+      b.replacementAt = null;
+      b.replacementBy = null;
+      b.maintenanceState = 'choice_pending';
+      b.maintenanceResolvedAt = null;
+      b.maintenanceChoiceDeadline = maintenanceDeadlineFor(s);
+      const candidates = maintenanceReplacementCandidatesForBooking(b);
+      if (candidates.length && b.userEmail && new Date(b.maintenanceChoiceDeadline).getTime() > Date.now()) {
+        choiceCount += 1;
+        replacementOffers += 1;
+        const cand = candidates[0];
+        notify(b.userEmail || driver?.userEmail, 'Jadwal maintenance — ' + b.code,
+          'Jadwal ' + s.date + ' ' + s.time + ' dibatalkan karena maintenance armada. '
+          + 'Refund 100% ' + rp(b.total) + '. Armada pengganti tersedia: ' + maintenanceCandidateLabel(cand) + '. '
+          + 'Pilih refund atau pindah armada sebelum ' + maintenanceDeadlineLabel(b.maintenanceChoiceDeadline)
+          + '. Jika tidak memilih, refund 100% otomatis. Jika armada pengganti tidak lagi tersedia, refund tetap 100%.',
+          'WA', { bookingId: b.id, kind: 'maintenance' });
+      } else {
+        const refund = applyMaintenanceRefundRecord(b, payments, ledger, req.reason, 'sistem', nowIso);
+        refundedCount += 1;
+        totalRefund += refund;
+        notify(b.userEmail || driver?.userEmail, 'Jadwal maintenance — ' + b.code,
+          'Jadwal ' + s.date + ' ' + s.time + ' dibatalkan karena maintenance armada. '
+          + (candidates.length && !b.userEmail
+            ? 'Tiket ini dibuat pengemudi tanpa akun pelanggan, sehingga refund 100% ' + rp(refund) + ' diproses otomatis.'
+            : 'Tidak ada armada pengganti valid atau batas pilihan sudah lewat. Refund 100% ' + rp(refund) + ' diproses otomatis.'),
+          'WA', { bookingId: b.id, kind: 'maintenance' });
+      }
+    });
+  });
+
+  req.status = 'disetujui';
+  req.decidedAt = nowIso;
+  req.decidedBy = u ? u.email : by;
+  req.decisionNote = String(note || '').trim();
+  req.affectedScheduleIds = affected.map((s) => s.id);
+  req.summary = {
+    schedules: affected.length,
+    paidBookings: paidCount,
+    pendingBookings: pendingCount,
+    refunded: refundedCount,
+    choices: choiceCount,
+    replacementOffers,
+    refundTotal: totalRefund,
+  };
+  v.maintenanceFrom = req.from;
+  v.maintenanceUntil = req.until;
+  v.maintenanceRequestId = req.id;
+
+  DB.save('schedules', schedules);
+  DB.save('bookings', bookings);
+  DB.save('payments', payments);
+  DB.save('ledger', ledger);
+  DB.save('maintenanceRequests', requests);
+  DB.save('vehicles', DB.load('vehicles', []).map((x) => (x.id === v.id ? v : x)));
+
+  if (driver && driver.userEmail) {
+    notify(driver.userEmail, 'Pengajuan maintenance disetujui',
+      'Maintenance ' + req.vehicleName + ' ' + maintenancePeriodLabel(req) + ' disetujui. '
+      + affected.length + ' jadwal diblokir; booking pelanggan ditindaklanjuti otomatis.', 'app', { requestId: req.id, kind: 'maintenance_request' });
+  }
+  DB.load('users', [])
+    .filter((x) => x.role === 'agen' && x.agencyId === req.agencyId)
+    .forEach((x) => notify(x.email, 'Maintenance disetujui',
+      req.vehicleName + ' ' + maintenancePeriodLabel(req) + ' • ' + affected.length + ' jadwal • ' + paidCount + ' booking lunas ditindaklanjuti.', 'app', { requestId: req.id, kind: 'maintenance_request' }));
+  audit('maintenance_approved', req.id + ' • ' + req.vehicleName + ' ' + maintenancePeriodLabel(req)
+    + ' • ' + affected.length + ' jadwal • ' + choiceCount + ' pilihan • ' + refundedCount + ' refund otomatis');
+
+  return {
+    ok: true, request: req,
+    affected: affected.length, paid: paidCount, pending: pendingCount,
+    choices: choiceCount, refunded: refundedCount, refundTotal: totalRefund,
+  };
+}
+
+/** Pengemudi membatalkan pengajuan yang masih menunggu; agen juga boleh
+ *  membersihkan antrean. Approval yang sudah berjalan tidak bisa dibatalkan. */
+export function cancelMaintenanceRequest(requestId, { reason = '', by = 'pengemudi' } = {}) {
+  const u = currentUser();
+  const requests = DB.load('maintenanceRequests', []);
+  const req = requests.find((r) => r.id === requestId);
+  if (!req) return { ok: false, msg: 'Pengajuan maintenance tidak ditemukan' };
+  if (req.status !== 'menunggu') return { ok: false, msg: 'Hanya pengajuan yang masih menunggu yang bisa dibatalkan' };
+  if (u && u.role === 'pengemudi') {
+    const me = driverForUser(u);
+    if (!me || me.id !== req.driverId) return { ok: false, msg: 'Pengajuan ini bukan milik Anda' };
+  } else if (u && u.role === 'agen' && u.agencyId !== req.agencyId) {
+    return { ok: false, msg: 'Pengajuan milik agensi lain' };
+  } else if (u && !['agen', 'superadmin'].includes(u.role)) {
+    return { ok: false, msg: 'Anda tidak bisa membatalkan pengajuan ini' };
+  }
+  const nowIso = new Date().toISOString();
+  req.status = 'dibatalkan';
+  req.decidedAt = nowIso;
+  req.decidedBy = u ? u.email : by;
+  req.decisionNote = String(reason || '').trim() || 'Dibatalkan sebelum diputuskan';
+  DB.save('maintenanceRequests', requests);
+  const driver = driverById(req.driverId);
+  if (u && u.role === 'pengemudi') {
+    DB.load('users', [])
+      .filter((x) => x.role === 'agen' && x.agencyId === req.agencyId)
+      .forEach((x) => notify(x.email, 'Pengajuan maintenance dibatalkan',
+        req.vehicleName + ' ' + maintenancePeriodLabel(req) + ' dibatalkan oleh pengemudi.', 'app', { requestId: req.id, kind: 'maintenance_request' }));
+  } else if (driver && driver.userEmail) {
+    notify(driver.userEmail, 'Pengajuan maintenance dibatalkan',
+      'Pengajuan maintenance ' + req.vehicleName + ' ' + maintenancePeriodLabel(req) + ' dibatalkan. Catatan: ' + req.decisionNote, 'app', { requestId: req.id, kind: 'maintenance_request' });
+  }
+  audit('maintenance_cancelled', req.id + ' • ' + req.vehicleName + ' • ' + req.decisionNote);
+  return { ok: true, request: req };
+}
+
+/** Pelanggan/agen memilih refund 100% untuk booking yang terkena maintenance. */
+export function refundMaintenanceBooking(bookingId, { reason = '', by = 'pelanggan' } = {}) {
+  const u = currentUser();
+  const bookings = DB.load('bookings', []);
+  const b = bookings.find((x) => x.id === bookingId);
+  if (!b) return { ok: false, msg: 'Booking tidak ditemukan' };
+  if (u && !['pelanggan', 'agen', 'superadmin'].includes(u.role)) return { ok: false, msg: 'Anda tidak bisa memproses refund ini' };
+  if (u && u.role === 'pelanggan' && (!b.userEmail || u.email !== b.userEmail)) return { ok: false, msg: 'Booking ini bukan milik akun Anda' };
+  if (u && u.role === 'agen' && schedById(b.scheduleId)?.agencyId !== u.agencyId) return { ok: false, msg: 'Booking milik agensi lain' };
+  if (b.maintenanceState === 'replaced') return { ok: false, msg: 'Booking sudah dipindahkan ke armada pengganti' };
+  if (b.status === 'cancelled' && b.maintenanceState === 'refunded') {
+    return { ok: true, refund: Number(b.refundAmount) || 0, already: true };
+  }
+  if (b.status !== 'paid') return { ok: false, msg: b.status === 'pending' ? 'Booking belum dibayar — dibatalkan tanpa refund' : 'Booking tidak bisa direfund pada status ini' };
+  if (!b.maintenanceRequestId && !scheduleMaintenance(schedById(b.scheduleId))) {
+    return { ok: false, msg: 'Booking ini tidak terkena maintenance' };
+  }
+  const nowIso = new Date().toISOString();
+  const payments = DB.load('payments', []);
+  const ledger = DB.load('ledger', []);
+  const refund = applyMaintenanceRefundRecord(b, payments, ledger, reason || 'Pilihan pelanggan', by, nowIso);
+  DB.save('bookings', bookings);
+  DB.save('payments', payments);
+  DB.save('ledger', ledger);
+  notify(b.userEmail, 'Refund maintenance diproses — ' + b.code,
+    'Refund 100% sebesar ' + new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(refund)
+    + ' diproses 1–3 hari kerja ke metode pembayaran awal.', 'WA', { bookingId: b.id, kind: 'maintenance' });
+  audit('maintenance_refund', b.code + ' • ' + by + ' • ' + refund);
+  return { ok: true, refund, booking: b };
+}
+
+/** Pindahkan booking lunas ke armada pengganti yang sudah divalidasi. */
+export function moveMaintenanceBooking(bookingId, targetScheduleId, { by = 'pelanggan' } = {}) {
+  const u = currentUser();
+  const bookings = DB.load('bookings', []);
+  const b = bookings.find((x) => x.id === bookingId);
+  if (!b) return { ok: false, msg: 'Booking tidak ditemukan' };
+  if (u && !['pelanggan', 'agen', 'superadmin'].includes(u.role)) return { ok: false, msg: 'Anda tidak bisa memindahkan booking ini' };
+  if (u && u.role === 'pelanggan' && (!b.userEmail || u.email !== b.userEmail)) return { ok: false, msg: 'Booking ini bukan milik akun Anda' };
+  if (u && u.role === 'agen' && schedById(b.scheduleId)?.agencyId !== u.agencyId) return { ok: false, msg: 'Booking milik agensi lain' };
+  if (b.maintenanceState !== 'choice_pending') return { ok: false, msg: 'Booking tidak dalam proses pilihan maintenance' };
+  if (b.maintenanceChoiceDeadline && new Date(b.maintenanceChoiceDeadline).getTime() <= Date.now()) {
+    return { ok: false, msg: 'Batas waktu memilih sudah lewat — refund 100% akan diproses otomatis' };
+  }
+  const candidates = maintenanceReplacementCandidatesForBooking(b);
+  const target = candidates.find((x) => x.id === targetScheduleId);
+  if (!target) return { ok: false, msg: 'Armada pengganti tidak tersedia atau sudah berubah' };
+  const orig = schedById(b.maintenanceOriginalScheduleId || b.scheduleId);
+  if (!orig) return { ok: false, msg: 'Jadwal asal tidak ditemukan' };
+
+  const tk = takenSeats(target.id);
+  const layout = vehLayout(vehicleById(target.vehicleId));
+  const available = layout.filter((c) => c.type === 'seat' && c.sid
+    && !tk.paid.includes(c.sid) && !tk.hold.includes(c.sid) && !tk.blocked.includes(c.sid) && !tk.inactive.includes(c.sid)).map((c) => c.sid);
+  const oldSeats = [...(b.seats || [])];
+  const nextSeats = oldSeats.filter((st) => available.includes(st));
+  for (const st of available) {
+    if (nextSeats.length >= oldSeats.length) break;
+    if (!nextSeats.includes(st)) nextSeats.push(st);
+  }
+  if (nextSeats.length < oldSeats.length) return { ok: false, msg: 'Kursi pada armada pengganti tidak mencukupi' };
+
+  const oldPax = Array.isArray(b.passengers) ? b.passengers : [];
+  b.passengers = oldSeats.map((oldSeat, i) => {
+    const p = oldPax.find((x) => x.seat === oldSeat) || oldPax[i] || { name: 'Penumpang', phone: '-' };
+    return { ...p, seat: nextSeats[i] };
+  });
+  b.maintenanceOriginalScheduleId = orig.id;
+  b.scheduleId = target.id;
+  b.seats = nextSeats;
+  b.status = 'paid';
+  b.tripStatus = 'scheduled';
+  b.boarded = false;
+  b.maintenanceState = 'replaced';
+  b.replacementScheduleId = target.id;
+  b.replacementAt = new Date().toISOString();
+  b.replacementBy = by;
+  b.maintenanceChoiceDeadline = null;
+  b.maintenanceResolvedAt = b.replacementAt;
+  b.fare = splitFare(target, nextSeats.length, b.discount || 0, b.source);
+
+  const ledger = DB.load('ledger', []);
+  ledger.forEach((e) => {
+    if (e.bookingId !== b.id || e.status === 'dicairkan') return;
+    const fare = splitFare(target, nextSeats.length, b.discount || 0, b.source);
+    e.scheduleId = target.id;
+    e.agencyId = target.agencyId;
+    e.driverId = target.driverId || null;
+    e.seats = [...nextSeats];
+    e.ticket = fare.ticket;
+    e.service = fare.service;
+    e.fee = fare.fee;
+    e.total = fare.total;
+    e.replacedFromScheduleId = orig.id;
+    e.updatedAt = b.replacementAt;
+  });
+  DB.save('bookings', bookings);
+  DB.save('ledger', ledger);
+
+  const v = vehicleById(target.vehicleId);
+  notify(b.userEmail, 'Pindah armada berhasil — ' + b.code,
+    'Tiket dipindahkan ke ' + vehName(v) + ' (' + (v.plate || '-') + ') pukul ' + target.time + ' WIB, tanggal ' + target.date
+    + '. Kursi baru: ' + nextSeats.join(', ') + '. Harga dan pembayaran tetap sama.', 'WA', { bookingId: b.id, kind: 'maintenance' });
+  DB.load('users', [])
+    .filter((x) => x.role === 'agen' && x.agencyId === target.agencyId)
+    .forEach((x) => notify(x.email, 'Pelanggan pindah armada',
+      b.code + ' dipindahkan dari ' + orig.date + ' ' + orig.time + ' ke ' + target.date + ' ' + target.time + '.', 'app', { bookingId: b.id, kind: 'maintenance' }));
+  audit('maintenance_replaced', b.code + ' • ' + orig.id + ' → ' + target.id + ' • kursi ' + nextSeats.join(','));
+  return { ok: true, booking: b, target, oldSchedule: orig, seats: nextSeats };
+}
+
+/* Fallback nama lama: aman hanya bila nama tunggal; nama kembar wajib driverId/NIK/SIM/HP. */
 export function driverByName(agencyId, name){
   const n=String(name||'').trim().toLowerCase();
   if(!n||!agencyId) return null;
@@ -798,6 +1414,8 @@ export function scheduleDateStatus({ vehicleId, routeId, date, time, schedules =
   if (!Number.isFinite(start)) return { state: 'blocked', count: 0, reason: 'Tanggal atau jam tidak valid' };
   if (String(date) < localDateKeyOf(now)) return { state: 'past', count: 0, reason: 'Tanggal sudah lewat' };
   if (start <= now) return { state: 'past-time', count: 0, reason: 'Jam keberangkatan sudah lewat' };
+  const mt = vehicleMaintenanceOn(vehicleId, date);
+  if (mt) return { state: 'maintenance', count: 0, reason: 'Armada maintenance ' + maintenancePeriodLabel(mt) };
 
   const routeMap = new Map(routes.map((r) => [r.id, r]));
   const active = schedules.filter(countedSchedule).filter((s) => s.vehicleId === vehicleId);
@@ -846,6 +1464,73 @@ export function tripProgress(s, route, now = Date.now()) {
   return { pct, start, end, totalMin, arrived, remainMin: Math.max(0, Math.round((end - now) / 60000)) };
 }
 
+/** Tindak lanjut otomatis maintenance:
+ *  - pilihan pelanggan yang melewati deadline / kehilangan armada pengganti → refund 100%;
+ *  - periode yang sudah lewat → request selesai dan tidak lagi memblokir tanggal lain. */
+export function syncMaintenanceResolutions(now = Date.now()) {
+  const requests = DB.load('maintenanceRequests', []);
+  const bookings = DB.load('bookings', []);
+  const payments = DB.load('payments', []);
+  const ledger = DB.load('ledger', []);
+  const vehicles = DB.load('vehicles', []);
+  const schedules = DB.load('schedules', []);
+  const nowIso = new Date(now).toISOString();
+  let reqChanged = false, bookChanged = false, payChanged = false, ledgerChanged = false, vehicleChanged = false, schedChanged = false;
+
+  bookings.forEach((b) => {
+    if (b.maintenanceState !== 'choice_pending') return;
+    const deadline = b.maintenanceChoiceDeadline ? new Date(b.maintenanceChoiceDeadline).getTime() : NaN;
+    const candidates = maintenanceReplacementCandidatesForBooking(b);
+    const expired = Number.isFinite(deadline) && now >= deadline;
+    if (!expired && candidates.length) return;
+    const reason = candidates.length ? 'Batas waktu memilih habis' : 'Armada pengganti tidak lagi tersedia';
+    const refund = applyMaintenanceRefundRecord(b, payments, ledger, reason, 'sistem', nowIso);
+    bookChanged = true; payChanged = true; ledgerChanged = true;
+    notify(b.userEmail, 'Refund maintenance otomatis — ' + b.code,
+      'Pilihan refund/pindah armada ditutup (' + reason.toLowerCase() + '). Refund 100% sebesar '
+      + new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(refund)
+      + ' diproses otomatis.', 'WA', { bookingId: b.id, kind: 'maintenance' });
+    audit('maintenance_auto_refund', b.code + ' • ' + reason + ' • ' + refund);
+  });
+
+  requests.forEach((r) => {
+    if (r.status !== 'disetujui' || !r.until || r.until >= todayStr(0)) return;
+    r.status = 'selesai';
+    r.completedAt = nowIso;
+    reqChanged = true;
+    vehicles.forEach((v) => {
+      if (v.id === r.vehicleId && v.maintenanceRequestId === r.id) {
+        delete v.maintenanceFrom;
+        delete v.maintenanceUntil;
+        delete v.maintenanceRequestId;
+        vehicleChanged = true;
+      }
+    });
+    schedules.forEach((s) => {
+      if (s.maintenanceRequestId !== r.id && !(s.vehicleId === r.vehicleId && s.date >= r.from && s.date <= r.until)) return;
+      s.maintenanceStatus = 'done';
+      if (s.tripStatus === 'scheduled' && s.date < todayStr(0)) {
+        s.tripStatus = 'cancelled';
+        s.status = 'closed';
+        s.cancelReason = 'Maintenance armada';
+        s.cancelledBy = 'sistem';
+        s.cancelledAt = nowIso;
+        s.reviewedAt = nowIso;
+        s.reviewResult = 'maintenance';
+        schedChanged = true;
+      }
+    });
+  });
+
+  if (reqChanged) DB.save('maintenanceRequests', requests);
+  if (bookChanged) DB.save('bookings', bookings);
+  if (payChanged) DB.save('payments', payments);
+  if (ledgerChanged) DB.save('ledger', ledger);
+  if (vehicleChanged) DB.save('vehicles', vehicles);
+  if (schedChanged) DB.save('schedules', schedules);
+  return reqChanged || bookChanged || payChanged || ledgerChanged || vehicleChanged || schedChanged;
+}
+
 /** Tandai jadwal terlambat sebagai Terlewat dan tutup dari pencarian.
  *  Jadwal tanpa penumpang aktif langsung ditutup (tidak masuk antrean admin/sopir). */
 export function syncScheduleLifecycle() {
@@ -858,6 +1543,9 @@ export function syncScheduleLifecycle() {
   const nowIso = new Date(now).toISOString();
   arr.forEach((s) => {
     if (!s.tripStatus) { s.tripStatus = 'scheduled'; changed = true; }
+    /* Jadwal yang sedang maintenance tidak boleh dianggap terlewat.
+       Tindak lanjut refund/pilihan ditangani syncMaintenanceResolutions. */
+    if (scheduleMaintenance(s) && s.status !== 'cancelled') return;
     const datePassed = !!s.date && String(s.date) < todayStr(0);
     const delayActive = s.delayUntil && new Date(s.delayUntil).getTime() > now;
     if (s.tripStatus === 'scheduled' && (scheduleIsPast(s, SCHEDULE_GRACE_HOURS, now) || (!delayActive && datePassed))) {
@@ -936,6 +1624,7 @@ export function setScheduleDelay(sid, minutes, reason, note, by = 'pengemudi') {
   const s = schedules.find((x) => x.id === sid);
   if (!s) return { ok: false, msg: 'Jadwal tidak ditemukan' };
   if (s.status !== 'open' || s.reviewedAt) return { ok: false, msg: 'Jadwal tidak aktif untuk delay' };
+  if (scheduleMaintenance(s)) return { ok: false, msg: 'Jadwal maintenance — delay tidak diperlukan' };
   if (s.tripStatus && s.tripStatus !== 'scheduled') return { ok: false, msg: 'Delay hanya bisa dicatat sebelum berangkat' };
 
   const mins = Math.round(Number(minutes));
@@ -1064,10 +1753,13 @@ export function feeFor(agencyId, amount){ const a=agencyById(agencyId); if(!a) r
 
 export function audit(action, detail){ const l=DB.load('audit',[]); const u=currentUser(); l.unshift({id:uid('LOG'),time:new Date().toISOString(),actor:u?u.email+' ('+u.role+')':'guest',action,detail:detail||''}); DB.save('audit',l.slice(0,300)); }
 
-export function notify(userEmail, title, msg, ch){
+export function notify(userEmail, title, msg, ch, meta){
+  if(!userEmail) return null;
   const n=DB.load('notifications',[]);
-  n.unshift({id:uid('NTF'),to:userEmail,title,msg,ch:ch||'app',time:new Date().toISOString(),read:false});
+  const item={id:uid('NTF'),to:userEmail,title,msg,ch:ch||'app',time:new Date().toISOString(),read:false,...(meta&&typeof meta==='object'?meta:{})};
+  n.unshift(item);
   DB.save('notifications',n.slice(0,200));
+  return item;
 }
 
 export const hm=t=>{const[a,b]=t.split(':').map(Number);return a*60+b;};
@@ -1248,6 +1940,7 @@ export function canPayBooking(b, s, { ignoreHold = false, now = Date.now() } = {
   if (!b || !s || b.status !== 'pending') return false;
   if (!ignoreHold && b.holdExpiry && new Date(b.holdExpiry).getTime() <= now) return false;
   if (s.status !== 'open') return false;
+  if (scheduleMaintenance(s)) return false;
   if (['ontrip', 'arrived', 'missed', 'cancelled'].includes(s.tripStatus)) return false;
   return !scheduleIsPast(s, 0, now);
 }
@@ -1256,6 +1949,7 @@ export function canPayBooking(b, s, { ignoreHold = false, now = Date.now() } = {
 export function canCancelBooking(b, s) {
   if (!b || !s) return false;
   if (!['pending', 'paid'].includes(b.status) || b.boarded) return false;
+  if (b.maintenanceState === 'choice_pending') return false;
   if (['ontrip', 'arrived', 'missed', 'cancelled'].includes(s.tripStatus)) return false;
   if (s.status === 'cancelled') return false;
   return !scheduleIsPast(s, 0);
@@ -1271,6 +1965,9 @@ export function cancelBooking(bookingId, { reason = '', by = 'pelanggan' } = {})
   if (!b) return { ok: false, msg: 'Booking tidak ditemukan' };
   if (b.status === 'cancelled') return { ok: false, msg: 'Booking sudah dibatalkan' };
   if (b.status === 'done') return { ok: false, msg: 'Perjalanan selesai — booking tidak bisa dibatalkan' };
+  if (b.maintenanceState === 'choice_pending') {
+    return { ok: false, msg: 'Gunakan pilihan refund 100% / pindah armada pada halaman tiket maintenance' };
+  }
   const s = schedById(b.scheduleId);
   if (!s) return { ok: false, msg: 'Jadwal tidak ditemukan' };
   if (!canCancelBooking(b, s)) return { ok: false, msg: 'Pembatalan ditutup — jadwal sudah berangkat atau terlewat' };
@@ -1387,6 +2084,9 @@ export function cancelScheduleByOperator(sid, reason, by = 'pengemudi') {
   const schedules = DB.load('schedules', []);
   const s = schedules.find((x) => x.id === sid);
   if (!s) return { ok: false, msg: 'Jadwal tidak ditemukan' };
+  if (scheduleMaintenance(s) && (s.tripStatus || 'scheduled') === 'scheduled') {
+    return { ok: false, msg: 'Jadwal sudah ditandai maintenance — tidak perlu dibatalkan. Selesaikan lewat alur maintenance.' };
+  }
   if (s.status === 'cancelled' || s.tripStatus === 'cancelled') return { ok: false, msg: 'Jadwal sudah dibatalkan' };
   if (s.tripStatus === 'ontrip') return { ok: false, msg: 'Perjalanan sudah dimulai — tidak bisa dibatalkan' };
   if (s.tripStatus === 'arrived') return { ok: false, msg: 'Perjalanan sudah selesai' };
@@ -1492,6 +2192,7 @@ export function createDriverBooking(sid, { passengers = [], seats = [], driverId
   const s = schedById(sid);
   if (!s) return { ok: false, msg: 'Jadwal tidak ditemukan' };
   if (s.status !== 'open') return { ok: false, msg: 'Jadwal tidak terbuka' };
+  if (scheduleMaintenance(s)) return { ok: false, msg: 'Jadwal maintenance — penjualan tiket ditutup' };
   if (['ontrip', 'arrived', 'missed', 'cancelled'].includes(s.tripStatus)) return { ok: false, msg: 'Jadwal sudah berjalan/selesai — penjualan tiket ditutup' };
   if (scheduleIsPast(s, 0)) return { ok: false, msg: 'Jadwal sudah lewat' };
 
@@ -1562,6 +2263,7 @@ export function confirmDriverBookingPayment(bookingId){
   if (b.status !== 'pending') return { ok: false, msg: 'Booking belum dalam status menunggu bayar' };
   const s = schedById(b.scheduleId);
   if (!s) return { ok: false, msg: 'Jadwal tidak ditemukan' };
+  if (scheduleMaintenance(s)) return { ok: false, msg: 'Pembayaran ditutup — jadwal maintenance' };
   if (s.status === 'cancelled' || ['arrived', 'missed', 'cancelled'].includes(s.tripStatus)) {
     return { ok: false, msg: 'Pembayaran ditutup — jadwal sudah selesai/dibatalkan' };
   }
@@ -1594,6 +2296,9 @@ export function toggleScheduleSeatBlock(sid, seat, { reason = '', by = 'agen' } 
   const arr = DB.load('schedules', []);
   const s = arr.find((x) => x.id === sid);
   if (!s) return { ok: false, msg: 'Jadwal tidak ditemukan' };
+  if (scheduleMaintenance(s) && (s.tripStatus || 'scheduled') === 'scheduled') {
+    return { ok: false, msg: 'Jadwal maintenance — kursi tidak bisa diubah' };
+  }
   if (s.status === 'cancelled' || ['ontrip', 'arrived', 'missed', 'cancelled'].includes(s.tripStatus) || scheduleIsPast(s, 0)) {
     return { ok: false, msg: 'Jadwal sudah berjalan/selesai — kursi tidak bisa diubah' };
   }
@@ -1638,6 +2343,7 @@ export function setScheduleTripStatus(sid, st, { reason = '', by = '' } = {}) {
   const arr = DB.load('schedules', []);
   const s = arr.find((x) => x.id === sid);
   if (!s || s.tripStatus === st) return false;
+  if (st === 'ontrip' && scheduleMaintenance(s) && (s.tripStatus || 'scheduled') === 'scheduled') return false;
   if (s.reviewedAt && s.reviewResult === 'no_show') return false;
   const prev = s.tripStatus || 'scheduled';
   const now = new Date().toISOString();

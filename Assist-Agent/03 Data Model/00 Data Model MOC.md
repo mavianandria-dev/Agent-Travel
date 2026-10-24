@@ -6,10 +6,11 @@ tags:
   - type/moc
   - area/data
 status: aktif
-updated: 2026-10-23
+updated: 2026-10-24
 source:
   - transaceh-react/src/lib/db.js
   - transaceh-react/src/lib/seed.js
+  - transaceh-react/src/lib/domain.js
 ---
 
 # Data Model — MOC
@@ -28,6 +29,7 @@ Tidak ada database relasional; relasi antar koleksi memakai **ID atau email** di
 | `vehicles` | Armada | Layout kursi, dokumen, pengemudi utama |
 | `drivers` | Pengemudi | Terhubung ke `users` lewat `userEmail` |
 | `schedules` | Jadwal keberangkatan | Kombinasi rute + armada + pengemudi |
+| `maintenanceRequests` | Pengajuan maintenance armada | Periode maksimal 2 hari; disetujui agen |
 | `bookings` | Pesanan kursi | Bisa dari pelanggan atau pengemudi |
 | `payments` | Pembayaran simulasi | Satu payment per booking |
 | `ledger` | Pembagian pendapatan | `ditahan → layak → dicairkan` |
@@ -57,7 +59,7 @@ Tidak ada database relasional; relasi antar koleksi memakai **ID atau email** di
 
 1. **Tidak ada foreign key** — referensi bisa dangling jika data dihapus manual.
 2. **Email adalah kunci login** — ganti email = akun baru.
-3. **ID berprefix** — `U-`, `AG`, `R`, `RQ`, `V`, `D`, `S-`, `BK`, `PAY`, `LG`, `ST`, `MSG`.
+3. **ID berprefix** — `U-`, `AG`, `R`, `RQ`, `V`, `D`, `S-`, `MT`, `BK`, `PAY`, `LG`, `ST`, `MSG`.
 4. **Array disimpan utuh** — setiap perubahan memuat seluruh array, mengubah, lalu menyimpan.
 5. **Data bisa hilang** — user dapat menghapus `localStorage` kapan saja.
 

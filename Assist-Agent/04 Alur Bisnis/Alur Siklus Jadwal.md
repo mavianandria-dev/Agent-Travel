@@ -11,6 +11,8 @@ source:
   - transaceh-react/src/lib/domain.js
   - transaceh-react/src/agen/SchedForm.jsx
   - transaceh-react/src/driver/Tasks.jsx
+  - transaceh-react/src/driver/Maintenance.jsx
+  - transaceh-react/src/agen/MaintenanceReview.jsx
 ---
 
 # Alur Siklus Jadwal
@@ -89,6 +91,19 @@ Aturan:
 - Jadwal `missed` tanpa booking aktif → `reviewResult = 'empty'` dan ditutup.
 - `ontrip`/`arrived`/`missed` → `status = 'closed'`.
 
+## Maintenance armada
+
+`syncScheduleLifecycle()` **melewati** jadwal yang sedang maintenance agar tidak otomatis menjadi `missed`. Status jadwal tetap `open`/`scheduled` dengan flag `maintenanceStatus = 'active'` supaya tetap terlihat di jadwal, tetapi `schedReady()` dan `canPayBooking()` menolaknya.
+
+Penutupan dilakukan `syncMaintenanceResolutions()`:
+
+- request `disetujui` yang `until` sudah lewat → `selesai`;
+- jadwal lampau yang masih `scheduled` → `cancelled` + `closed`, `reviewResult = 'maintenance'`;
+- trip `ontrip`/`arrived` tidak dihentikan;
+- request yang masih berjalan tetap memblokir tanggalnya.
+
+Saat approval, jadwal pada periode saja yang ditandai; tanggal lain tetap normal. Aksi operator/pengemudi yang mengubah jadwal, kursi, boarding, atau penjualan diblokir selama maintenance pada trip yang belum berangkat.
+
 ## Delay
 
 `setScheduleDelay(sid, minutes, reason, note)`:
@@ -100,10 +115,11 @@ Aturan:
 
 ## Sumber
 
-- `transaceh-react/src/lib/domain.js:692-771` — konstanta grace/buffer.
-- `transaceh-react/src/lib/domain.js:851-910` — `syncScheduleLifecycle`.
-- `transaceh-react/src/lib/domain.js:934-991` — delay.
-- `transaceh-react/src/lib/domain.js:1636-1708` — status trip.
+- `transaceh-react/src/lib/domain.js:1308-1386` — konstanta grace/buffer dan helper waktu.
+- `transaceh-react/src/lib/domain.js:1536-1621` — `syncScheduleLifecycle`.
+- `transaceh-react/src/lib/domain.js:1470-1535` — `syncMaintenanceResolutions`.
+- `transaceh-react/src/lib/domain.js:1622-1683` — delay.
+- `transaceh-react/src/lib/domain.js:2341-2420` — status trip.
 - `transaceh-react/src/agen/SchedForm.jsx:223-248` — pembuatan.
 - `transaceh-react/src/driver/Tasks.jsx` — aksi pengemudi.
 

@@ -20,6 +20,7 @@ Catatan sesi belajar, keputusan, dan pertanyaan. Satu sesi = satu catatan.
 | :--- | :--- | :--- |
 | 2026-10-23 | [[2026-10-23 - Sesi 1]] | Pemetaan awal codebase dan pembuatan vault |
 | 2026-10-24 | [[2026-10-24 - Sesi 2]] | Validasi vault dan koreksi perilaku KYC, boarding, settlement |
+| 2026-10-24 | [[2026-10-24 - Sesi 3]] | Maintenance armada berbasis tanggal, refund/pindah, guard UI |
 
 ## Cara menulis
 

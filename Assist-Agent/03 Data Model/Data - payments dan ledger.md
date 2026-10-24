@@ -6,10 +6,11 @@ tags:
   - type/note
   - area/data
 status: aktif
-updated: 2026-10-23
+updated: 2026-10-24
 source:
   - transaceh-react/src/lib/domain.js
   - transaceh-react/src/pages/Search.jsx
+  - transaceh-react/src/pages/TicketDetail.jsx
   - transaceh-react/src/admin/Settlement.jsx
 ---
 
@@ -40,6 +41,12 @@ Satu booking memiliki satu payment pada alur normal.
 - Booking pending dibatalkan → payment `cancelled`.
 - Refund selesai → payment `refunded`.
 - `updatePaymentRefund()` menyelaraskan data refund booking ke payment.
+
+### Refund maintenance
+
+- Refund maintenance selalu **100% dari total pembayaran**, `refundScope = 'total'`.
+- Payment mendapat `refundStatus = 'pending'`; admin memproses lewat antrean refund yang sama.
+- Booking `pending` yang dibatalkan maintenance tidak mendapat refund; payment menjadi `cancelled`.
 
 ## `ledger`
 
@@ -85,16 +92,17 @@ stateDiagram-v2
 - `ledgerEligible(e)` mensyaratkan sudah 24 jam sejak `arrivedAt`/`releasedAt`.
 - Ledger yang sudah `dicairkan` tidak bisa di-void; refund harus manual.
 - Driver wallet menjumlahkan `ticket`; agen melihat `service`; admin melihat `fee`.
+- Saat booking maintenance **direfund**, ledger terkait di-void. Saat **pindah armada**, ledger yang belum dicairkan dipindahkan ke `scheduleId`, `agencyId`, `driverId`, kursi, dan nominal tujuan; `replacedFromScheduleId` menyimpan asal.
 
 > [!warning] Ledger bukan saldo
 > Tidak ada tabel saldo. Saldo dihitung dari agregasi ledger setiap kali halaman dibuka.
 
 ## Sumber
 
-- `transaceh-react/src/pages/Search.jsx:275-277` — payment awal.
-- `transaceh-react/src/lib/domain.js:1185-1207` — create/release/void.
-- `transaceh-react/src/lib/domain.js:1224-1237` — update refund payment.
-- `transaceh-react/src/lib/domain.js:1813-1827` — settle dan eligibility.
+- `transaceh-react/src/pages/Search.jsx:283-285` — payment awal.
+- `transaceh-react/src/lib/domain.js:1878-1932` — create/release/void dan update refund payment.
+- `transaceh-react/src/lib/domain.js:1187-1296` — refund/pindah booking maintenance.
+- `transaceh-react/src/lib/domain.js:2519-2535` — settle dan eligibility.
 - `transaceh-react/src/admin/Settlement.jsx:8-120` — UI settlement.
 
 Lihat [[Alur Ledger dan Settlement]] dan [[Alur Pembatalan dan Refund]].

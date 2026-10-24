@@ -6,7 +6,7 @@ tags:
   - type/note
   - area/arsitektur
 status: aktif
-updated: 2026-10-23
+updated: 2026-10-24
 source:
   - transaceh-react/src/store/AppContext.jsx
   - transaceh-react/src/lib/domain.js
@@ -51,6 +51,16 @@ komponen render ulang dan baca DB lagi
 > [!info] Data bukan state React
 > Array `users`, `bookings`, dan lainnya tidak disimpan di Context. Sumbernya tetap `localStorage`; `tick` hanya memaksa komponen membaca ulang.
 
+## Sinkronisasi lifecycle dan maintenance
+
+Saat modul `AppContext` dimuat:
+
+1. `initDB()` menyiapkan seed/migrasi.
+2. `syncScheduleLifecycle()` menutup jadwal lampau (melewati jadwal maintenance).
+3. `syncMaintenanceResolutions()` menyelesaikan periode maintenance, refund otomatis, dan menutup jadwal maintenance yang sudah lampau.
+
+Keduanya juga dipanggil berkala lewat interval dan pada event `storage`, sehingga approval/refund dari tab lain terlihat tanpa reload. Pelanggan yang sedang di `PaymentModal` juga memantau booking sendiri setiap detik.
+
 ## Konsekuensi
 
 - Komponen yang tidak membaca `tick` bisa menampilkan data lama.
@@ -83,10 +93,11 @@ Bentuk awal dari `freshBW()`:
 
 ## Sumber
 
-- `transaceh-react/src/store/AppContext.jsx:14` — `freshBW`.
-- `transaceh-react/src/store/AppContext.jsx:32-46` — state.
-- `transaceh-react/src/store/AppContext.jsx:48-49` — `refresh`, `user`.
-- `transaceh-react/src/store/AppContext.jsx:99-118` — timer dan `storage`.
-- `transaceh-react/src/store/AppContext.jsx:128-134` — value context.
+- `transaceh-react/src/store/AppContext.jsx:8-10` — init + sync lifecycle/maintenance.
+- `transaceh-react/src/store/AppContext.jsx:15` — `freshBW`.
+- `transaceh-react/src/store/AppContext.jsx:34-46` — state.
+- `transaceh-react/src/store/AppContext.jsx:49-51` — `refresh`, `user`.
+- `transaceh-react/src/store/AppContext.jsx:100-121` — timer, sinkronisasi, dan `storage`.
+- `transaceh-react/src/store/AppContext.jsx:131-137` — value context.
 
 Lihat [[Pola Mutasi Data]].

@@ -309,6 +309,9 @@ function VehFormInner({ agId, oldV, vid }) {
       brand: br, model: md, year: vYear, color: col, plate: pl.toUpperCase(), chassis: old?.chassis || '', engine: old?.engine || '',
       vtype: vtype === 'Lainnya' ? (gv(vtypeOther) || 'Lainnya') : vtype, vtypeOther: gv(vtypeOther), baggage: old?.baggage || 'Sedang', tax: old?.tax || 'Aktif',
       stnkExp: stk, kir: old?.kir || '', condition: old?.condition || 'Baik', status, photo: pho, facilities,
+      /* Periode dari pengajuan maintenance disimpan di koleksi request, bukan di armada.
+         Field lama dibersihkan agar status legacy 'maintenance' benar-benar memblokir semua tanggal. */
+      maintenanceFrom: '', maintenanceUntil: '', maintenanceRequestId: '',
       layout: VLAY.map((cc) => ({ sid: cc.sid, type: cc.type })), inactiveSeats: off, capacity: seats.length, seatSeq: VSEQ,
       ownerName: onm, ownerBiz: biz, ownerNik: nik, ownerAddr: addr, ownerPhone: oph, ownerEmail: oEm, ownership: own, coopDriverId: own === 'Milik Pengemudi' ? drvRef.id : '', hasEmail: hEm,
       docs: ['STNK', 'KTP pemilik'], docOther: old?.docOther || '', stnkPhoto, ktpOwnerPhoto,
@@ -388,7 +391,8 @@ function VehFormInner({ agId, oldV, vid }) {
         <div><label className="text-[12px] font-extrabold">JENIS KENDARAAN <span className="text-red-500">*</span></label><PillRadios options={V_TYPES} value={vtype} onChange={setVtype} /></div>
         <div className={vtype === 'Lainnya' ? '' : 'hidden'}><label className="text-[12px] font-extrabold">JENIS LAINNYA</label><input value={vtypeOther} onChange={(e) => setVtypeOther(e.target.value)} placeholder="cth: Sebutkan jenisnya" className={'w-full mt-1 ' + inC} /></div>
         <div className="grid grid-cols-2 gap-2.5"><div><label className="text-[12px] font-extrabold">MASA BERLAKU STNK <span className="text-red-500">*</span></label><input type="date" value={stnkExp} onChange={(e) => setStnkExp(e.target.value)} className={'w-full mt-1 ' + inC} /></div>
-          <div><label className="text-[12px] font-extrabold">STATUS ARMADA <span className="text-red-500">*</span></label><select value={status} onChange={(e) => setStatus(e.target.value)} className={inC + ' w-full mt-1'}><option value="">— Pilih —</option><option value="aktif">aktif</option><option value="maintenance">maintenance</option></select></div></div>
+          <div><label className="text-[12px] font-extrabold">STATUS ARMADA <span className="text-red-500">*</span></label><select value={status} onChange={(e) => setStatus(e.target.value)} className={inC + ' w-full mt-1'}><option value="">— Pilih —</option><option value="aktif">aktif</option>{(oldV?.status === 'maintenance' || status === 'maintenance') ? <option value="maintenance">maintenance (legacy — semua tanggal)</option> : null}</select>
+            {status === 'maintenance' ? <div className="text-[11px] font-semibold text-red-700 bg-red-50 border border-red-200 rounded-lg px-2.5 py-1.5 mt-1.5">Status legacy ini memblokir semua tanggal. Untuk maintenance terjadwal maksimal 2 hari, gunakan pengajuan pengemudi di tab Maintenance.</div> : null}</div></div>
         <div><label className="text-[12px] font-extrabold">FASILITAS (boleh pilih lebih dari 1)</label><CheckPills options={V_FAC} values={facilities} onChange={setFacilities} /></div>
         <div><label className="text-[12px] font-extrabold">URL FOTO ARMADA <span className="text-red-500">*</span></label><input value={photo} onChange={(e) => setPhoto(e.target.value)} placeholder="URL foto armada" className={'w-full mt-1 ' + inC} /></div>
       </div>

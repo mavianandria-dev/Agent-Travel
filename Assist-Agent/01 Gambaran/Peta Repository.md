@@ -54,11 +54,15 @@ transaceh-react/
 
 | File | Baris | Peran |
 | :--- | ---: | :--- |
-| `src/lib/domain.js` | 2.089 | Logika bisnis utama |
+| `src/lib/domain.js` | 2.795 | Logika bisnis utama |
 | `src/lib/seed.js` | 816 | Seed + migrasi data |
-| `src/pages/Search.jsx` | 496 | Wizard booking + pembayaran |
+| `src/pages/Search.jsx` | 515 | Wizard booking + pembayaran + kartu maintenance |
 | `src/agen/KycWizard.jsx` | 459 | KYC agen |
-| `src/driver/Tasks.jsx` | 562 | Tugas pengemudi |
+| `src/driver/Tasks.jsx` | 574 | Tugas pengemudi |
+| `src/driver/Maintenance.jsx` | 172 | Pengajuan/riwayat maintenance pengemudi |
+| `src/agen/MaintenanceReview.jsx` | 118 | Review maintenance agen |
+| `src/pages/Tickets.jsx` | 90 | Daftar tiket + status maintenance |
+| `src/pages/TicketDetail.jsx` | 246 | Detail tiket + refund/pindah |
 | `src/admin/Accounts.jsx` | 509 | Manajemen akun |
 | `src/pages/help/ChatSection.jsx` | 429 | Chat AI |
 | `index.html` (root) | 2.053 | Versi legacy single-file |
@@ -68,13 +72,13 @@ transaceh-react/
 1. `transaceh-react/index.html` memuat `/src/main.jsx`.
 2. `main.jsx` merender `<App />` dalam `StrictMode`.
 3. `App.jsx` membungkus `Router` dengan `AppProvider`.
-4. `AppProvider` menjalankan `initDB()` dan `syncScheduleLifecycle()`.
+4. `AppProvider` menjalankan `initDB()`, `syncScheduleLifecycle()`, dan `syncMaintenanceResolutions()`.
 
 ## Folder besar
 
 - `src/lib/` — hampir semua aturan bisnis dan data.
-- `src/pages/` — layar pelanggan dan auth.
-- `src/agen/`, `src/driver/`, `src/admin/` — panel per peran.
+- `src/pages/` — layar pelanggan dan auth, termasuk panel refund/pindah maintenance.
+- `src/agen/`, `src/driver/`, `src/admin/` — panel per peran; maintenance ada di `driver/Maintenance.jsx` dan `agen/MaintenanceReview.jsx`.
 - `src/components/` — komponen lintas halaman.
 
 ## Sumber

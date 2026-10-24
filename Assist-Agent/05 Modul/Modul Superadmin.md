@@ -7,7 +7,7 @@ tags:
   - area/modul
   - role/superadmin
 status: aktif
-updated: 2026-10-23
+updated: 2026-10-24
 source:
   - transaceh-react/src/admin/Admin.jsx
   - transaceh-react/src/admin/Overview.jsx
@@ -72,6 +72,8 @@ source:
 - Kliring 24 jam.
 - Pencairan massal.
 - Antrean no-show: pilih persentase refund, proses refund total.
+- Antrean refund (`refundStatus` belum `done`) juga memuat refund maintenance 100% dari approval agen.
+- Ledger refund maintenance di-void; pindah armada tidak masuk antrean refund.
 
 ## Refund
 
@@ -101,6 +103,7 @@ source:
 - `transaceh-react/src/admin/Transactions.jsx:8-41`
 - `transaceh-react/src/admin/Master.jsx:8-82`
 - `transaceh-react/src/admin/Refunds.jsx:73-106`
-- `transaceh-react/src/admin/Settlement.jsx`
+- `transaceh-react/src/admin/Settlement.jsx:84-170`
+- `transaceh-react/src/lib/domain.js:1187-1217` — refund maintenance masuk antrean.
 
 Lihat [[Alur Ledger dan Settlement]] dan [[Alur Pembatalan dan Refund]].

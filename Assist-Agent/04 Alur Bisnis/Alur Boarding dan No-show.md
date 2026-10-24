@@ -72,9 +72,9 @@ No-show bukan aksi pengemudi. Admin menanganinya di `Settlement`:
 ## Sumber
 
 - `transaceh-react/src/driver/Tasks.jsx:200-250` — boarding.
-- `transaceh-react/src/lib/domain.js:1593-1633` — blokir kursi.
-- `transaceh-react/src/lib/domain.js:1715-1812` — no-show.
-- `transaceh-react/src/lib/domain.js:864-875` — boarding memengaruhi lifecycle.
+- `transaceh-react/src/lib/domain.js:2295-2340` — blokir kursi (ditolak saat maintenance).
+- `transaceh-react/src/lib/domain.js:2421-2518` — no-show.
+- `transaceh-react/src/lib/domain.js:1536-1621` — boarding memengaruhi lifecycle; jadwal maintenance dilewati.
 - `transaceh-react/src/admin/Settlement.jsx:8-120` — modal no-show.
 
 Lihat [[Alur Siklus Jadwal]] dan [[Alur Pembatalan dan Refund]].

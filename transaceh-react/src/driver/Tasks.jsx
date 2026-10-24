@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { routeById, vehicleById, bookingsOf, vehName, vehLayout, schedSeatCap, takenSeats, seatsLeft, audit, setScheduleTripStatus, scheduleNeedsReview, scheduleInHistory, schedById, setScheduleDelay, reportTripDelay, createDriverBooking, confirmDriverBookingPayment, splitFare, tripProgress, bookedPassengers, departureTiming, scheduleIsPast } from '@/lib/domain.js';
+import { routeById, vehicleById, bookingsOf, vehName, vehLayout, schedSeatCap, takenSeats, seatsLeft, audit, setScheduleTripStatus, scheduleNeedsReview, scheduleInHistory, schedById, setScheduleDelay, reportTripDelay, createDriverBooking, confirmDriverBookingPayment, splitFare, tripProgress, bookedPassengers, departureTiming, scheduleIsPast, scheduleMaintenance, maintenancePeriodLabel } from '@/lib/domain.js';
 import { fmtClock, fmtRp } from '@/lib/utils.js';
 import { Icon, Empty, BadgeStatus, fmtDate, CabinGrid } from '@/components/ui.jsx';
 import { pickupArea, pickupOptions, pickupOf } from '@/lib/pickups.js';
@@ -101,7 +101,8 @@ function ManifestModal({ sid }) {
   const order = lay.filter((c) => c.type === 'seat' || c.type === 'off').map((c) => c.sid);
   const bookedExtra = [...new Set(bk.flatMap((b) => b.seats || []))].filter((id) => !order.includes(id));
   const offSet = new Set(lay.filter((c) => c.type === 'off').map((c) => c.sid));
-  const canBlock = s.status !== 'cancelled' && !['ontrip', 'arrived', 'missed', 'cancelled'].includes(s.tripStatus) && !scheduleIsPast(s, 0);
+  const mt = scheduleMaintenance(s);
+  const canBlock = !mt && s.status !== 'cancelled' && !['ontrip', 'arrived', 'missed', 'cancelled'].includes(s.tripStatus) && !scheduleIsPast(s, 0);
   return (
     <div className="p-6">
       <div className="flex items-center justify-between">
@@ -206,6 +207,10 @@ function ScanModal({ sid }) {
       toast('Boarding ditutup — jadwal sudah terlewat/dibatalkan/selesai.', 'err');
       return;
     }
+    if (scheduleMaintenance(s) && (s.tripStatus || 'scheduled') === 'scheduled') {
+      toast('Boarding ditutup — jadwal maintenance armada.', 'err');
+      return;
+    }
     if (b.status !== 'paid') { toast('Tiket ' + c + ' status: ' + b.status, 'warn'); return; }
     if (b.boarded) { toast('Penumpang ' + c + ' sudah boarding.', 'warn'); return; }
     b.boarded = true;
@@ -235,6 +240,10 @@ export function boardPassenger(sid, code, toast, closeModal, refresh) {
   const s = schedById(sid);
   if (!s || s.status === 'cancelled' || ['missed', 'cancelled', 'arrived'].includes(s.tripStatus)) {
     toast('Boarding ditutup — jadwal sudah terlewat/dibatalkan/selesai.', 'err');
+    return false;
+  }
+  if (scheduleMaintenance(s) && (s.tripStatus || 'scheduled') === 'scheduled') {
+    toast('Boarding ditutup — jadwal maintenance armada.', 'err');
     return false;
   }
   if (b.status !== 'paid') { toast('Tiket ' + c + ' status: ' + b.status, 'warn'); return false; }
@@ -456,6 +465,8 @@ export default function Tasks() {
     const tk = takenSeats(s.id);
     const delayActive = s.tripStatus === 'scheduled' && s.delayUntil && new Date(s.delayUntil).getTime() > Date.now();
     const tripInfo = s.tripStatus === 'ontrip' && Array.isArray(s.tripDelayInfo) ? s.tripDelayInfo[0] : null;
+    const mt = scheduleMaintenance(s);
+    const mtActive = !!mt && !['ontrip', 'arrived'].includes(s.tripStatus);
     const prog = s.tripStatus === 'ontrip' ? tripProgress(s, r, now) : null;
     /* Titik jemput penumpang — hanya baris yang benar-benar ada di manifest
        (kursi yang dipesan), lalu dikelompokkan per titik jemput. */
@@ -522,16 +533,17 @@ export default function Tasks() {
         ) : null}
         {delayActive ? <div className="mt-2.5 bg-amber-50 border border-amber-200 rounded-2xl p-2.5 text-[12px] font-semibold text-amber-900">Delay {s.delayMinutes} menit • estimasi {fmtClock(s.delayUntil)} — {s.delayReason}</div> : null}
         {tripInfo ? <div className="mt-2.5 bg-sky-50 border border-sky-200 rounded-2xl p-2.5 text-[12px] font-semibold text-sky-900">Info keterlambatan: {tripInfo.reason}{tripInfo.note ? ' • ' + tripInfo.note : ''} ({fmtClock(tripInfo.at)})</div> : null}
+        {mtActive ? <div className="mt-2.5 bg-red-50 border-2 border-red-200 rounded-2xl p-2.5 text-[12px] font-semibold text-red-800"><b>Maintenance armada</b>{mt.legacy ? ' — status armada sedang maintenance.' : ' ' + maintenancePeriodLabel(mt) + '.'} Jadwal ini tidak berangkat; booking pelanggan ditangani agen. Manifest tetap dapat dilihat.</div> : null}
         <div className="flex flex-wrap gap-1.5 mt-3 items-center">
           <button onClick={() => openModal(<ManifestModal sid={s.id} />)} className="badge bg-sky-100 text-sky-700 cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="users" className="w-3.5 h-3.5" /> Manifest ({bk.length})</button>
-          {late ? <button onClick={finish} className="badge bg-blue-600 text-white cursor-pointer !text-[12px] py-1.5 active:scale-95 transition">Tandai Tiba</button> : null}
-          {!late && (s.tripStatus === 'scheduled' || !s.tripStatus) ? <button onClick={() => openModal(<StartTripModal sid={s.id} />)} className="badge bg-green-500 text-white cursor-pointer !text-[12px] py-1.5 active:scale-95 transition">Berangkat →</button> : null}
-          {!late && (s.tripStatus === 'scheduled' || !s.tripStatus) ? <button onClick={() => openModal(<DelayModal sid={s.id} mode="departure" />)} className="badge bg-amber-100 text-amber-700 cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="clock" className="w-3.5 h-3.5" /> Delay</button> : null}
-          {!late && (s.tripStatus === 'scheduled' || !s.tripStatus) && bk.length ? <button onClick={() => openModal(<CancelTripModal sid={s.id} by="pengemudi" />)} className="badge bg-red-100 text-red-600 cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="calendar-x" className="w-3.5 h-3.5" /> Batalkan</button> : null}
+          {late && !mtActive ? <button onClick={finish} className="badge bg-blue-600 text-white cursor-pointer !text-[12px] py-1.5 active:scale-95 transition">Tandai Tiba</button> : null}
+          {!late && !mtActive && (s.tripStatus === 'scheduled' || !s.tripStatus) ? <button onClick={() => openModal(<StartTripModal sid={s.id} />)} className="badge bg-green-500 text-white cursor-pointer !text-[12px] py-1.5 active:scale-95 transition">Berangkat →</button> : null}
+          {!late && !mtActive && (s.tripStatus === 'scheduled' || !s.tripStatus) ? <button onClick={() => openModal(<DelayModal sid={s.id} mode="departure" />)} className="badge bg-amber-100 text-amber-700 cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="clock" className="w-3.5 h-3.5" /> Delay</button> : null}
+          {!late && !mtActive && (s.tripStatus === 'scheduled' || !s.tripStatus) && bk.length ? <button onClick={() => openModal(<CancelTripModal sid={s.id} by="pengemudi" />)} className="badge bg-red-100 text-red-600 cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="calendar-x" className="w-3.5 h-3.5" /> Batalkan</button> : null}
           {!late && s.tripStatus === 'ontrip' ? <button onClick={finish} className="badge bg-blue-600 text-white cursor-pointer !text-[12px] py-1.5 active:scale-95 transition">Tiba di Tujuan</button> : null}
           {s.tripStatus === 'ontrip' && s.status !== 'cancelled' ? <button onClick={() => openModal(<DelayModal sid={s.id} mode="ontrip" />)} className="badge bg-sky-100 text-sky-700 cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="clock" className="w-3.5 h-3.5" /> Info Delay</button> : null}
-          {!late && (s.status === 'open' || !s.status) && (s.tripStatus === 'scheduled' || !s.tripStatus) && left > 0 ? <button onClick={() => openModal(<DriverBookingModal sid={s.id} />)} className="badge bg-violet-100 text-violet-700 cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="user-plus" className="w-3.5 h-3.5" /> Pesan Tiket</button> : null}
-          {s.tripStatus !== 'missed' && s.status !== 'cancelled' ? <button onClick={() => openModal(<ScanModal sid={s.id} />)} className="badge bg-[#0b2447] text-white cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="scan-line" className="w-3.5 h-3.5" /> Scan QR</button> : null}
+          {!late && !mtActive && (s.status === 'open' || !s.status) && (s.tripStatus === 'scheduled' || !s.tripStatus) && left > 0 ? <button onClick={() => openModal(<DriverBookingModal sid={s.id} />)} className="badge bg-violet-100 text-violet-700 cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="user-plus" className="w-3.5 h-3.5" /> Pesan Tiket</button> : null}
+          {!mtActive && s.tripStatus !== 'missed' && s.status !== 'cancelled' ? <button onClick={() => openModal(<ScanModal sid={s.id} />)} className="badge bg-[#0b2447] text-white cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="scan-line" className="w-3.5 h-3.5" /> Scan QR</button> : null}
         </div>
       </div>
     );

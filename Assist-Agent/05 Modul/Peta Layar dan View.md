@@ -6,7 +6,7 @@ tags:
   - type/reference
   - area/modul
 status: aktif
-updated: 2026-10-23
+updated: 2026-10-24
 source:
   - transaceh-react/src/App.jsx
   - transaceh-react/src/admin/Admin.jsx
@@ -49,6 +49,7 @@ source:
 | View | Komponen |
 | :--- | :--- |
 | `driver` | `DriverPanel` → `Tasks` |
+| `driver-maintenance` | `DriverPanel` → `Maintenance` |
 | `driver-trips` | `DriverPanel` → `Trips` |
 | `driver-wallet` | `DriverPanel` → `Wallet` |
 | `driver-profile` | `DriverPanel` → `Profile` |
@@ -81,6 +82,6 @@ source:
 - `transaceh-react/src/App.jsx:24-80`
 - `transaceh-react/src/agen/Agen.jsx:13-28`
 - `transaceh-react/src/admin/Admin.jsx:13-27`
-- `transaceh-react/src/driver/DriverPanel.jsx:10-23`
+- `transaceh-react/src/driver/DriverPanel.jsx:11-26`
 
 Lihat [[Navigasi dan View Router]].

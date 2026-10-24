@@ -7,7 +7,7 @@ tags:
   - area/modul
   - role/pelanggan
 status: aktif
-updated: 2026-10-23
+updated: 2026-10-24
 source:
   - transaceh-react/src/pages/Home.jsx
   - transaceh-react/src/pages/Search.jsx
@@ -15,6 +15,7 @@ source:
   - transaceh-react/src/pages/TicketDetail.jsx
   - transaceh-react/src/pages/History.jsx
   - transaceh-react/src/pages/Profile.jsx
+  - transaceh-react/src/lib/domain.js
 ---
 
 # Modul Pelanggan
@@ -48,6 +49,8 @@ source:
 - Tombol **Bayar** membuka `PaymentModal`.
 - Tombol **Batal** memanggil `cancelBooking`.
 - Tiket `done` pindah ke riwayat.
+- Tiket maintenance menampilkan badge `MAINTENANCE`, refund 100%, deadline, dan tombol **Pilih Refund / Pindah**.
+- Tiket `replaced` menampilkan asal jadwal dan kursi baru; tiket `refunded`/`cancelled_unpaid` menampilkan hasilnya.
 
 `TicketDetail`:
 
@@ -55,6 +58,8 @@ source:
 - Rute, armada, pengemudi, pickup.
 - Status trip dan delay.
 - Refund info.
+- Panel maintenance: refund 100% atau pilih armada pengganti; QR lama ditandai tidak berlaku.
+- Jika pindah, QR tetap berlaku untuk jadwal/kursi baru.
 - Rating bintang setelah selesai.
 
 ## Profil
@@ -68,15 +73,17 @@ source:
 
 - Pelanggan tidak bisa mengakses panel agen/driver/admin.
 - Booking hanya bisa dibatalkan sebelum perjalanan dan sebelum boarding.
-- Refund pelanggan hanya komponen tiket.
+- Refund pelanggan biasa hanya komponen tiket; refund maintenance 100% total.
+- Saat `choice_pending`, tombol batal biasa dinonaktifkan; gunakan panel maintenance.
 - Ulasan hanya setelah perjalanan selesai.
 
 ## Sumber
 
 - `transaceh-react/src/pages/Home.jsx:8-90`
 - `transaceh-react/src/pages/Search.jsx`
-- `transaceh-react/src/pages/Tickets.jsx:8-85`
-- `transaceh-react/src/pages/TicketDetail.jsx:35-90`
+- `transaceh-react/src/pages/Tickets.jsx:8-89`
+- `transaceh-react/src/pages/TicketDetail.jsx:47-52, 119-133, 176-223`
+- `transaceh-react/src/lib/domain.js:909-1001` — info maintenance booking.
 - `transaceh-react/src/pages/History.jsx`
 - `transaceh-react/src/pages/Profile.jsx`
 

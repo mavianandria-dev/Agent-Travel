@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { schedById, routeById, vehicleById, driverById, agencyById, audit, vehName, splitFare, cancelBooking as cancelBookingDomain, canCancelBooking, canPayBooking, refundRuleFor, refundPolicyOf, refundPolicyText, scheduleIsPast, ensureHoldExpiry, bookedPassengers } from '@/lib/domain.js';
+import { schedById, routeById, vehicleById, driverById, agencyById, audit, vehName, splitFare, cancelBooking as cancelBookingDomain, canCancelBooking, canPayBooking, refundRuleFor, refundPolicyOf, refundPolicyText, scheduleIsPast, ensureHoldExpiry, bookedPassengers, maintenanceBookingInfo, maintenanceDeadlineLabel, refundMaintenanceBooking, moveMaintenanceBooking, seatsLeft } from '@/lib/domain.js';
 import { fmtRp, todayStr, uid, fmtClock } from '@/lib/utils.js';
 import { pickupOf } from '@/lib/pickups.js';
 import { Icon, Empty, BadgeStatus, fmtDate } from '@/components/ui.jsx';
@@ -44,6 +44,12 @@ export default function TicketDetail({ bid }) {
   const tripStatus = s.tripStatus && s.tripStatus !== 'scheduled' ? s.tripStatus : (b.tripStatus || 'scheduled');
   const delayActive = s.tripStatus === 'scheduled' && s.delayUntil && new Date(s.delayUntil).getTime() > Date.now();
   const tripDelayInfo = s.tripStatus === 'ontrip' && Array.isArray(s.tripDelayInfo) ? s.tripDelayInfo[0] : null;
+  const mt = maintenanceBookingInfo(b);
+  const mtActive = mt?.state === 'choice_pending';
+  const mtCandidates = mt?.candidates || [];
+  const mtOriginal = mt?.originalSchedule || s;
+  const mtRoute = routeById(mtOriginal.routeId) || r;
+  const qrInvalid = !!mt && mt.state !== 'replaced';
 
   const submitReview = () => {
     const arr = DB.load('bookings', []);
@@ -74,9 +80,10 @@ export default function TicketDetail({ bid }) {
   };
 
   const cancelRule = refundRuleFor(s.agencyId, s);
-  const cancelable = canCancelBooking(b, s);
+  const cancelable = canCancelBooking(b, s) && !mtActive;
   const policyText = refundPolicyText(refundPolicyOf(s.agencyId));
   const cancelBlockReason = (() => {
+    if (mtActive) return 'Gunakan pilihan refund 100% / pindah armada pada panel maintenance.';
     if (b.status === 'done') return 'Perjalanan sudah selesai.';
     if (b.status === 'cancelled') return 'Booking sudah dibatalkan.';
     if (b.boarded) return 'Penumpang sudah boarding.';
@@ -109,16 +116,35 @@ export default function TicketDetail({ bid }) {
     go('tickets');
   };
 
+  const doMaintenanceRefund = () => {
+    const res = refundMaintenanceBooking(b.id, { by: 'pelanggan', reason: 'Pilihan pelanggan' });
+    refresh();
+    if (!res.ok) { toast(res.msg, 'err'); return; }
+    toast('Refund 100% ' + fmtRp(res.refund) + ' diproses.', 'ok');
+    go('tickets');
+  };
+
+  const doMove = (targetId) => {
+    const res = moveMaintenanceBooking(b.id, targetId, { by: 'pelanggan' });
+    refresh();
+    if (!res.ok) { toast(res.msg, 'err'); return; }
+    toast('Berhasil pindah ke ' + vehName(vehicleById(res.target.vehicleId)) + ' pukul ' + res.target.time + ' WIB', 'ok');
+    go('ticket-detail:' + b.id);
+  };
+
   return (
     <div className="anim grid md:grid-cols-2 gap-4">
       <div className="bg-white rounded-3xl shadow-card overflow-hidden print-only-off">
         <div className="bg-gradient-to-r from-[#0b2447] to-sky-700 text-white p-5">
-          <div className="flex items-center justify-between"><span className="font-extrabold text-[15px]">TransAceh • E-Tiket</span><div className="flex items-center gap-1.5"><BadgeStatus st={b.status} />{tripStatus === 'missed' && b.status !== 'cancelled' ? <BadgeStatus st="missed" /> : null}</div></div>
+          <div className="flex items-center justify-between"><span className="font-extrabold text-[15px]">TransAceh • E-Tiket</span><div className="flex items-center gap-1.5"><BadgeStatus st={b.status} />{mtActive ? <span className="badge bg-red-100 text-red-700 italic">MAINTENANCE</span> : mt?.state === 'refunded' ? <span className="badge bg-green-100 text-green-700">Refund</span> : null}{tripStatus === 'missed' && b.status !== 'cancelled' ? <BadgeStatus st="missed" /> : null}</div></div>
           <div className="font-mono font-extrabold text-[26px] tracking-widest mt-2">{b.code}</div>
           <div className="text-[13px] font-bold opacity-90">{r.from} → {r.to}</div>
         </div>
         <div className="p-5">
-          <div className="flex gap-4"><img src={'https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=TIKET-' + b.code} className="w-36 h-36 rounded-2xl border-2 border-slate-200" alt="QR" />
+          <div className="flex gap-4"><div className="relative w-36 h-36 shrink-0">
+              <img src={'https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=TIKET-' + b.code} className={'w-36 h-36 rounded-2xl border-2 border-slate-200 ' + (qrInvalid ? 'grayscale' : '')} alt="QR" />
+              {qrInvalid ? <div className="absolute inset-0 rounded-2xl bg-slate-900/65 text-white flex flex-col items-center justify-center text-center px-2"><Icon name="wrench" className="w-7 h-7 mb-1" /><div className="text-[11px] font-extrabold leading-tight italic">TIDAK BERLAKU<br />MAINTENANCE</div></div> : null}
+            </div>
             <div className="text-[13px] font-semibold space-y-1.5">
               <div><span className="text-slate-400">Tanggal</span><br /><b>{fmtDate(s.date)} • {s.time} WIB</b></div>
               <div><span className="text-slate-400">Armada / Pengemudi</span><br /><b>{vehName(v)} • {v.plate}</b><br /><b>{dr.name}</b> • {dr.phone}</div>
@@ -147,6 +173,54 @@ export default function TicketDetail({ bid }) {
         </div>
       </div>
       <div className="space-y-4">
+        {mt ? (
+          <div className={'bg-white rounded-3xl shadow-card p-5 border-2 ' + (mtActive ? 'border-red-200' : 'border-slate-100')}>
+            <h3 className="font-extrabold text-[15px] flex items-center gap-2"><Icon name="wrench" className="w-5 h-5 text-red-600" />{mtActive ? 'Jadwal Maintenance' : 'Riwayat Maintenance'}</h3>
+            <div className="mt-2 bg-red-50 border border-red-200 rounded-2xl p-3 text-[12.5px] font-semibold text-red-900">
+              <div>Jadwal asal: <b>{mtOriginal.date} • {mtOriginal.time} WIB</b> — {mtRoute.from} → {mtRoute.to}</div>
+              {mt.request?.reason ? <div className="mt-1">Alasan: {mt.request.reason}</div> : null}
+              {mt.state !== 'replaced' && mt.state !== 'cancelled_unpaid' ? <div className="mt-1">Refund 100%: <b>{fmtRp(mt.refundAmount)}</b> (total pembayaran).</div> : null}
+            </div>
+
+            {mtActive ? (
+              <>
+                <div className="mt-2 bg-amber-50 border border-amber-200 rounded-2xl p-3 text-[12px] font-semibold text-amber-900">
+                  Pilih sebelum <b>{maintenanceDeadlineLabel(mt.deadline)}</b>. Jika tidak memilih, refund 100% diproses otomatis.
+                </div>
+                {mtCandidates.length ? (
+                  <div className="mt-3">
+                    <div className="text-[12px] font-extrabold text-slate-600">Armada pengganti tersedia</div>
+                    <div className="space-y-2 mt-1.5">
+                      {mtCandidates.map((t) => {
+                        const tv = vehicleById(t.vehicleId);
+                        return (
+                          <div key={t.id} className="border-2 border-green-200 bg-green-50 rounded-2xl p-3">
+                            <div className="font-extrabold text-[12.5px]">{vehName(tv)} <span className="text-slate-500 font-semibold">• {tv?.plate}</span></div>
+                            <div className="text-[11.5px] font-semibold text-slate-600">{t.time} WIB • {seatsLeft(t.id)} kursi tersisa • harga sama</div>
+                            <button onClick={() => doMove(t.id)} className="mt-2 w-full bg-green-500 text-white font-extrabold text-[12px] py-2 rounded-xl">Pindah ke Armada Ini</button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-2 bg-slate-50 border border-slate-200 rounded-2xl p-3 text-[12px] font-semibold text-slate-600">Tidak ada armada pengganti valid saat ini. Refund 100% akan diproses otomatis.</div>
+                )}
+                <button onClick={doMaintenanceRefund} className="mt-3 w-full bg-red-500 hover:bg-red-600 text-white font-extrabold text-[13px] py-3 rounded-2xl">Refund 100% {fmtRp(mt.refundAmount)}</button>
+              </>
+            ) : mt.state === 'replaced' ? (
+              <div className="mt-2 bg-green-50 border border-green-200 rounded-2xl p-3 text-[12.5px] font-semibold text-green-900">
+                Sudah dipindahkan ke <b>{vehName(v)} ({v?.plate})</b> pukul <b>{s.time} WIB</b>, {fmtDate(s.date)}. Kursi baru: <b>{(b.seats || []).join(', ')}</b>. Pembayaran lama tetap berlaku.
+              </div>
+            ) : mt.state === 'refunded' ? (
+              <div className="mt-2 bg-green-50 border border-green-200 rounded-2xl p-3 text-[12.5px] font-semibold text-green-900">
+                Refund 100% {fmtRp(b.refundAmount)} • {b.refundStatus === 'done' ? 'Selesai' : b.refundStatus === 'diproses' ? 'Sedang diproses' : 'Menunggu diproses'}.
+              </div>
+            ) : mt.state === 'cancelled_unpaid' ? (
+              <div className="mt-2 bg-slate-50 border border-slate-200 rounded-2xl p-3 text-[12.5px] font-semibold text-slate-600">Booking belum dibayar dan dibatalkan karena maintenance. Tidak ada refund.</div>
+            ) : null}
+          </div>
+        ) : null}
         <div className="bg-white rounded-3xl shadow-card p-5">
           <h3 className="font-extrabold text-[15px] flex items-center gap-2"><Icon name="navigation" className="w-5 h-5 text-sky-600" />Status Perjalanan</h3>
           <TripTimeline st={tripStatus} />
