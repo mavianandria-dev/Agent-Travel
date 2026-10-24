@@ -1,0 +1,40 @@
+{
+	"nodes":[
+		{"id":"n-index","type":"file","file":"00 Mulai/00 Index.md","x":0,"y":260,"width":320,"height":140,"color":"1"},
+		{"id":"n-produk","type":"file","file":"01 Gambaran/Produk TransAceh.md","x":440,"y":-260,"width":300,"height":120},
+		{"id":"n-repo","type":"file","file":"01 Gambaran/Peta Repository.md","x":440,"y":-80,"width":300,"height":120},
+		{"id":"n-peran","type":"file","file":"01 Gambaran/Peran dan Hak Akses.md","x":440,"y":100,"width":300,"height":120},
+		{"id":"n-stack","type":"file","file":"01 Gambaran/Tech Stack.md","x":440,"y":280,"width":300,"height":120},
+		{"id":"n-arsitektur","type":"file","file":"02 Arsitektur/00 Arsitektur MOC.md","x":860,"y":-360,"width":300,"height":120,"color":"4"},
+		{"id":"n-data","type":"file","file":"03 Data Model/00 Data Model MOC.md","x":860,"y":-180,"width":300,"height":120,"color":"5"},
+		{"id":"n-alur","type":"file","file":"04 Alur Bisnis/00 Alur Bisnis MOC.md","x":860,"y":0,"width":300,"height":120,"color":"6"},
+		{"id":"n-modul","type":"file","file":"05 Modul/00 Modul MOC.md","x":860,"y":180,"width":300,"height":120,"color":"3"},
+		{"id":"n-konvensi","type":"file","file":"06 Konvensi/Pola Kode.md","x":860,"y":360,"width":300,"height":120},
+		{"id":"n-domain","type":"file","file":"02 Arsitektur/Lapisan Domain.md","x":1280,"y":-480,"width":300,"height":120},
+		{"id":"n-seed","type":"file","file":"02 Arsitektur/Lapisan Data dan Seed.md","x":1280,"y":-300,"width":300,"height":120},
+		{"id":"n-booking","type":"file","file":"04 Alur Bisnis/Alur Booking dan Checkout.md","x":1280,"y":-120,"width":300,"height":120},
+		{"id":"n-refund","type":"file","file":"04 Alur Bisnis/Alur Pembatalan dan Refund.md","x":1280,"y":60,"width":300,"height":120},
+		{"id":"n-ledger","type":"file","file":"04 Alur Bisnis/Alur Ledger dan Settlement.md","x":1280,"y":240,"width":300,"height":120},
+		{"id":"n-layar","type":"file","file":"05 Modul/Peta Layar dan View.md","x":1280,"y":420,"width":300,"height":120},
+		{"id":"n-ai","type":"file","file":"02 Arsitektur/Pusat Bantuan dan AI.md","x":1280,"y":600,"width":300,"height":120},
+		{"id":"n-catatan","type":"text","text":"**Cara membaca**\n\nMulai dari Index, lalu pilih MOC sesuai kebutuhan.\n\n- Arsitektur: cara aplikasi bekerja\n- Data: bentuk dan relasi data\n- Alur: perilaku bisnis\n- Modul: layar per peran\n\nSource of truth tetap kode di `transaceh-react/`.","x":440,"y":500,"width":340,"height":220,"color":"2"}
+	],
+	"edges":[
+		{"id":"e1","fromNode":"n-index","fromSide":"right","toNode":"n-produk","toSide":"left"},
+		{"id":"e2","fromNode":"n-index","fromSide":"right","toNode":"n-repo","toSide":"left"},
+		{"id":"e3","fromNode":"n-index","fromSide":"right","toNode":"n-peran","toSide":"left"},
+		{"id":"e4","fromNode":"n-index","fromSide":"right","toNode":"n-stack","toSide":"left"},
+		{"id":"e5","fromNode":"n-index","fromSide":"right","toNode":"n-arsitektur","toSide":"left"},
+		{"id":"e6","fromNode":"n-index","fromSide":"right","toNode":"n-data","toSide":"left"},
+		{"id":"e7","fromNode":"n-index","fromSide":"right","toNode":"n-alur","toSide":"left"},
+		{"id":"e8","fromNode":"n-index","fromSide":"right","toNode":"n-modul","toSide":"left"},
+		{"id":"e9","fromNode":"n-arsitektur","fromSide":"right","toNode":"n-domain","toSide":"left"},
+		{"id":"e10","fromNode":"n-arsitektur","fromSide":"right","toNode":"n-seed","toSide":"left"},
+		{"id":"e11","fromNode":"n-alur","fromSide":"right","toNode":"n-booking","toSide":"left"},
+		{"id":"e12","fromNode":"n-alur","fromSide":"right","toNode":"n-refund","toSide":"left"},
+		{"id":"e13","fromNode":"n-alur","fromSide":"right","toNode":"n-ledger","toSide":"left"},
+		{"id":"e14","fromNode":"n-modul","fromSide":"right","toNode":"n-layar","toSide":"left"},
+		{"id":"e15","fromNode":"n-arsitektur","fromSide":"bottom","toNode":"n-ai","toSide":"left"},
+		{"id":"e16","fromNode":"n-konvensi","fromSide":"right","toNode":"n-domain","toSide":"bottom"}
+	]
+}

@@ -1,0 +1,63 @@
+---
+title: 00 Arsitektur MOC
+type: moc
+area: arsitektur
+tags:
+  - type/moc
+  - area/arsitektur
+status: aktif
+updated: 2026-10-23
+source: []
+---
+
+# Arsitektur — MOC
+
+Aplikasi adalah SPA React dengan data di `localStorage` dan satu Worker untuk AI.
+
+```mermaid
+flowchart TB
+  subgraph Browser
+    UI[React Components]
+    CTX[AppContext]
+    DOM[domain.js]
+    DATA[lib/db.js]
+    LS[(localStorage at_*)]
+  end
+  subgraph Cloud
+    W[Cloudflare Worker]
+    N[NVIDIA API]
+  end
+  subgraph Deploy
+    GH[GitHub Actions]
+    GP[GitHub Pages]
+  end
+  UI --> CTX
+  UI --> DOM
+  CTX --> DATA
+  DOM --> DATA
+  DATA --> LS
+  UI -->|POST /api/chat| W
+  W --> N
+  GH -->|build transaceh-react| GP
+```
+
+## Catatan
+
+- [[Bootstrap dan Provider]] — urutan start aplikasi dan efek samping awal.
+- [[Navigasi dan View Router]] — cara `view` menggantikan React Router.
+- [[State Management]] — state global, `tick`, modal, toast, checkout draft.
+- [[Lapisan Data dan Seed]] — `DB.load/save`, seed, migrasi.
+- [[Lapisan Domain]] — aturan bisnis di `domain.js`.
+- [[UI dan Desain]] — Tailwind, komponen UI, ikon, peta, chart.
+- [[Pusat Bantuan dan AI]] — chatbot, Worker, privasi.
+- [[Build dan Deploy]] — Vite, GitHub Pages, Wrangler.
+
+## Prinsip besar
+
+1. **Client-only** — tidak ada API aplikasi; semua data di browser.
+2. **State global minimal** — Context menyimpan navigasi dan UI, bukan seluruh data.
+3. **Data dibaca langsung** — komponen memanggil `DB.load()` saat render.
+4. **Refresh manual** — `refresh()` menaikkan `tick` agar render ulang.
+5. **Domain terpusat** — aturan bisnis sedapat mungkin di `lib/domain.js`.
+
+Lihat [[Technical Debt dan Jebakan]] untuk konsekuensi desain ini.

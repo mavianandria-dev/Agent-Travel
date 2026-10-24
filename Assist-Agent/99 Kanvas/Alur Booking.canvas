@@ -1,0 +1,35 @@
+{
+	"nodes":[
+		{"id":"b-start","type":"text","text":"**Mulai**\n\n`Home` → pilih rute → `Search`\n\nWizard 5 langkah","x":0,"y":100,"width":260,"height":140,"color":"2"},
+		{"id":"b-step1","type":"text","text":"**1. Rute**\n\n`groupRoutes()`\n\nHanya rute aktif dan bookable","x":340,"y":100,"width":260,"height":140},
+		{"id":"b-step2","type":"text","text":"**2. Tanggal**\n\n0–30 hari\n\nHitung jadwal siap + kursi tersisa","x":680,"y":100,"width":260,"height":140},
+		{"id":"b-step3","type":"text","text":"**3. Armada**\n\nPilih jadwal\n\n`bw.scheduleId`","x":1020,"y":100,"width":260,"height":140},
+		{"id":"b-step4","type":"text","text":"**4. Kursi**\n\n`CabinGrid`\n\nPenumpang + pickup + voucher","x":1360,"y":100,"width":260,"height":140},
+		{"id":"b-step5","type":"text","text":"**5. Bayar**\n\nRingkasan\n\nGuest → draft login","x":1700,"y":100,"width":260,"height":140},
+		{"id":"b-booking","type":"text","text":"**Booking dibuat**\n\n`status: pending`\n\n`holdExpiry: +15 menit`\n\nPayment `pending`","x":1700,"y":340,"width":260,"height":180,"color":"5"},
+		{"id":"b-pay","type":"text","text":"**PaymentModal**\n\nQRIS / VA / E-Wallet / Transfer\n\nSimulasi bayar","x":1360,"y":340,"width":260,"height":180},
+		{"id":"b-paid","type":"text","text":"**Lunas**\n\nBooking `paid`\n\nPayment `paid`\n\n`fare = splitFare()`","x":1020,"y":340,"width":260,"height":180,"color":"4"},
+		{"id":"b-ledger","type":"text","text":"**Ledger**\n\n`status: ditahan`\n\nTiket + jasa + fee","x":680,"y":340,"width":260,"height":180,"color":"6"},
+		{"id":"b-ticket","type":"text","text":"**E-tiket**\n\nQR + manifest\n\nBoarding oleh pengemudi","x":340,"y":340,"width":260,"height":180},
+		{"id":"b-expire","type":"text","text":"**Hold habis**\n\n`cleanupHolds()`\n\nBooking & payment `cancelled`\n\nVoucher kembali","x":1700,"y":600,"width":260,"height":180,"color":"3"},
+		{"id":"b-cancel","type":"text","text":"**Batal / refund**\n\nPelanggan: tiket saja\n\nOperator/no-show: total\n\nLedger `void`","x":1360,"y":600,"width":260,"height":180,"color":"3"},
+		{"id":"b-notes","type":"file","file":"04 Alur Bisnis/Alur Booking dan Checkout.md","x":0,"y":600,"width":300,"height":140},
+		{"id":"b-ledger-note","type":"file","file":"04 Alur Bisnis/Alur Ledger dan Settlement.md","x":340,"y":600,"width":300,"height":140}
+	],
+	"edges":[
+		{"id":"e1","fromNode":"b-start","fromSide":"right","toNode":"b-step1","toSide":"left"},
+		{"id":"e2","fromNode":"b-step1","fromSide":"right","toNode":"b-step2","toSide":"left"},
+		{"id":"e3","fromNode":"b-step2","fromSide":"right","toNode":"b-step3","toSide":"left"},
+		{"id":"e4","fromNode":"b-step3","fromSide":"right","toNode":"b-step4","toSide":"left"},
+		{"id":"e5","fromNode":"b-step4","fromSide":"right","toNode":"b-step5","toSide":"left"},
+		{"id":"e6","fromNode":"b-step5","fromSide":"bottom","toNode":"b-booking","toSide":"top"},
+		{"id":"e7","fromNode":"b-booking","fromSide":"left","toNode":"b-pay","toSide":"right"},
+		{"id":"e8","fromNode":"b-pay","fromSide":"left","toNode":"b-paid","toSide":"right"},
+		{"id":"e9","fromNode":"b-paid","fromSide":"left","toNode":"b-ledger","toSide":"right"},
+		{"id":"e10","fromNode":"b-ledger","fromSide":"left","toNode":"b-ticket","toSide":"right"},
+		{"id":"e11","fromNode":"b-booking","fromSide":"bottom","toNode":"b-expire","toSide":"top"},
+		{"id":"e12","fromNode":"b-paid","fromSide":"bottom","toNode":"b-cancel","toSide":"top"},
+		{"id":"e13","fromNode":"b-notes","fromSide":"right","toNode":"b-step1","toSide":"bottom"},
+		{"id":"e14","fromNode":"b-ledger-note","fromSide":"right","toNode":"b-ledger","toSide":"bottom"}
+	]
+}
