@@ -36,7 +36,7 @@ Jumlah baris adalah total baris file saat catatan dibuat (2026-10-25).
 | `src/pages/Profile.jsx` | 76 | Profil |
 | `src/pages/Notif.jsx` | 40 | Notifikasi |
 | `src/pages/Help.jsx` | 91 | Pusat bantuan |
-| `src/pages/Auth.jsx` | 234 | Login/daftar/daftar agen |
+| `src/pages/Auth.jsx` | 293 | Login/daftar/daftar agen |
 
 ## Pusat bantuan
 

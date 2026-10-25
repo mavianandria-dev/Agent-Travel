@@ -214,7 +214,9 @@ export function Register() {
       {!IS_SHEETS ? (
         <button onClick={() => { toast('Google OAuth (simulasi) — login berhasil'); demoLogin('user@demo.com', 'user123'); }} className="mt-2 w-full bg-white border-2 border-slate-200 font-extrabold text-[13px] py-3 rounded-2xl flex items-center justify-center gap-2"><span className="font-extrabold text-sky-500 text-[16px]">G</span> Daftar dengan Google</button>
       ) : null}
-      <div className="text-[12.5px] text-center mt-3 font-semibold text-slate-500">Sudah punya akun? <button onClick={() => go('login')} className="text-sky-600 font-extrabold">Masuk</button></div></div>
+      <div className="text-[12.5px] text-center mt-3 font-semibold text-slate-500">Sudah punya akun? <button onClick={() => go('login')} className="text-sky-600 font-extrabold">Masuk</button></div>
+      <div className="text-[11px] text-center mt-2 font-semibold text-slate-400">atau</div>
+      <div className="text-[12.5px] text-center mt-2 font-semibold text-slate-500">Ingin menjadi mitra kami? <button onClick={() => go('register-agen')} className="text-sky-600 font-extrabold">Daftar agen travel</button></div></div>
   );
 }
 
