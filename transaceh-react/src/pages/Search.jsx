@@ -45,6 +45,8 @@ function calcDiscount(voucher, scheduleId, seatCount) {
   if (v.quota != null && Number(v.used || 0) >= Number(v.quota)) return 0;
   const s = schedById(scheduleId);
   if (!s) return 0;
+  /* Voucher milik agen hanya berlaku pada jadwal agen tersebut. */
+  if (v.agencyId && String(v.agencyId) !== String(s.agencyId || '')) return 0;
   const sub = s.price * seatCount;
   if (v.type === 'percent') return Math.min(Math.round((sub * v.value) / 100), v.maxDisc || sub);
   return Math.min(v.value, sub);
@@ -464,7 +466,8 @@ export default function Search() {
     const discount = calcDiscount(bw.voucher, bw.scheduleId, bw.seats.length);
     const total = sub - discount;
     const _fare = splitFare(s, bw.seats.length, discount);
-    const vouchers = DB.load('vouchers', []).filter((x) => x.active);
+    const schedAgency = schedById(bw.scheduleId)?.agencyId || '';
+    const vouchers = DB.load('vouchers', []).filter((x) => x.active && (!x.agencyId || String(x.agencyId) === String(schedAgency)));
     return (
       <>
         <h3 className="font-extrabold text-[16px]">Ringkasan &amp; Pembayaran</h3>

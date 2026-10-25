@@ -6,7 +6,7 @@ tags:
   - type/note
   - area/arsitektur
 status: aktif
-updated: 2026-10-25
+updated: 2026-10-26
 source:
   - transaceh-react/package.json
   - transaceh-react/vite.config.js
@@ -36,14 +36,14 @@ source:
 | Oxlint | Lint |
 | Wrangler | Cloudflare Worker (AI proxy) |
 | GitHub Actions | Build & deploy GitHub Pages |
-| Google Apps Script | Seed database Google Sheets (belum terhubung ke app) |
+| Google Apps Script | Backend Google Sheets mode direct (kode 1.2.0; deployment masih 1.1.0) |
 
 ## Yang **tidak** dipakai
 
 - **React Router** — navigasi memakai state `view` di `AppContext`.
 - **Redux/Zustand** — state global memakai React Context.
 - **TypeScript** — seluruh kode aplikasi `.js`/`.jsx`.
-- **Backend API aplikasi** — data aktif di `localStorage`; backend yang berjalan hanya Worker AI. Google Apps Script baru dipakai untuk seed, belum menjadi API aplikasi.
+- **Backend API aplikasi** — mode default masih `localStorage`; adapter Google Apps Script sudah ada, tetapi Web App ter-deploy belum mendukung `sync`. Worker yang berjalan hanya untuk AI.
 - **Framework test** — belum ada unit/integration test; validasi lewat lint dan manual.
 
 ## Arsitektur singkat
@@ -66,7 +66,7 @@ flowchart LR
 
 ## Rencana Google Sheets
 
-Backend Google Sheets disiapkan bertahap: seed produksi minimal, lalu `code.gs` mode direct (155 asersi lokal), lalu adapter cache di frontend. Frontend masih client-only sampai Fase B–D; probe CORS belum dilakukan. Lihat [[Database Google Sheets]].
+Backend Google Sheets sudah mencapai `code.gs` 1.2.0 dengan `sync` ter-scope dan 265 asersi lokal. Adapter frontend (cache, diff, rollback, bootstrap) juga sudah ada, tetapi deployment Web App masih 1.1.0 dan probe CORS browser belum dilakukan; mode default tetap `local`. Lihat [[Database Google Sheets]].
 
 ## Sumber
 

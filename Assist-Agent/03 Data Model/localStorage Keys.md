@@ -6,7 +6,7 @@ tags:
   - type/reference
   - area/data
 status: aktif
-updated: 2026-10-24
+updated: 2026-10-26
 source:
   - transaceh-react/src/lib/db.js
   - transaceh-react/src/lib/seed.js
@@ -23,8 +23,8 @@ source:
 `DB.save(key, value)` menulis ke `localStorage` dengan nama `at_` + `key`.
 `DB.load(key, fallback)` membaca key yang sama.
 
-> [!info] Ini sumber data yang masih aktif
-> Google Sheets tahap seed memakai nama koleksi yang sama, tetapi belum terhubung ke aplikasi. Lihat [[Database Google Sheets]].
+> [!info] Mode data
+> Mode default masih `localStorage`; adapter Google Sheets sudah ada, tetapi Web App ter-deploy belum mendukung `sync`. Saat `VITE_DATA_MODE=sheets`, data aplikasi dipindah ke cache memori + Google Sheets, sedangkan `session`, `lang`, `checkout_draft`, `supportGuest`, dan `guest_support_tickets` tetap lokal. Lihat [[Database Google Sheets]].
 
 ## Koleksi data
 
@@ -58,6 +58,7 @@ source:
 | `at_lang` | string | `id` atau `en` |
 | `at_checkout_draft` | object | `{ bw, ts }` draft checkout tamu, TTL 30 menit |
 | `at_supportGuest` | object | Identitas guest untuk Pusat Bantuan |
+| `at_guest_support_tickets` | array | Tiket guest mode Sheets (lokal, tanpa akun) |
 
 ## Flag seed dan migrasi
 
@@ -91,7 +92,8 @@ Menghapus semua `at_*` akan:
 
 ## Sumber
 
-- `transaceh-react/src/lib/db.js:1-6`
+- `transaceh-react/src/lib/db.js:1-10` — daftar key yang tetap lokal.
+- `transaceh-react/src/lib/runtime.js` — pemilihan mode data.
 - `transaceh-react/src/lib/seed.js:70-132`
 - `transaceh-react/src/lib/domain.js:748-780` — pembacaan request maintenance.
 - `transaceh-react/src/lib/checkoutDraft.js:11-30`

@@ -6,7 +6,7 @@ tags:
   - type/note
   - area/arsitektur
 status: aktif
-updated: 2026-10-25
+updated: 2026-10-26
 source:
   - .github/workflows/deploy-pages.yml
   - transaceh-react/package.json
@@ -63,17 +63,17 @@ google-apps-script/
 ├─ code.gs                  # API Web App mode direct
 ├─ appsscript.json          # manifest bound script
 ├─ local-tests/
-│  └─ mock-harness.mjs      # 155 asersi mock Apps Script
+│  └─ mock-harness.mjs      # 265 asersi mock Apps Script
 └─ README.md                # pemasangan, probe CORS, kontrak API
 ```
 
-Script terikat ke spreadsheet. `code.gs` sudah memakai mode direct (tanpa proxy DB) dan lulus 155 asersi lokal, tetapi belum dipanggil aplikasi React; database aktif masih `localStorage`. Lihat [[Database Google Sheets]].
+Script terikat ke spreadsheet. `code.gs` versi 1.2.0 memakai mode direct (tanpa proxy DB), sudah punya `sync` ter-scope, dan lulus 265 asersi lokal. Adapter frontend juga sudah ada, tetapi deployment Web App masih 1.1.0; mode default tetap `local` sampai gerbang deploy/CORS lulus. Lihat [[Database Google Sheets]].
 
 ## File kunci dan ukuran
 
 | File | Baris | Peran |
 | :--- | ---: | :--- |
-| `src/lib/domain.js` | 2.795 | Logika bisnis utama |
+| `src/lib/domain.js` | 2.816 | Logika bisnis utama |
 | `src/lib/seed.js` | 816 | Seed + migrasi data |
 | `src/pages/Search.jsx` | 515 | Wizard booking + pembayaran + kartu maintenance |
 | `src/agen/KycWizard.jsx` | 459 | KYC agen |
@@ -85,17 +85,17 @@ Script terikat ke spreadsheet. `code.gs` sudah memakai mode direct (tanpa proxy 
 | `src/admin/Accounts.jsx` | 509 | Manajemen akun |
 | `src/pages/help/ChatSection.jsx` | 429 | Chat AI |
 | `google-apps-script/seed.gs` | 476 | Seed database Sheets + validasi |
-| `google-apps-script/code.gs` | 1.718 | API Web App mode direct |
-| `google-apps-script/local-tests/mock-harness.mjs` | 955 | 155 asersi mock `code.gs` |
-| `google-apps-script/README.md` | 330 | Pemasangan, probe CORS, kontrak API |
+| `google-apps-script/code.gs` | 3.850 | API Web App 1.2.0: bootstrap, `sync`, validasi domain |
+| `google-apps-script/local-tests/mock-harness.mjs` | 1.636 | 265 asersi mock `code.gs` |
+| `google-apps-script/README.md` | 383 | Pemasangan, probe CORS, kontrak API |
 | `index.html` (root) | 2.053 | Versi legacy single-file |
 
 ## Entry point
 
 1. `transaceh-react/index.html` memuat `/src/main.jsx`.
-2. `main.jsx` merender `<App />` dalam `StrictMode`.
-3. `App.jsx` membungkus `Router` dengan `AppProvider`.
-4. `AppProvider` menjalankan `initDB()`, `syncScheduleLifecycle()`, dan `syncMaintenanceResolutions()`.
+2. `main.jsx` merender `BootGate` dalam `StrictMode`; `BootGate` memanggil `boot()`.
+3. Mode local: `initDB()`, `syncScheduleLifecycle()`, `syncMaintenanceResolutions()`. Mode Sheets: `loadSnapshot()` sebelum render.
+4. Setelah boot selesai, `App.jsx` membungkus `Router` dengan `AppProvider`. Interval lifecycle hanya aktif di mode local.
 
 ## Folder besar
 

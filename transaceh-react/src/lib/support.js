@@ -5,6 +5,14 @@ import { FAQ_CATEGORIES, BOT_FALLBACK_SUGGESTIONS, BOT_PROMPTS, allFaqs, faqById
 
 export const TICKETS_KEY = 'supportTickets';
 export const GUEST_KEY = 'supportGuest';
+const GUEST_TICKETS_KEY = 'guest_support_tickets';
+
+/** Tiket guest tetap lokal (tanpa akun); tiket pengguna login disinkronkan. */
+function ticketsKey() {
+  if (!DB.isRemote()) return TICKETS_KEY;
+  const session = DB.load('session', null);
+  return session && session.uid ? TICKETS_KEY : GUEST_TICKETS_KEY;
+}
 
 export const STATUS_META = {
   new: { label: 'Baru', cls: 'bg-sky-100 text-sky-700', dot: 'bg-sky-500' },
@@ -26,12 +34,12 @@ export const STATUS_FLOW = {
 export const STATUS_ORDER = { new: 0, process: 1, waiting: 2, resolved: 3 };
 
 export function loadTickets() {
-  const arr = DB.load(TICKETS_KEY, []);
+  const arr = DB.load(ticketsKey(), []);
   return Array.isArray(arr) ? arr : [];
 }
 
 export function saveTickets(arr) {
-  DB.save(TICKETS_KEY, Array.isArray(arr) ? arr : []);
+  DB.save(ticketsKey(), Array.isArray(arr) ? arr : []);
 }
 
 export function sortTickets(arr) {
@@ -98,6 +106,7 @@ export function createTicket({ channel = 'report', user = null, guest = null, ca
     userEmail: email,
     userName: name || 'Pengunjung',
     userPhone: phone,
+    agencyId: (user && user.agencyId) || null,
     isGuest: !user,
     category: cat,
     subject: subj,

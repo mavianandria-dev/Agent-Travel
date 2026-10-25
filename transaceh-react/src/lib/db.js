@@ -1,12 +1,30 @@
 /* DB layer.
    - mode local: localStorage seperti sebelumnya (kunci at_*)
-   - mode sheets: cache memori hasil bootstrap; hanya session/checkout draft
-     yang tetap di localStorage. Fase B belum punya jalur tulis remote. */
+   - mode sheets: cache memori + antrean sync ke Apps Script. Hanya session,
+     lang, checkout draft, dan tiket support guest yang tetap di localStorage.
+   - Tulisan optimistis: cache berubah dulu, lalu dikirim sebagai diff per
+     koleksi dengan baseRev. Bila server menolak, cache di-rollback dan
+     pemanggil menerima notifikasi lewat setSyncErrorHandler(). */
 
 import { IS_SHEETS } from './runtime.js';
+import { sheetsApi, getToken } from './sheetsApi.js';
 
-const LOCAL_KEYS = new Set(['session', 'lang', 'checkout_draft']);
+const LOCAL_KEYS = new Set(['session', 'lang', 'checkout_draft', 'guest_support_tickets']);
 const cache = Object.create(null);
+const serverSnapshot = Object.create(null);
+const revisions = Object.create(null);
+const dirty = new Set();
+
+let syncTimer = null;
+let inFlight = false;
+let inFlightPromise = null;
+let generation = 0;
+let syncErrorHandler = null;
+
+function clone(value) {
+  if (value == null) return value;
+  try { return JSON.parse(JSON.stringify(value)); } catch { return value; }
+}
 
 function readLocal(k, f) {
   try {
@@ -15,6 +33,141 @@ function readLocal(k, f) {
   } catch {
     return f;
   }
+}
+
+function recordKey(rec) {
+  if (!rec || typeof rec !== 'object') return '';
+  if (rec.id != null && rec.id !== '') return String(rec.id);
+  if (rec.key != null && rec.key !== '') return String(rec.key);
+  if (rec._id != null && rec._id !== '') return String(rec._id);
+  if (rec.code != null && rec.code !== '') return String(rec.code);
+  return '';
+}
+
+function indexRecords(list) {
+  const map = new Map();
+  (Array.isArray(list) ? list : []).forEach((rec) => {
+    const key = recordKey(rec);
+    if (key) map.set(key, rec);
+  });
+  return map;
+}
+
+/** Diff satu koleksi. Hanya record yang benar-benar berubah yang dikirim. */
+function diffCollection(prev, next) {
+  if (Array.isArray(prev) || Array.isArray(next)) {
+    const before = indexRecords(prev);
+    const after = indexRecords(next);
+    const upserts = [];
+    const deletes = [];
+    after.forEach((rec, key) => {
+      const old = before.get(key);
+      if (!old || JSON.stringify(old) !== JSON.stringify(rec)) upserts.push(rec);
+    });
+    before.forEach((_rec, key) => {
+      if (!after.has(key)) deletes.push(key);
+    });
+    return { upserts, deletes };
+  }
+  /* Koleksi objek tunggal (mis. fees lama) belum dipakai UI; jangan kirim
+     record tanpa id ke server. */
+  return { upserts: [], deletes: [] };
+}
+
+function scheduleSync(delay = 40) {
+  if (!IS_SHEETS || syncTimer) return;
+  syncTimer = setTimeout(() => {
+    syncTimer = null;
+    flush();
+  }, delay);
+}
+
+function buildChanges() {
+  const changes = {};
+  const snapshots = {};
+  Array.from(dirty).forEach((key) => {
+    if (!Object.prototype.hasOwnProperty.call(cache, key)) {
+      dirty.delete(key);
+      return;
+    }
+    const prev = Object.prototype.hasOwnProperty.call(serverSnapshot, key) ? serverSnapshot[key] : [];
+    const next = cache[key];
+    const diff = diffCollection(prev, next);
+    if (!diff.upserts.length && !diff.deletes.length) {
+      dirty.delete(key);
+      return;
+    }
+    changes[key] = {
+      baseRev: Number(revisions[key] || 0) || 0,
+      upserts: diff.upserts,
+      deletes: diff.deletes,
+    };
+    snapshots[key] = clone(next);
+  });
+  return Object.keys(changes).length ? { changes, snapshots } : null;
+}
+
+async function flush() {
+  if (!IS_SHEETS || inFlight || !dirty.size) {
+    if (inFlightPromise) return inFlightPromise;
+    return undefined;
+  }
+  const built = buildChanges();
+  if (!built) return undefined;
+
+  const token = getToken();
+  if (!token) {
+    /* Jangan kirim tulis tanpa sesi. Cache akan diganti saat login/bootstrap. */
+    return undefined;
+  }
+
+  const gen = generation;
+  const sentKeys = Object.keys(built.changes);
+  inFlight = true;
+  inFlightPromise = (async () => {
+    try {
+      const data = await sheetsApi.sync(token, built.changes);
+      if (gen !== generation) return;
+      sentKeys.forEach((key) => {
+        revisions[key] = Number((data && data.revisions && data.revisions[key]) || 0) || 0;
+        if (key === 'users') {
+          /* Jangan biarkan password plaintext tinggal di cache/snapshot dan
+             terkirim ulang saat baris user lain berubah. */
+          const strip = (list) => {
+            (Array.isArray(list) ? list : []).forEach((rec) => {
+              if (!rec || typeof rec !== 'object') return;
+              delete rec.pass;
+              delete rec.password;
+            });
+          };
+          strip(cache[key]);
+          strip(built.snapshots[key]);
+        }
+        serverSnapshot[key] = built.snapshots[key];
+        if (JSON.stringify(cache[key]) !== JSON.stringify(built.snapshots[key])) dirty.add(key);
+        else dirty.delete(key);
+      });
+    } catch (err) {
+      if (gen === generation) {
+        sentKeys.forEach((key) => {
+          if (Object.prototype.hasOwnProperty.call(serverSnapshot, key)) {
+            cache[key] = clone(serverSnapshot[key]);
+          } else {
+            delete cache[key];
+          }
+          dirty.delete(key);
+        });
+        if (syncErrorHandler) {
+          Promise.resolve(syncErrorHandler(err)).catch(() => {});
+        }
+      }
+    } finally {
+      inFlight = false;
+      inFlightPromise = null;
+      if (dirty.size) scheduleSync(120);
+    }
+  })();
+  return inFlightPromise;
 }
 
 export const DB = {
@@ -31,24 +184,50 @@ export const DB = {
 
   save(k, v) {
     if (IS_SHEETS && !LOCAL_KEYS.has(k)) {
-      throw new Error('Mode Sheets masih baca-saja. Perubahan data belum didukung sampai Fase C.');
+      cache[k] = v;
+      dirty.add(k);
+      scheduleSync();
+      return;
     }
     localStorage.setItem('at_' + k, JSON.stringify(v));
   },
 
   /** Isi cache dari respons bootstrap. Mengganti seluruh snapshot, bukan merge. */
-  hydrate(records) {
+  hydrate(records, revs) {
     if (!IS_SHEETS) return;
-    this.clear();
+    generation += 1;
+    this.clearCache();
     Object.keys(records || {}).forEach((k) => {
       cache[k] = records[k];
+      serverSnapshot[k] = clone(records[k]);
+    });
+    Object.keys(revs || {}).forEach((k) => {
+      revisions[k] = Number(revs[k] || 0) || 0;
     });
   },
 
-  clear() {
+  clearCache() {
     Object.keys(cache).forEach((k) => { delete cache[k]; });
+    Object.keys(serverSnapshot).forEach((k) => { delete serverSnapshot[k]; });
+    Object.keys(revisions).forEach((k) => { delete revisions[k]; });
+    dirty.clear();
+    if (syncTimer) { clearTimeout(syncTimer); syncTimer = null; }
+  },
+
+  clear() {
+    generation += 1;
+    this.clearCache();
   },
 
   /** Untuk diagnostik/UI: apakah koleksi ada di snapshot saat ini. */
   has(k) { return Object.prototype.hasOwnProperty.call(cache, k); },
+
+  revision(k) { return Number(revisions[k] || 0) || 0; },
+
+  pendingCount() { return dirty.size; },
+
+  setSyncErrorHandler(fn) { syncErrorHandler = typeof fn === 'function' ? fn : null; },
+
+  /** Kirim semua perubahan tertunda; dipakai saat logout / test. */
+  flush() { return flush(); },
 };

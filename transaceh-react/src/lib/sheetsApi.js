@@ -103,5 +103,6 @@ export const sheetsApi = {
   register: (payload) => call('register', payload),
   session: (token) => call('session', { token }),
   bootstrap: (token) => call('bootstrap', token ? { token } : {}),
+  sync: (token, changes) => call('sync', { token, changes }),
   changePassword: (token, currentPassword, newPassword) => call('changePassword', { token, currentPassword, newPassword }),
 };

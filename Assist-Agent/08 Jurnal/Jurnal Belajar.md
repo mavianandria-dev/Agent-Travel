@@ -6,7 +6,7 @@ tags:
   - type/journal
   - area/jurnal
 status: aktif
-updated: 2026-10-25
+updated: 2026-10-26
 source: []
 ---
 
@@ -24,6 +24,7 @@ Catatan sesi belajar, keputusan, dan pertanyaan. Satu sesi = satu catatan.
 | 2026-10-24 | [[2026-10-24 - Sesi 4]] | Seed produksi minimal Google Sheets dan validasi database |
 | 2026-10-25 | [[2026-10-25 - Sesi 5]] | Backend API `code.gs` + harness uji lokal 50 asersi |
 | 2026-10-25 | [[2026-10-25 - Sesi 6]] | Mode direct, proyeksi publik, filter per peran, aksi akun, throttle (155 asersi) |
+| 2026-10-25 | [[2026-10-25 - Sesi 7]] | Fase B/C: adapter Sheets, `sync` ter-scope, validasi booking/payment/ledger (265 asersi) |
 
 ## Cara menulis
 

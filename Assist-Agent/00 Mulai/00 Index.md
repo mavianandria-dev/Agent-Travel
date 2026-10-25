@@ -6,13 +6,13 @@ tags:
   - type/moc
   - area/navigasi
 status: aktif
-updated: 2026-10-25
+updated: 2026-10-26
 source: []
 ---
 
 # TransAceh — Memori Codebase
 
-Vault ini membantu memahami **TransAceh**, aplikasi travel antar kota berbasis React + Vite dengan data simulasi di `localStorage`. Backend Google Sheets sudah melewati tahap seed (tervalidasi) dan `code.gs` API mode direct sudah ditulis serta lulus 155 asersi mock di lokal; frontend masih memakai `localStorage` dan belum terhubung ke spreadsheet. Probe CORS dari browser belum dilakukan.
+Vault ini membantu memahami **TransAceh**, aplikasi travel antar kota berbasis React + Vite dengan data default di `localStorage`. Backend Google Sheets sudah melewati tahap seed (tervalidasi); `code.gs` versi 1.2.0 sudah punya `sync` ter-scope dan lulus 265 asersi mock di lokal. Adapter frontend juga sudah ada, tetapi Web App ter-deploy masih 1.1.0 dan mode Sheets belum diaktifkan. Probe CORS dari browser dan lifecycle server-side belum diselesaikan.
 
 > [!info] Mulai dari sini
 > Jika baru pertama kali, baca [[Cara Pakai Vault]] lalu ikuti [[Peta Belajar 7 Hari]].

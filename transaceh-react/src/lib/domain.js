@@ -1766,12 +1766,20 @@ export function feeFor(agencyId, amount){ const a=agencyById(agencyId); if(!a) r
 export function audit(action, detail){ if(DB.isRemote()) return; const l=DB.load('audit',[]); const u=currentUser(); l.unshift({id:uid('LOG'),time:new Date().toISOString(),actor:u?u.email+' ('+u.role+')':'guest',action,detail:detail||''}); DB.save('audit',l.slice(0,300)); }
 
 export function notify(userEmail, title, msg, ch, meta){
-  if(DB.isRemote()) return null;
   if(!userEmail) return null;
+  /* Mode Sheets: klien hanya boleh membuat notifikasi untuk dirinya sendiri.
+     Notifikasi untuk agen/pengemudi/superadmin dibuat oleh alur server atau
+     tampil lewat data transaksi masing-masing. */
+  let me = null;
+  if(DB.isRemote()){
+    me = currentUser();
+    if(!me || (me.role === 'agen' && me.status === 'pending')) return null;
+  }
   const n=DB.load('notifications',[]);
   const item={id:uid('NTF'),to:userEmail,title,msg,ch:ch||'app',time:new Date().toISOString(),read:false,...(meta&&typeof meta==='object'?meta:{})};
+  if(DB.isRemote() && String(item.to||'').toLowerCase() !== String(me.email||'').toLowerCase()) return null;
   n.unshift(item);
-  DB.save('notifications',n.slice(0,200));
+  DB.save('notifications', DB.isRemote() ? n : n.slice(0, 200));
   return item;
 }
 

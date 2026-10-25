@@ -6,14 +6,14 @@ tags:
   - type/moc
   - area/arsitektur
 status: aktif
-updated: 2026-10-24
+updated: 2026-10-26
 source:
   - google-apps-script/seed.gs
 ---
 
 # Arsitektur — MOC
 
-Aplikasi adalah SPA React dengan data di `localStorage` dan satu Worker untuk AI. Sejak 2026-10-24 ada backend Google Sheets tahap seed; backend itu belum terhubung ke aplikasi.
+Aplikasi adalah SPA React dengan data default di `localStorage` dan satu Worker untuk AI. Backend Google Sheets 1.2.0 serta adapter frontend sudah ada, tetapi Web App ter-deploy masih 1.1.0 dan mode Sheets belum diaktifkan sampai deploy/CORS/uji per peran/lifecycle server-side lulus.
 
 ```mermaid
 flowchart TB

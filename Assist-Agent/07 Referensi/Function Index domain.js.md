@@ -6,7 +6,7 @@ tags:
   - type/reference
   - area/referensi
 status: aktif
-updated: 2026-10-24
+updated: 2026-10-26
 source:
   - transaceh-react/src/lib/domain.js
 ---
@@ -23,175 +23,191 @@ Select-String -Path "transaceh-react/src/lib/domain.js" -Pattern "^export (funct
 
 | Fungsi | Baris | Fungsi |
 | :--- | ---: | :--- |
-| `simParse`, `simLabel`, `simExpired` | 9–17 | Parsing/validasi SIM |
-| `accountStatusKind` | 23 | Normalisasi status akun |
-| `accountStatusLabel`, `accountRoleLabel` | 31–33 | Label tampilan |
-| `accountBlocked` | 36 | Cek akun diblokir |
-| `checkAccountAccess` | 45 | Pesan alasan blokir |
-| `currentUser` | 61 | User dari session |
-| `setSession` | 72 | Simpan/hapus session |
-| `agentAccountForAgency` | 84 | Cari akun agen |
-| `driverParentIssue` | 95 | Cek agen induk pengemudi |
-| `createManagedAccount` | 139 | Buat akun |
-| `updateManagedAccount` | 191 | Ubah akun |
-| `resetManagedAccountPassword` | 222 | Reset password |
-| `setManagedAccountStatus` | 236 | Aktif/nonaktif |
-| `setAgencyStatusWithAccounts` | 289 | Status agen + akun anak |
-| `deleteManagedAgent` | 321 | Hapus agen tanpa riwayat |
+| `simParse`, `simLabel`, `simExpired` | 10-18 | Parsing/validasi SIM |
+| `accountStatusKind` | 24 | Normalisasi status akun |
+| `accountStatusLabel`, `accountRoleLabel` | 32-34 | Label tampilan |
+| `accountBlocked` | 37 | Cek akun diblokir |
+| `checkAccountAccess` | 46 | Pesan alasan blokir |
+| `currentUser` | 62 | User dari session |
+| `setSession` | 77 | Simpan/hapus session |
+| `agentAccountForAgency` | 89 | Cari akun agen |
+| `driverParentIssue` | 100 | Cek agen induk pengemudi |
+| `createManagedAccount` | 144 | Buat akun |
+| `updateManagedAccount` | 196 | Ubah akun |
+| `resetManagedAccountPassword` | 227 | Reset password |
+| `setManagedAccountStatus` | 241 | Aktif/nonaktif |
+| `setAgencyStatusWithAccounts` | 294 | Status agen + akun anak |
+| `agentDeleteBlockReason` | 318 | Alasan agen tidak boleh dihapus |
+| `deleteManagedAgent` | 326 | Hapus agen tanpa riwayat |
 
 ## Agen dan KYC
 
 | Fungsi | Baris |
 | :--- | ---: |
-| `agencyOf` | 335 |
-| `formatAlamat` | 338 |
-| `agencyProfileFromKyc` | 345 |
-| `syncAgencyProfileFromKyc` | 357 |
-| `agencyPending` | 2639 |
-| `kycAge` | 2650 |
-| `checkAgenAccess` | 2661 |
-| `validateKycStep1` | 2682 |
-| `kycDocGroups` | 2730 |
-| `kycDocList` | 2763 |
-| `kycDocWajib` | 2768 |
-| `kycLengkap` | 2773 |
-| `kycSummary` | 2778 |
+| `agencyOf` | 340 |
+| `formatAlamat` | 343 |
+| `agencyProfileFromKyc` | 350 |
+| `syncAgencyProfileFromKyc` | 362 |
+| `agencyById` | 639 |
+| `agencyPending` | 2660 |
+| `KYC_MIN_AGE`, `KYC_JENIS`, `KYC_BENTUK`, `KYC_AGAMA`, `KYC_HUBUNGAN`, `KYC_BANKS` | 2649-2654 |
+| `normName` | 2657 |
+| `kycAge` | 2671 |
+| `checkAgenAccess` | 2682 |
+| `validateKycStep1` | 2703 |
+| `kycDocGroups` | 2751 |
+| `kycDocList` | 2784 |
+| `kycDocWajib` | 2789 |
+| `kycLengkap` | 2794 |
+| `kycSummary` | 2799 |
 
 ## Rute
 
 | Fungsi | Baris |
 | :--- | ---: |
-| `routeById` | 367 |
-| `routeGroupKey` | 372 |
-| `groupRoutes` | 377 |
-| `routesInRouteGroup` | 403 |
-| `priceForAgency` | 1772 |
-| `normalizePoints` | 2536 |
-| `isRouteSuspended` | 2543 |
-| `routeOfferedTo` | 2544 |
-| `routeBookable` | 2545 |
-| `suspendAgencyRoute` | 2546 |
-| `activateAgencyRoute` | 2556 |
-| `saveRouteRequest` | 2567 |
-| `decideRouteRequest` | 2580 |
+| `routeById` | 372 |
+| `routeGroupKey` | 377 |
+| `groupRoutes` | 382 |
+| `routesInRouteGroup` | 408 |
+| `priceForAgency` | 1793 |
+| `normalizePoints` | 2557 |
+| `isRouteSuspended` | 2564 |
+| `routeOfferedTo` | 2565 |
+| `routeBookable` | 2566 |
+| `suspendAgencyRoute` | 2567 |
+| `activateAgencyRoute` | 2577 |
+| `saveRouteRequest` | 2588 |
+| `decideRouteRequest` | 2601 |
 
 ## Armada dan pengemudi
 
 | Fungsi | Baris |
 | :--- | ---: |
-| `vehicleById` | 411 |
-| `vehName` | 413 |
-| `fleetAvailable` | 418 |
-| `driverById` | 429 |
-| `driverForUser` | 433 |
-| `driverBySnapshot` | 467 |
-| `driverForVehicle` | 484 |
-| `backupDriverForVehicle` | 494 |
-| `driverProfileStatus` | 519 |
-| `ensureDriverForUser` | 526 |
-| `submitDriverProfile` | 558 |
-| `approveDriverProfile` | 594 |
-| `rejectDriverProfile` | 615 |
-| `vehLayout` | 665 |
-| `vehSeatCount` | 676 |
-| `schedSeatCap` | 678 |
+| `vehicleById` | 416 |
+| `vehName` | 418 |
+| `fleetAvailable` | 423 |
+| `driverById` | 434 |
+| `driverForUser` | 438 |
+| `sameDriver` | 449 |
+| `driverOptionLabel` | 465 |
+| `driverBySnapshot` | 472 |
+| `driverForVehicle` | 489 |
+| `backupDriverForVehicle` | 499 |
+| `DRIVER_DIRECT_FIELDS`, `DRIVER_VERIFY_FIELDS`, `DRIVER_FIELD_LABELS`, `driverFieldLabel` | 512-521 |
+| `driverProfileStatus` | 524 |
+| `ensureDriverForUser` | 531 |
+| `submitDriverProfile` | 563 |
+| `approveDriverProfile` | 599 |
+| `rejectDriverProfile` | 620 |
+| `vehLayout` | 677 |
+| `vehSeatCount` | 688 |
+| `schedSeatCap` | 690 |
 
 ## Maintenance armada
 
 | Fungsi | Baris |
 | :--- | ---: |
-| `MAINTENANCE_MAX_DAYS` | 692 |
-| `maintenanceDateLabel` | 699 |
-| `maintenancePeriodLabel` | 706 |
-| `maintenanceRequestStatusLabel` | 714 |
-| `maintenanceRequestById` | 724 |
-| `maintenanceRequestsForVehicle` | 728 |
-| `maintenanceRequestsForAgency` | 734 |
-| `maintenanceRequestsForDriver` | 740 |
-| `vehicleMaintenanceOn` | 748 |
-| `scheduleMaintenance` | 765 |
-| `vehicleMaintenancePeriods` | 774 |
-| `vehicleMaintenanceLabel` | 781 |
-| `maintenanceAffectedSchedules` | 791 |
-| `maintenanceImpact` | 804 |
-| `maintenanceRequestImpact` | 823 |
-| `createMaintenanceRequest` | 833 |
-| `maintenanceDeadlineFor` | 884 |
-| `maintenanceDeadlineLabel` | 894 |
-| `maintenanceReplacementCandidatesForBooking` | 909 |
-| `maintenanceBookingInfo` | 938 |
-| `decideMaintenanceRequest` | 1002 |
-| `cancelMaintenanceRequest` | 1152 |
-| `refundMaintenanceBooking` | 1187 |
-| `moveMaintenanceBooking` | 1218 |
-| `syncMaintenanceResolutions` | 1470 |
+| `MAINTENANCE_MAX_DAYS` | 704 |
+| `maintenanceDateLabel` | 711 |
+| `maintenancePeriodLabel` | 718 |
+| `maintenanceRequestStatusLabel` | 726 |
+| `maintenanceRequestById` | 736 |
+| `maintenanceRequestsForVehicle` | 740 |
+| `maintenanceRequestsForAgency` | 746 |
+| `maintenanceRequestsForDriver` | 752 |
+| `vehicleMaintenanceOn` | 760 |
+| `scheduleMaintenance` | 777 |
+| `vehicleMaintenancePeriods` | 786 |
+| `vehicleMaintenanceLabel` | 793 |
+| `maintenanceAffectedSchedules` | 803 |
+| `maintenanceImpact` | 816 |
+| `maintenanceRequestImpact` | 835 |
+| `createMaintenanceRequest` | 845 |
+| `maintenanceDeadlineFor` | 896 |
+| `maintenanceDeadlineLabel` | 906 |
+| `maintenanceReplacementCandidatesForBooking` | 921 |
+| `maintenanceBookingInfo` | 950 |
+| `decideMaintenanceRequest` | 1014 |
+| `cancelMaintenanceRequest` | 1164 |
+| `refundMaintenanceBooking` | 1199 |
+| `moveMaintenanceBooking` | 1230 |
+| `syncMaintenanceResolutions` | 1482 |
 
 ## Jadwal dan kursi
 
 | Fungsi | Baris |
 | :--- | ---: |
-| `schedById` | 632 |
-| `bookingsOf` | 636 |
-| `bookedPassengers` | 640 |
-| `takenSeats` | 648 |
-| `seatsLeft` | 657 |
-| `schedReady` | 680 |
-| `scheduleDepartureMs` | 1312 |
-| `scheduleEffectiveDepartureMs` | 1318 |
-| `departureTiming` | 1326 |
-| `scheduleIsPast` | 1336 |
-| `scheduleInHistory` | 1342 |
-| `scheduleNeedsReview` | 1350 |
-| `routeDurationMinutes` | 1363 |
-| `durMinutes` | 1382 |
-| `scheduleDateStatus` | 1406 |
-| `tripProgress` | 1454 |
-| `syncScheduleLifecycle` | 1536 |
-| `setScheduleDelay` | 1622 |
-| `toggleScheduleSeatBlock` | 2295 |
-| `setScheduleTripStatus` | 2341 |
-| `resolveScheduleNoShow` | 2421 |
+| `schedById` | 637 |
+| `bookingsOf` | 641 |
+| `bookedPassengers` | 645 |
+| `takenSeats` | 653 |
+| `seatsLeft` | 669 |
+| `schedReady` | 692 |
+| `SCHEDULE_GRACE_HOURS`, `MAX_DEPARTURE_DELAY_MINUTES` | 1320-1321 |
+| `scheduleDepartureMs` | 1324 |
+| `scheduleEffectiveDepartureMs` | 1330 |
+| `departureTiming` | 1338 |
+| `scheduleIsPast` | 1348 |
+| `scheduleInHistory` | 1354 |
+| `scheduleNeedsReview` | 1362 |
+| `routeDurationMinutes` | 1375 |
+| `durMinutes` | 1394 |
+| `SCHEDULE_BUFFER_MINUTES` | 1399 |
+| `countedSchedule` | 1403 |
+| `scheduleDateStatus` | 1418 |
+| `tripProgress` | 1466 |
+| `syncScheduleLifecycle` | 1548 |
+| `setScheduleDelay` | 1634 |
+| `reportTripDelay` | 1696 |
+| `scheduleHasTransactions` | 1727 |
+| `seatBookedFuture` | 1732 |
+| `toggleScheduleSeatBlock` | 2316 |
+| `setScheduleTripStatus` | 2362 |
+| `resolveScheduleNoShow` | 2442 |
 
 ## Tarif, refund, ledger
 
 | Fungsi | Baris |
 | :--- | ---: |
-| `feeFor` (legacy) | 1752 |
-| `priceForAgency` | 1772 |
-| `servicePerSeat` | 1773 |
-| `platformFeeOf` | 1776 |
-| `savePlatformFee` | 1781 |
-| `splitFare` | 1791 |
-| `normalizeRefundPolicy` | 1817 |
-| `refundPolicyOf` | 1832 |
-| `refundRuleFor` | 1841 |
-| `refundPolicyText` | 1849 |
-| `saveRefundPolicy` | 1860 |
-| `createLedger` | 1878 |
-| `releaseLedger` | 1888 |
-| `voidLedger` | 1894 |
-| `ensureHoldExpiry` | 1933 |
-| `canPayBooking` | 1939 |
-| `canCancelBooking` | 1949 |
-| `cancelBooking` | 1962 |
-| `startRefundProcessing` | 2014 |
-| `markRefundPaid` | 2043 |
-| `cancelScheduleByOperator` | 2081 |
-| `settleLedger` | 2519 |
-| `ledgerByDriver` | 2525 |
-| `ledgerEligible` | 2527 |
+| `hm`, `DEFAULT_SERVICE`, `DEFAULT_PLATFORM_FEE` | 1786-1791 |
+| `feeFor` (legacy) | 1764 |
+| `priceForAgency` | 1793 |
+| `servicePerSeat` | 1794 |
+| `platformFeeOf` | 1797 |
+| `savePlatformFee` | 1802 |
+| `splitFare` | 1812 |
+| `DEFAULT_REFUND_POLICY` | 1831 |
+| `normalizeRefundPolicy` | 1838 |
+| `refundPolicyOf` | 1853 |
+| `refundRuleFor` | 1862 |
+| `refundPolicyText` | 1870 |
+| `saveRefundPolicy` | 1881 |
+| `createLedger` | 1899 |
+| `releaseLedger` | 1909 |
+| `voidLedger` | 1915 |
+| `ensureHoldExpiry` | 1954 |
+| `canPayBooking` | 1960 |
+| `canCancelBooking` | 1970 |
+| `cancelBooking` | 1983 |
+| `startRefundProcessing` | 2035 |
+| `markRefundPaid` | 2064 |
+| `cancelScheduleByOperator` | 2102 |
+| `settleLedger` | 2540 |
+| `ledgerByDriver` | 2546 |
+| `ledgerEligible` | 2548 |
 
-## Booking dan trip
+## Booking, trip, dan notifikasi
 
 | Fungsi | Baris |
 | :--- | ---: |
-| `createDriverBooking` | 2191 |
-| `confirmDriverBookingPayment` | 2259 |
-| `cleanupHolds` | 1724 |
-| `audit` | 1754 |
-| `notify` | 1756 |
+| `cleanupHolds` | 1736 |
+| `feeFor` | 1764 |
+| `audit` | 1766 |
+| `notify` | 1768 |
+| `createDriverBooking` | 2212 |
+| `confirmDriverBookingPayment` | 2280 |
 
 > [!note] Nomor baris bisa bergeser
-> Selalu verifikasi ulang setelah file berubah. Gunakan pencarian nama fungsi, bukan hanya baris. Tabel ini diperbarui 2026-10-24 setelah penambahan blok maintenance.
+> Selalu verifikasi ulang setelah file berubah. Gunakan pencarian nama fungsi, bukan hanya baris. Tabel ini diperbarui 2026-10-26 setelah patch mode Sheets.
 
 Lihat [[Lapisan Domain]].

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
+import { uid } from '@/lib/utils.js';
 import { agencyOf, audit, formatAlamat, kycSummary, syncAgencyProfileFromKyc, refundPolicyText } from '@/lib/domain.js';
 
 export default function Setting({ ag }) {
@@ -23,7 +24,7 @@ function SettingInner({ agency }) {
   const [name, setName] = useState(a0.name || '');
   const [nvC, setNvC] = useState('');
   const [nvV, setNvV] = useState('');
-  const vouchers = DB.load('vouchers', []);
+  const vouchers = DB.load('vouchers', []).filter((x) => !x.agencyId || x.agencyId === agency.id);
 
   const saveAgency = () => {
     const arr = DB.load('agencies', []);
@@ -39,7 +40,7 @@ function SettingInner({ agency }) {
 
   const addVoucher = () => {
     const v = DB.load('vouchers', []);
-    v.push({ code: (nvC || 'PROMO').toUpperCase(), type: 'flat', value: Number(nvV) || 10000, quota: 50, used: 0, active: true, desc: 'Voucher agen' });
+    v.push({ id: uid('VC'), agencyId: agency.id, code: (nvC || 'PROMO').toUpperCase(), type: 'flat', value: Number(nvV) || 10000, quota: 50, used: 0, active: true, desc: 'Voucher agen' });
     DB.save('vouchers', v); refresh();
     toast('Voucher dibuat');
     setNvC('');
@@ -47,14 +48,15 @@ function SettingInner({ agency }) {
     refresh();
   };
 
-  const toggleVoucher = (code) => {
+  const toggleVoucher = (target) => {
+    if (!target || target.agencyId !== agency.id) return;
     const v = DB.load('vouchers', []);
-    const m = v.find((x) => x.code === code);
-    if (!m) return;
+    const m = v.find((x) => (x.id && target.id ? x.id === target.id : x.code === target.code));
+    if (!m || m.agencyId !== agency.id) return;
     m.active = !m.active;
     DB.save('vouchers', v); refresh();
-    audit('voucher_toggle', code + ' → ' + (m.active ? 'aktif' : 'nonaktif'));
-    toast('Voucher ' + code + (m.active ? ' diaktifkan' : ' dinonaktifkan'), 'info');
+    audit('voucher_toggle', m.code + ' → ' + (m.active ? 'aktif' : 'nonaktif'));
+    toast('Voucher ' + m.code + (m.active ? ' diaktifkan' : ' dinonaktifkan'), 'info');
     refresh();
   };
 
@@ -132,7 +134,10 @@ function SettingInner({ agency }) {
       <div className="bg-white rounded-3xl shadow-card p-5"><h3 className="font-extrabold text-[15px]">Kebijakan Refund &amp; Voucher</h3>
         <div className="text-[12.5px] font-semibold bg-slate-50 rounded-2xl p-3 mt-2"><div className="text-[12px] font-bold text-slate-600">{refundPolicyText(a0.refundPolicy)}</div><div className="text-[11.5px] font-medium text-slate-400 mt-1">Refund tiket diatur Super Admin. Hanya komponen tiket yang dikembalikan; jasa agen &amp; fee platform tidak.</div></div>
         <div className="text-[12px] font-extrabold mt-3">VOUCHER AKTIF</div>
-        {vouchers.map((vv) => <div key={vv.code} onClick={() => toggleVoucher(vv.code)} title="Klik untuk aktif/nonaktif" className="flex items-center gap-2 mt-1.5 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-[12.5px] font-bold cursor-pointer"><span className="font-mono">{vv.code}</span><span className="text-slate-500 font-medium flex-1">{vv.desc}</span><span className={`badge ${vv.active ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-500'}`}>{vv.used}/{vv.quota}</span></div>)}
+        {vouchers.map((vv) => {
+          const own = vv.agencyId === agency.id;
+          return <div key={vv.id || vv.code} onClick={() => toggleVoucher(vv)} title={own ? 'Klik untuk aktif/nonaktif' : 'Voucher global diatur Super Admin'} className={`flex items-center gap-2 mt-1.5 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-[12.5px] font-bold ${own ? 'cursor-pointer' : 'opacity-75'}`}><span className="font-mono">{vv.code}</span><span className="text-slate-500 font-medium flex-1">{vv.desc}{own ? '' : ' • Global'}</span><span className={`badge ${vv.active ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-500'}`}>{vv.used}/{vv.quota}</span></div>;
+        })}
         <div className="flex gap-2 mt-2.5"><input value={nvC} onChange={(e) => setNvC(e.target.value)} placeholder="KODE" className="flex-1 text-[12px] font-mono font-bold uppercase border-2 border-slate-200 rounded-xl px-3 py-2 focus-ring" /><input value={nvV} onChange={(e) => setNvV(e.target.value)} type="number" placeholder="Nilai" className="w-24 text-[12px] border-2 border-slate-200 rounded-xl px-3 py-2 focus-ring" /><button onClick={addVoucher} className="bg-amber-400 px-3.5 rounded-xl font-extrabold">+</button></div>
       </div>
     </div>

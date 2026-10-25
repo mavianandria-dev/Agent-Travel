@@ -4,7 +4,9 @@ import { todayStr } from '@/lib/utils.js';
 import { currentUser, setSession, cleanupHolds, syncScheduleLifecycle, syncMaintenanceResolutions, audit, agencyPending } from '@/lib/domain.js';
 import { clearCheckoutDraft } from '@/lib/checkoutDraft.js';
 import { IS_SHEETS } from '@/lib/runtime.js';
-import { signOutRemote } from '@/lib/remote.js';
+import { signOutRemote, loadSnapshot } from '@/lib/remote.js';
+import { DB } from '@/lib/db.js';
+import { clearToken, getToken } from '@/lib/sheetsApi.js';
 
 const AppCtx = createContext(null);
 export const useApp = () => useContext(AppCtx);
@@ -21,7 +23,7 @@ const initialView = () => {
     const u = currentUser();
     if (u && u.role === 'agen' && agencyPending(u)) return 'agen-pending';
     if (u && u.role !== 'pelanggan' && CUSTOMER_VIEWS.includes('home')) return roleHome(u.role);
-  } catch (e) { /* abaikan, pakai home */ }
+  } catch { /* abaikan, pakai home */ }
   return 'home';
 };
 
@@ -100,6 +102,46 @@ export function AppProvider({ children }) {
     setModal(null);
     setTick((x) => x + 1);
     toast('Keluar. Sampai jumpa!', 'info');
+  }, [toast]);
+
+  useEffect(() => {
+    if (!IS_SHEETS) return undefined;
+    DB.setSyncErrorHandler(async (err) => {
+      const code = String((err && err.code) || '');
+      if (code === 'UNAUTHORIZED' || code === 'ACCOUNT_BLOCKED') {
+        /* Jangan biarkan cache berisi data peran lama setelah sesi dicabut. */
+        clearToken();
+        setSession(null);
+        DB.clear();
+        clearCheckoutDraft();
+        setBw(freshBW());
+        setModal(null);
+        setView('home');
+        try {
+          const snap = await loadSnapshot(null);
+          DB.hydrate(snap.records, snap.revisions);
+        } catch { /* data publik akan dimuat ulang saat refresh */ }
+        setTick((x) => x + 1);
+        toast('Sesi berakhir. Silakan masuk lagi.', 'err');
+        return;
+      }
+      try {
+        const token = getToken();
+        if (token) {
+          const snap = await loadSnapshot(token);
+          if (snap.user) setSession(snap.user);
+        }
+      } catch { /* biarkan pengguna memakai data terakhir */ }
+      setTick((x) => x + 1);
+      if (code === 'REV_CONFLICT') {
+        toast('Data sudah berubah di server. Data dimuat ulang; silakan ulangi perubahan.', 'warn');
+      } else if (code === 'SEAT_CONFLICT') {
+        toast(err.message || 'Kursi sudah terpakai. Data dimuat ulang.', 'err');
+      } else {
+        toast((err && err.message) || 'Perubahan gagal disimpan ke server.', 'err');
+      }
+    });
+    return () => DB.setSyncErrorHandler(null);
   }, [toast]);
 
   useEffect(() => {

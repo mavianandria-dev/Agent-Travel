@@ -6,7 +6,7 @@ tags:
   - type/reference
   - area/referensi
 status: aktif
-updated: 2026-10-25
+updated: 2026-10-26
 source:
   - transaceh-react/src
   - google-apps-script
@@ -132,10 +132,10 @@ Jumlah baris adalah total baris file saat catatan dibuat (2026-10-25).
 | File | Baris | Isi |
 | :--- | ---: | :--- |
 | `google-apps-script/seed.gs` | 476 | Seed produksi minimal + validasi |
-| `google-apps-script/code.gs` | 1.718 | API Web App mode direct + proyeksi/filter/aksi akun |
-| `google-apps-script/local-tests/mock-harness.mjs` | 955 | 155 asersi mock `code.gs` |
+| `google-apps-script/code.gs` | 3.850 | API Web App 1.2.0: bootstrap, `sync`, validasi domain |
+| `google-apps-script/local-tests/mock-harness.mjs` | 1.636 | 265 asersi mock `code.gs` |
 | `google-apps-script/appsscript.json` | 10 | Manifest bound script |
-| `google-apps-script/README.md` | 330 | Pemasangan, probe CORS, kontrak API |
+| `google-apps-script/README.md` | 383 | Pemasangan, probe CORS, kontrak API |
 
 ## Worker dan konfigurasi
 

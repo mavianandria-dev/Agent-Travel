@@ -465,6 +465,10 @@ function login(email, password, extra) {
   return dispatch(bodyOf({ email, password }, Object.assign({ action: 'login' }, extra || {})));
 }
 
+function sync(changes, token) {
+  return dispatch(bodyOf({ changes }, { action: 'sync', token }));
+}
+
 function idsOf(list) {
   return (list || []).map((x) => String(x && x.id)).sort();
 }
@@ -489,7 +493,7 @@ ok('setupBackend menggenerasi TOKEN_TTL', Number(scriptProperties.get('TOKEN_TTL
 ok('REQUIRE_PROXY_KEY default false', scriptProperties.get('REQUIRE_PROXY_KEY') === 'false');
 
 let res = dispatch({ action: 'health' });
-ok('health tanpa proxyKey tetap ok', res.ok === true && res.data.version === '1.1.0', res);
+ok('health tanpa proxyKey tetap ok', res.ok === true && res.data.version === '1.2.0', res);
 ok('health tidak membocorkan secret', !JSON.stringify(res).includes(proxyKey) && !JSON.stringify(res).includes(scriptProperties.get('API_TOKEN_SECRET')));
 
 /* ------------------------------------------------------------------ */
@@ -657,6 +661,19 @@ ok('pelanggan menerima voucher untuk checkout', (custRecords.vouchers || []).som
 ok('pelanggan tidak melihat katalog agensi pending', !idsOf(custRecords.vehicles).includes('v_pending') && !idsOf(custRecords.schedules).includes('s_pending') && !idsOf(custRecords.reviews).includes('rv_pending'));
 ok('pelanggan tidak menerima data agensi sensitif', !JSON.stringify(custRecords.agencies || []).includes('"kyc"'));
 ok('pelanggan melihat takenSeats jadwal', !!record(custRecords, 'schedules', 's_1') && record(custRecords, 'schedules', 's_1').takenSeats.join(',') === 'A1,A2,A3,A5');
+ok('pelanggan melihat pengemudi pada jadwal booking sendiri',
+  record(custRecords, 'schedules', 's_1')?.driverId === 'd_1' &&
+  record(custRecords, 'schedules', 's_2')?.driverId === 'd_2' &&
+  !Object.prototype.hasOwnProperty.call(record(custRecords, 'schedules', 's_3') || {}, 'driverId'),
+  (custRecords.schedules || []).map((s) => ({ id: s.id, driverId: s.driverId })));
+ok('pelanggan hanya menerima data pengemudi jadwalnya tanpa NIK/bank',
+  idsOf(custRecords.drivers).join(',') === 'd_1,d_2' &&
+  (custRecords.drivers || []).every((d) => !Object.prototype.hasOwnProperty.call(d, 'nik') && !Object.prototype.hasOwnProperty.call(d, 'bank')),
+  custRecords.drivers);
+ok('armada yang diterima pengemudi tidak memuat data pemilik/dokumen',
+  (driverRecords.vehicles || []).every((v) => !Object.prototype.hasOwnProperty.call(v, 'ownerNik') &&
+    !Object.prototype.hasOwnProperty.call(v, 'stnkPhoto') &&
+    !Object.prototype.hasOwnProperty.call(v, 'chassis')), driverRecords.vehicles);
 
 /* ------------------------------------------------------------------ */
 /* 6) commit (hanya superadmin)                                        */
@@ -741,6 +758,8 @@ ok('ganti password sukses', res.ok === true && res.data.user.id === 'u_admin_1',
 
 res = dispatch(bodyOf({}, { action: 'session', token: oldAdminToken }));
 ok('token lama dicabut setelah ganti password', res.ok === false && res.error.code === 'UNAUTHORIZED', res);
+res = dispatch(bodyOf({ currentPassword: NEW_ADMIN_PW, newPassword: 'old-token-pw-123' }, { action: 'changePassword', token: oldAdminToken }));
+ok('token lama juga tidak boleh mengganti password', res.ok === false && res.error.code === 'UNAUTHORIZED', res);
 
 res = login('admin@transaceh.id', NEW_ADMIN_PW);
 ok('login dengan password baru sukses', res.ok === true, res);
@@ -781,7 +800,25 @@ ok('register agen sukses dan pending tanpa token', res.ok === true && res.data.p
 const newAgencyId = res.ok ? res.data.user.agencyId : '';
 ok('register agen membuat agensi pending', !!spread.getSheetByName('agencies').rows.find((r) => String(r[0]) === newAgencyId && String(r[2]).includes('"status":"pending"')));
 res = login('newagen@test.local', REG_AGEN_PW);
-ok('login agen pending ditolak', res.ok === false && res.error.code === 'ACCOUNT_BLOCKED', res);
+ok('login agen pending sukses untuk melengkapi KYC', res.ok === true && res.data.user.status === 'pending' && typeof res.data.token === 'string', res);
+const pendingAgenToken = res.ok ? res.data.token : '';
+const pendingAgenUserId = res.ok ? res.data.user.id : '';
+res = dispatch(bodyOf({}, { action: 'bootstrap', token: pendingAgenToken }));
+ok('bootstrap agen pending hanya memuat agensi sendiri dan akun sendiri',
+  res.ok === true &&
+  (res.data.records.agencies || []).length === 1 &&
+  String(res.data.records.agencies[0].id) === String(newAgencyId) &&
+  (res.data.records.users || []).length === 1 &&
+  !res.data.records.schedules && !res.data.records.vehicles, res);
+const pendingAgencyRow = spread.getSheetByName('agencies').rows.find((r) => String(r[0]) === newAgencyId);
+const pendingAgencyRec = pendingAgencyRow ? JSON.parse(pendingAgencyRow[2]) : null;
+const pendingAgencyBase = revOf('agencies');
+res = sync({ agencies: { baseRev: pendingAgencyBase, upserts: [Object.assign({}, pendingAgencyRec, { kyc: { nama: 'Agen Baru KYC' } })], deletes: [] } }, pendingAgenToken);
+ok('agen pending boleh menyimpan KYC agensinya', res.ok === true && res.data.revisions.agencies === pendingAgencyBase + 1, res);
+res = sync({ vehicles: { baseRev: revOf('vehicles'), upserts: [{ id: 'v_ilegal', agencyId: newAgencyId, plate: 'BL 1 X' }], deletes: [] } }, pendingAgenToken);
+ok('agen pending tetap dilarang menulis armada', res.ok === false && res.error.code === 'FORBIDDEN', res);
+res = sync({ users: { baseRev: revOf('users'), upserts: [], deletes: [pendingAgenUserId] } }, pendingAgenToken);
+ok('agen pending tidak boleh menghapus akun', res.ok === false && res.error.code === 'FORBIDDEN', res);
 
 res = dispatch(bodyOf({ name: 'Super', email: 'superbaru@test.local', phone: '081255550005', password: 'superbaru-pw-123', role: 'superadmin' }, { action: 'register' }));
 ok('register role superadmin ditolak', res.ok === false && res.error.code === 'VALIDATION', res);
@@ -795,7 +832,7 @@ res = dispatch(bodyOf({ name: 'Agen Baru', email: 'agenbaru@test.local', phone: 
 ok('admin membuat akun agen (status ikut agensi pending)', res.ok === true && res.data.user.role === 'agen' && res.data.user.status === 'pending' && res.data.user.agencyId === 'ag_new', res);
 
 res = login('agenbaru@test.local', AGEN_NEW_PW);
-ok('akun agen pending tidak bisa login', res.ok === false && res.error.code === 'ACCOUNT_BLOCKED', res);
+ok('akun agen pending bisa login untuk KYC', res.ok === true && res.data.user.status === 'pending' && typeof res.data.token === 'string', res);
 
 res = dispatch(bodyOf({ name: 'Agen Kedua', email: 'agenkedua@test.local', phone: '081255560002', password: 'agenkedua-pw-123', role: 'agen', agencyId: 'ag_new', status: 'active' }, { action: 'adminCreateUser', token: adminToken }));
 ok('satu agensi hanya boleh satu akun agen', res.ok === false && res.error.code === 'VALIDATION', res);
@@ -844,6 +881,650 @@ res = dispatch(bodyOf({ userId: 'u_cust_2', newPassword: 'olehagen-pw-123' }, { 
 ok('adminSetPassword oleh agen ditolak', res.ok === false && res.error.code === 'FORBIDDEN', res);
 
 /* ------------------------------------------------------------------ */
+/* 9b) sync ter-scope per peran                                        */
+/* ------------------------------------------------------------------ */
+
+console.log('\n== 9b) sync ter-scope, kepemilikan, kursi, revisi ==');
+res = sync({}, custToken);
+ok('sync changes kosong ditolak', res.ok === false && res.error.code === 'VALIDATION', res);
+
+const custBase = revOf('users');
+const custProfile = {
+  id: 'u_cust_1', name: 'Rina Sync', email: 'cust1@test.local',
+  phone: '0812000005', role: 'pelanggan', status: 'active', favorites: []
+};
+res = sync({ users: { baseRev: custBase, upserts: [custProfile], deletes: [] } }, custToken);
+ok('sync pelanggan update profil sendiri sukses', res.ok === true && res.data.revisions.users === custBase + 1, res);
+const custRowSync = spread.getSheetByName('users').rows.find((r) => String(r[0]) === 'u_cust_1');
+ok('sync profil pelanggan tidak menghapus hash password', String(custRowSync?.[2]).includes('"passHash"') && String(custRowSync?.[2]).includes('Rina Sync'));
+
+res = sync({ users: { baseRev: revOf('users'), upserts: [{
+  id: 'u_cust_2', name: 'Hack', email: 'cust2@test.local',
+  phone: '0812000006', role: 'pelanggan', status: 'active', favorites: []
+}], deletes: [] } }, custToken);
+ok('sync pelanggan tidak boleh mengubah akun lain', res.ok === false && res.error.code === 'FORBIDDEN', res);
+
+res = sync({ users: { baseRev: revOf('users'), upserts: [Object.assign({}, custProfile, { passwordHash: 'x' })], deletes: [] } }, custToken);
+ok('sync menolak field rahasia dari klien', res.ok === false && res.error.code === 'VALIDATION', res);
+
+const bookingBase = revOf('bookings');
+const syncBooking = {
+  id: 'b_sync_1', code: 'TA-S1', scheduleId: 's_1', userEmail: 'cust1@test.local',
+  seats: ['A4'], passengers: [{ name: 'Uji Sync', seat: 'A4' }],
+  subtotal: 150000, discount: 0, total: 150000, status: 'pending',
+  holdExpiry: '2099-01-01T00:00:00.000Z',
+  createdAt: '2026-10-24T05:00:00.000Z'
+};
+res = sync({ bookings: { baseRev: bookingBase, upserts: [syncBooking], deletes: [] } }, custToken);
+ok('sync pelanggan membuat booking di kursi kosong sukses', res.ok === true && res.data.revisions.bookings === bookingBase + 1, res);
+const holdRow = spread.getSheetByName('bookings').rows.find((r) => String(r[0]) === 'b_sync_1');
+const holdRec = holdRow ? JSON.parse(holdRow[2]) : null;
+const holdMs = holdRec ? Date.parse(holdRec.holdExpiry) : NaN;
+ok('server menimpa holdExpiry booking baru menjadi 15 menit',
+  Number.isFinite(holdMs) && holdMs > Date.now() && holdMs <= Date.now() + 20 * 60 * 1000, holdRec);
+
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, syncBooking, {
+  id: 'b_sync_maint_inject', code: 'TA-MI', seats: ['A6'],
+  passengers: [{ name: 'Inject', seat: 'A6' }],
+  maintenanceState: 'choice_pending', refundPct: 100
+})], deletes: [] } }, custToken);
+ok('sync menolak booking baru menyelipkan field maintenance/refund',
+  res.ok === false && res.error.code === 'FORBIDDEN', res);
+
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, syncBooking, {
+  id: 'b_sync_2', code: 'TA-S2', seats: ['A1'],
+  passengers: [{ name: 'Uji Sync', seat: 'A1' }]
+})], deletes: [] } }, custToken);
+ok('sync menolak kursi yang sudah dipakai booking lain', res.ok === false && res.error.code === 'SEAT_CONFLICT', res);
+
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, syncBooking, { id: 'b_sync_3', code: 'TA-S3', userEmail: 'cust2@test.local' })], deletes: [] } }, custToken);
+ok('sync pelanggan tidak boleh membuat booking atas nama orang lain', res.ok === false && res.error.code === 'FORBIDDEN', res);
+
+res = sync({ bookings: { baseRev: bookingBase, upserts: [syncBooking], deletes: [] } }, custToken);
+ok('sync dengan revisi basi ditolak', res.ok === false && res.error.code === 'REV_CONFLICT', res);
+
+const bOwnRow = spread.getSheetByName('bookings').rows.find((r) => String(r[0]) === 'b_sync_1');
+const bOwn = bOwnRow ? JSON.parse(bOwnRow[2]) : null;
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, syncBooking, {
+  id: 'b_sync_fake_total', code: 'TA-FT', seats: ['A6'],
+  passengers: [{ name: 'Fake', seat: 'A6' }], total: 1
+})], deletes: [] } }, custToken);
+ok('sync menolak total booking yang tidak sesuai harga', res.ok === false && res.error.code === 'VALIDATION', res);
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, syncBooking, {
+  id: 'b_sync_fake_voucher', code: 'TA-FV', seats: ['A6'],
+  passengers: [{ name: 'Fake', seat: 'A6' }], voucher: 'HEMAT20',
+  discount: 0, total: 150000
+})], deletes: [] } }, custToken);
+ok('sync menolak diskon voucher yang tidak sesuai', res.ok === false && res.error.code === 'VALIDATION', res);
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, bOwn, {
+  total: 1
+})], deletes: [] } }, custToken);
+ok('sync menolak perubahan total booking', res.ok === false && res.error.code === 'FORBIDDEN', res);
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, bOwn, {
+  status: 'done'
+})], deletes: [] } }, custToken);
+ok('sync menolak transisi status booking tidak sah', res.ok === false && res.error.code === 'FORBIDDEN', res);
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, bOwn, {
+  holdExpiry: '2099-01-01T00:00:00.000Z'
+})], deletes: [] } }, custToken);
+ok('sync menolak memperpanjang hold booking', res.ok === false && res.error.code === 'FORBIDDEN', res);
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, bOwn, {
+  holdExpiry: null
+})], deletes: [] } }, custToken);
+ok('sync menolak menghapus hold booking pending', res.ok === false && res.error.code === 'FORBIDDEN', res);
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, bOwn, {
+  scheduleId: 's_2', seats: ['A6'], passengers: [{ name: 'Pindah', seat: 'A6' }]
+})], deletes: [] } }, custToken);
+ok('sync menolak pindah jadwal tanpa maintenance', res.ok === false && res.error.code === 'FORBIDDEN', res);
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [], deletes: ['b_sync_1'] } }, custToken);
+ok('sync menolak hapus booking oleh pelanggan', res.ok === false && res.error.code === 'FORBIDDEN', res);
+
+const voucherRow = spread.getSheetByName('vouchers').rows.find((r) => String(r[2]).includes('HEMAT20'));
+const voucherRec = voucherRow ? JSON.parse(voucherRow[2]) : null;
+const voucherBase = revOf('vouchers');
+res = sync({ vouchers: { baseRev: voucherBase, upserts: [Object.assign({}, voucherRec, { used: Number(voucherRec.used || 0) + 1 })], deletes: [] } }, custToken);
+ok('sync pelanggan boleh menaikkan pemakaian voucher satu langkah', res.ok === true && res.data.revisions.vouchers === voucherBase + 1, res);
+res = sync({ vouchers: { baseRev: revOf('vouchers'), upserts: [Object.assign({}, voucherRec, { used: Number(voucherRec.used || 0) })], deletes: [] } }, custToken);
+ok('sync menolak pengurangan pemakaian voucher tanpa pembatalan booking',
+  res.ok === false && res.error.code === 'FORBIDDEN', res);
+res = sync({ vouchers: { baseRev: revOf('vouchers'), upserts: [Object.assign({}, voucherRec, { active: false })], deletes: [] } }, custToken);
+ok('sync pelanggan tidak boleh mengubah field voucher lain', res.ok === false && res.error.code === 'FORBIDDEN', res);
+
+const voucherBooking = Object.assign({}, syncBooking, {
+  id: 'b_voucher_restore', code: 'TA-VR', seats: ['A6'],
+  passengers: [{ name: 'Voucher', seat: 'A6' }],
+  voucher: 'HEMAT20', discount: 30000, total: 120000
+});
+res = sync({
+  bookings: { baseRev: revOf('bookings'), upserts: [voucherBooking], deletes: [] },
+  vouchers: { baseRev: revOf('vouchers'), upserts: [Object.assign({}, voucherRec, {
+    used: Number(voucherRec.used || 0) + 2
+  })], deletes: [] }
+}, custToken);
+ok('sync pelanggan boleh membuat booking voucher + menaikkan pemakaian', res.ok === true, res);
+const bVoucherRow = spread.getSheetByName('bookings').rows.find((r) => String(r[0]) === 'b_voucher_restore');
+const bVoucherRec = bVoucherRow ? JSON.parse(bVoucherRow[2]) : null;
+res = sync({
+  bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, bVoucherRec, {
+    status: 'cancelled', cancelledAt: '2026-10-24T06:00:00.000Z',
+    cancelledBy: 'cust1@test.local', cancelReason: 'Uji restorasi voucher'
+  })], deletes: [] },
+  vouchers: { baseRev: revOf('vouchers'), upserts: [Object.assign({}, voucherRec, {
+    used: Number(voucherRec.used || 0) + 1
+  })], deletes: [] }
+}, custToken);
+ok('sync pelanggan boleh mengembalikan voucher saat membatalkan booking',
+  res.ok === true, res);
+
+const ag1Row = spread.getSheetByName('agencies').rows.find((r) => String(r[0]) === 'ag_1');
+const ag1Rec = ag1Row ? JSON.parse(ag1Row[2]) : null;
+const agBase = revOf('agencies');
+res = sync({ agencies: { baseRev: agBase, upserts: [Object.assign({}, ag1Rec, { phone: '0654-99999' })], deletes: [] } }, agenToken);
+ok('sync agen update agensi sendiri sukses', res.ok === true && res.data.revisions.agencies === agBase + 1, res);
+const ag2Row = spread.getSheetByName('agencies').rows.find((r) => String(r[0]) === 'ag_2');
+const ag2Rec = ag2Row ? JSON.parse(ag2Row[2]) : null;
+res = sync({ agencies: { baseRev: revOf('agencies'), upserts: [Object.assign({}, ag2Rec, { phone: '0651-00001' })], deletes: [] } }, agenToken);
+ok('sync agen tidak boleh mengubah agensi lain', res.ok === false && res.error.code === 'FORBIDDEN', res);
+
+const vehicleBase = revOf('vehicles');
+res = sync({ vehicles: { baseRev: vehicleBase, upserts: [{
+  id: 'v_sync_1', agencyId: 'ag_1', plate: 'BL 7777 SY', brand: 'Uji', model: 'Sync',
+  status: 'aktif', capacity: 6, inactiveSeats: []
+}], deletes: [] } }, agenToken);
+ok('sync agen membuat armada sendiri sukses', res.ok === true && res.data.revisions.vehicles === vehicleBase + 1, res);
+
+const s1Row = spread.getSheetByName('schedules').rows.find((r) => String(r[0]) === 's_1');
+const s1Rec = s1Row ? JSON.parse(s1Row[2]) : null;
+const schedBase = revOf('schedules');
+res = sync({ schedules: { baseRev: schedBase, upserts: [Object.assign({}, s1Rec, { price: 155000 })], deletes: [] } }, agenToken);
+ok('sync agen update jadwal sendiri sukses', res.ok === true && res.data.revisions.schedules === schedBase + 1, res);
+
+const s1NowRow = spread.getSheetByName('schedules').rows.find((r) => String(r[0]) === 's_1');
+const s1Now = s1NowRow ? JSON.parse(s1NowRow[2]) : null;
+const driverSchedBase = revOf('schedules');
+res = sync({ schedules: { baseRev: driverSchedBase, upserts: [Object.assign({}, s1Now, {
+  tripStatus: 'ontrip', status: 'closed', departedAt: '2026-10-24T05:10:00.000Z'
+})], deletes: [] } }, driverToken);
+ok('sync pengemudi update status jadwal yang ditugaskan sukses', res.ok === true && res.data.revisions.schedules === driverSchedBase + 1, res);
+
+const s3Row = spread.getSheetByName('schedules').rows.find((r) => String(r[0]) === 's_3');
+const s3Rec = s3Row ? JSON.parse(s3Row[2]) : null;
+res = sync({ schedules: { baseRev: revOf('schedules'), upserts: [Object.assign({}, s3Rec, { tripStatus: 'ontrip' })], deletes: [] } }, driverToken);
+ok('sync pengemudi tidak boleh mengubah jadwal agensi lain', res.ok === false && res.error.code === 'FORBIDDEN', res);
+
+res = sync({ routes: { baseRev: revOf('routes'), upserts: [{ id: 'r_ilegal', from: 'X', to: 'Y' }], deletes: [] } }, driverToken);
+ok('sync pengemudi tidak boleh menulis rute', res.ok === false && res.error.code === 'FORBIDDEN', res);
+
+const adminRouteBase = revOf('routes');
+res = sync({ routes: { baseRev: adminRouteBase, upserts: [{ id: 'r_sync_admin', from: 'A', to: 'B' }], deletes: [] } }, adminToken);
+ok('sync superadmin boleh menulis rute', res.ok === true && res.data.revisions.routes === adminRouteBase + 1, res);
+
+const rt1Row = spread.getSheetByName('routes').rows.find((r) => String(r[0]) === 'rt_1');
+const rt1Rec = rt1Row ? JSON.parse(rt1Row[2]) : null;
+const agenRouteBase = revOf('routes');
+res = sync({ routes: { baseRev: agenRouteBase, upserts: [Object.assign({}, rt1Rec, {
+  driverIds: ['d_1'], driverId: 'd_1'
+})], deletes: [] } }, agenToken);
+ok('sync agen boleh menugaskan pengemudi sendiri pada rute agensinya', res.ok === true && res.data.revisions.routes === agenRouteBase + 1, res);
+res = sync({ routes: { baseRev: revOf('routes'), upserts: [Object.assign({}, rt1Rec, {
+  driverIds: ['d_1', 'd_3'], driverId: 'd_1'
+})], deletes: [] } }, agenToken);
+ok('sync agen tidak boleh menambahkan pengemudi agensi lain ke rute', res.ok === false && res.error.code === 'FORBIDDEN', res);
+res = sync({ routes: { baseRev: revOf('routes'), upserts: [Object.assign({}, rt1Rec, {
+  from: 'Rute Hack'
+})], deletes: [] } }, agenToken);
+ok('sync agen tidak boleh mengubah field rute selain pengemudi', res.ok === false && res.error.code === 'FORBIDDEN', res);
+res = sync({ routes: { baseRev: revOf('routes'), upserts: [], deletes: ['rt_2'] } }, agenToken);
+ok('sync agen tidak boleh menghapus rute', res.ok === false && res.error.code === 'FORBIDDEN', res);
+
+const tempDriverBase = revOf('drivers');
+res = sync({ drivers: { baseRev: tempDriverBase, upserts: [{
+  id: 'd_temp', agencyId: 'ag_1', name: 'Pengemudi Sementara', status: 'aktif'
+}], deletes: [] } }, adminToken);
+ok('superadmin membuat pengemudi sementara untuk uji rute', res.ok === true && res.data.revisions.drivers === tempDriverBase + 1, res);
+const rt1LatestRow = spread.getSheetByName('routes').rows.find((r) => String(r[0]) === 'rt_1');
+const rt1Latest = rt1LatestRow ? JSON.parse(rt1LatestRow[2]) : null;
+res = sync({ routes: { baseRev: revOf('routes'), upserts: [Object.assign({}, rt1Latest, {
+  driverIds: ['d_1', 'd_temp'], driverId: 'd_1'
+})], deletes: [] } }, agenToken);
+ok('agen menambahkan pengemudi sementara ke rute', res.ok === true, res);
+const rt1WithTempRow = spread.getSheetByName('routes').rows.find((r) => String(r[0]) === 'rt_1');
+const rt1WithTemp = rt1WithTempRow ? JSON.parse(rt1WithTempRow[2]) : null;
+const routeCleanupBase = revOf('routes');
+const driverCleanupBase = revOf('drivers');
+res = sync({
+  routes: { baseRev: routeCleanupBase, upserts: [Object.assign({}, rt1WithTemp, {
+    driverIds: ['d_1'], driverId: 'd_1'
+  })], deletes: [] },
+  drivers: { baseRev: driverCleanupBase, upserts: [], deletes: ['d_temp'] }
+}, agenToken);
+ok('agen boleh menghapus pengemudi dan melepasnya dari rute dalam satu batch',
+  res.ok === true &&
+  res.data.revisions.routes === routeCleanupBase + 1 &&
+  res.data.revisions.drivers === driverCleanupBase + 1, res);
+res = sync({ drivers: { baseRev: revOf('drivers'), upserts: [], deletes: ['d_1'] } }, agenToken);
+ok('pengemudi yang masih terpasang di armada tidak boleh dihapus',
+  res.ok === false && res.error.code === 'VALIDATION', res);
+
+/* Multi-koleksi: agen membuat akun pengemudi + data driver + armada + jadwal. */
+const syncUserBase = revOf('users');
+const syncDriverBase = revOf('drivers');
+const syncVehicleBase = revOf('vehicles');
+const syncScheduleBase = revOf('schedules');
+const syncUser = {
+  id: 'u_sync_driver', name: 'Driver Sync', email: 'sync.driver@test.local',
+  phone: '081255580001', wa: '081255580001', role: 'pengemudi', agencyId: 'ag_1',
+  status: 'active', pass: 'driver-sync-pw-123', profileStep: 'done', photo: ''
+};
+const syncDriverRec = {
+  id: 'd_sync', agencyId: 'ag_1', name: 'Driver Sync', phone: '081255580001',
+  userEmail: 'sync.driver@test.local', status: 'aktif', rating: 5, trips: 0
+};
+const syncVehicleRec = {
+  id: 'v_sync_2', agencyId: 'ag_1', plate: 'BL 8888 SY', brand: 'Uji', model: 'Multi',
+  status: 'aktif', capacity: 6, inactiveSeats: [], driverId: 'd_sync'
+};
+const syncScheduleRec = {
+  id: 's_sync_1', agencyId: 'ag_1', routeId: 'rt_1', vehicleId: 'v_sync_2',
+  driverId: 'd_sync', driverName: 'Driver Sync', backupDriverId: '', backupName: '',
+  date: futureDate(3), time: '10:00', price: 150000, status: 'open',
+  tripStatus: 'scheduled', blockedSeats: []
+};
+res = sync({
+  users: { baseRev: syncUserBase, upserts: [syncUser], deletes: [] },
+  drivers: { baseRev: syncDriverBase, upserts: [syncDriverRec], deletes: [] },
+  vehicles: { baseRev: syncVehicleBase, upserts: [syncVehicleRec], deletes: [] },
+  schedules: { baseRev: syncScheduleBase, upserts: [syncScheduleRec], deletes: [] }
+}, agenToken);
+ok('sync agen multi-koleksi membuat akun+driver+armada+jadwal',
+  res.ok === true &&
+  res.data.revisions.users === syncUserBase + 1 &&
+  res.data.revisions.drivers === syncDriverBase + 1 &&
+  res.data.revisions.vehicles === syncVehicleBase + 1 &&
+  res.data.revisions.schedules === syncScheduleBase + 1, res);
+res = login('sync.driver@test.local', 'driver-sync-pw-123');
+ok('pengemudi hasil sync bisa login', res.ok === true && res.data.user.role === 'pengemudi', res);
+res = sync({ schedules: { baseRev: revOf('schedules'), upserts: [Object.assign({}, syncScheduleRec, {
+  id: 's_sync_bad_route', routeId: 'rt_2'
+})], deletes: [] } }, agenToken);
+ok('agen tidak boleh membuat jadwal pada rute agensi lain',
+  res.ok === false && res.error.code === 'FORBIDDEN', res);
+
+res = sync({ vehicles: { baseRev: revOf('vehicles'), upserts: [], deletes: ['v_sync_2'] } }, agenToken);
+ok('sync agen tidak boleh menghapus armada yang masih dipakai jadwal', res.ok === false && res.error.code === 'VALIDATION', res);
+res = sync({ schedules: { baseRev: revOf('schedules'), upserts: [], deletes: ['s_1'] } }, agenToken);
+ok('sync agen tidak boleh menghapus jadwal yang masih punya booking', res.ok === false && res.error.code === 'VALIDATION', res);
+
+const s1RestoreRow = spread.getSheetByName('schedules').rows.find((r) => String(r[0]) === 's_1');
+const s1Restore = s1RestoreRow ? JSON.parse(s1RestoreRow[2]) : null;
+res = sync({ schedules: { baseRev: revOf('schedules'), upserts: [Object.assign({}, s1Restore, {
+  price: 150000
+})], deletes: [] } }, agenToken);
+ok('harga jadwal dikembalikan untuk uji pembayaran', res.ok === true, res);
+
+const bSyncRow = spread.getSheetByName('bookings').rows.find((r) => String(r[0]) === 'b_sync_1');
+const bSyncPaid = Object.assign({}, JSON.parse(bSyncRow[2]), {
+  status: 'paid', paidAt: '2026-10-24T05:15:00.000Z',
+  fare: { ticket: 128889, service: 10000, fee: 11111, total: 150000 }
+});
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [bSyncPaid], deletes: [] } }, custToken);
+ok('pelanggan menandai booking sendiri lunas', res.ok === true, res);
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, bSyncPaid, {
+  status: 'cancelled', tripStatus: 'cancelled', refundPct: 100, refundAmount: 150000,
+  refundScope: 'total', refundStatus: 'pending', refundPaidAt: null,
+  cancelReason: 'Uji refund', cancelledBy: 'pelanggan', cancelledAt: '2026-10-24T05:16:00.000Z'
+})], deletes: [] } }, custToken);
+ok('sync menolak refund melebihi kebijakan pembatalan',
+  res.ok === false && res.error.code === 'FORBIDDEN', res);
+
+const payBase = revOf('payments');
+const ledgerBase = revOf('ledger');
+const syncPayment = {
+  id: 'p_sync_1', bookingId: 'b_sync_1', amount: 150000, method: 'transfer',
+  status: 'pending', fee: 11111, time: '2026-10-24T05:20:00.000Z'
+};
+const syncLedger = {
+  id: 'l_sync_1', agencyId: 'ag_1', bookingId: 'b_sync_1',
+  scheduleId: 's_1', driverId: 'd_1', userEmail: 'cust1@test.local',
+  seats: ['A4'], ticket: 128889, service: 10000, fee: 11111, total: 150000,
+  status: 'ditahan', createdAt: '2026-10-24T05:20:00.000Z'
+};
+res = sync({ payments: { baseRev: payBase, upserts: [syncPayment], deletes: [] } }, custToken);
+ok('sync pelanggan membuat pembayaran booking sendiri',
+  res.ok === true && res.data.revisions.payments === payBase + 1, res);
+res = sync({ payments: { baseRev: revOf('payments'), upserts: [Object.assign({}, syncPayment, {
+  id: 'p_sync_refund_inject', refundStatus: 'done', refundAmount: 150000
+})], deletes: [] } }, custToken);
+ok('sync menolak pembayaran baru menyelipkan field refund',
+  res.ok === false && res.error.code === 'FORBIDDEN', res);
+res = sync({
+  payments: { baseRev: revOf('payments'), upserts: [Object.assign({}, syncPayment, {
+    status: 'paid'
+  })], deletes: [] },
+  ledger: { baseRev: ledgerBase, upserts: [syncLedger], deletes: [] }
+}, custToken);
+ok('sync pelanggan menyelesaikan pembayaran+ledger booking sendiri',
+  res.ok === true &&
+  res.data.revisions.payments === payBase + 2 &&
+  res.data.revisions.ledger === ledgerBase + 1, res);
+const pSyncRow = spread.getSheetByName('payments').rows.find((r) => String(r[0]) === 'p_sync_1');
+const pSyncPaid = pSyncRow ? JSON.parse(pSyncRow[2]) : null;
+res = sync({ payments: { baseRev: revOf('payments'), upserts: [Object.assign({}, syncPayment, {
+  id: 'p_sync_2', bookingId: 'b_4'
+})], deletes: [] } }, custToken);
+ok('sync pelanggan tidak boleh membayar booking orang lain', res.ok === false && res.error.code === 'FORBIDDEN', res);
+res = sync({ payments: { baseRev: revOf('payments'), upserts: [Object.assign({}, syncPayment, {
+  id: 'p_sync_fake_amount', amount: 1
+})], deletes: [] } }, custToken);
+ok('sync menolak nominal pembayaran tidak sesuai booking',
+  res.ok === false && res.error.code === 'VALIDATION', res);
+res = sync({ payments: { baseRev: revOf('payments'), upserts: [Object.assign({}, syncPayment, {
+  id: 'p_sync_fake_paid', status: 'paid'
+})], deletes: [] } }, custToken);
+ok('sync menolak pembayaran baru langsung lunas',
+  res.ok === false && res.error.code === 'VALIDATION', res);
+res = sync({ payments: { baseRev: revOf('payments'), upserts: [Object.assign({}, syncPayment, {
+  id: 'p_sync_duplicate'
+})], deletes: [] } }, custToken);
+ok('sync menolak pembayaran ganda untuk satu booking',
+  res.ok === false && res.error.code === 'VALIDATION', res);
+res = sync({ payments: { baseRev: revOf('payments'), upserts: [Object.assign({}, syncPayment, {
+  id: 'p_sync_fake_fee', fee: 1
+})], deletes: [] } }, custToken);
+ok('sync menolak fee pembayaran tidak sesuai perhitungan',
+  res.ok === false && res.error.code === 'VALIDATION', res);
+res = sync({ payments: { baseRev: revOf('payments'), upserts: [Object.assign({}, pSyncPaid, {
+  fee: 1
+})], deletes: [] } }, custToken);
+ok('sync menolak perubahan fee setelah pembayaran lunas',
+  res.ok === false && res.error.code === 'FORBIDDEN', res);
+res = sync({ payments: { baseRev: revOf('payments'), upserts: [Object.assign({}, pSyncPaid, {
+  amount: 1
+})], deletes: [] } }, custToken);
+ok('sync menolak perubahan nominal pembayaran',
+  res.ok === false && res.error.code === 'FORBIDDEN', res);
+res = sync({ payments: { baseRev: revOf('payments'), upserts: [Object.assign({}, pSyncPaid, {
+  refundStatus: 'done'
+})], deletes: [] } }, custToken);
+ok('sync menolak pelanggan menyelesaikan refund',
+  res.ok === false && res.error.code === 'FORBIDDEN', res);
+res = sync({ payments: { baseRev: revOf('payments'), upserts: [], deletes: ['p_sync_1'] } }, custToken);
+ok('sync menolak hapus pembayaran oleh pelanggan',
+  res.ok === false && res.error.code === 'FORBIDDEN', res);
+
+res = sync({ ledger: { baseRev: revOf('ledger'), upserts: [Object.assign({}, syncLedger, {
+  id: 'l_sync_fake_total', ticket: 1
+})], deletes: [] } }, custToken);
+ok('sync menolak nominal ledger tidak sesuai perhitungan',
+  res.ok === false && res.error.code === 'VALIDATION', res);
+res = sync({ ledger: { baseRev: revOf('ledger'), upserts: [Object.assign({}, syncLedger, {
+  id: 'l_sync_fake_agency', agencyId: 'ag_2'
+})], deletes: [] } }, custToken);
+ok('sync menolak agensi ledger tidak sesuai booking',
+  res.ok === false && res.error.code === 'VALIDATION', res);
+res = sync({ ledger: { baseRev: revOf('ledger'), upserts: [Object.assign({}, syncLedger, {
+  id: 'l_sync_fake_status', status: 'dicairkan'
+})], deletes: [] } }, custToken);
+ok('sync menolak ledger baru langsung dicairkan',
+  res.ok === false && res.error.code === 'VALIDATION', res);
+res = sync({ ledger: { baseRev: revOf('ledger'), upserts: [Object.assign({}, syncLedger, {
+  status: 'dicairkan'
+})], deletes: [] } }, custToken);
+ok('sync menolak transisi ledger tidak sah',
+  res.ok === false && res.error.code === 'FORBIDDEN', res);
+res = sync({ ledger: { baseRev: revOf('ledger'), upserts: [Object.assign({}, syncLedger, {
+  paidOutAt: '2026-10-24T05:30:00.000Z'
+})], deletes: [] } }, custToken);
+ok('sync menolak pelanggan mengisi pencairan ledger',
+  res.ok === false && res.error.code === 'FORBIDDEN', res);
+res = sync({ ledger: { baseRev: revOf('ledger'), upserts: [], deletes: ['l_sync_1'] } }, custToken);
+ok('sync menolak hapus ledger oleh pelanggan',
+  res.ok === false && res.error.code === 'FORBIDDEN', res);
+res = sync({ ledger: { baseRev: revOf('ledger'), upserts: [Object.assign({}, syncLedger, {
+  id: 'l_sync_duplicate'
+})], deletes: [] } }, custToken);
+ok('sync menolak ledger ganda untuk satu booking',
+  res.ok === false && res.error.code === 'VALIDATION', res);
+res = sync({ ledger: { baseRev: revOf('ledger'), upserts: [Object.assign({}, syncLedger, {
+  id: 'l_sync_paidout_inject', paidOutAt: '2026-10-24T06:00:00.000Z'
+})], deletes: [] } }, custToken);
+ok('sync menolak ledger baru dengan paidOutAt',
+  res.ok === false && res.error.code === 'FORBIDDEN', res);
+res = sync({ ledger: { baseRev: revOf('ledger'), upserts: [Object.assign({}, syncLedger, {
+  status: 'layak'
+})], deletes: [] } }, custToken);
+ok('sync pelanggan boleh melepas ledger ke layak',
+  res.ok === true, res);
+res = sync({ ledger: { baseRev: revOf('ledger'), upserts: [Object.assign({}, syncLedger, {
+  status: 'dicairkan', paidOutAt: '2026-10-24T06:00:00.000Z'
+})], deletes: [] } }, custToken);
+ok('sync menolak pelanggan mencairkan ledger layak',
+  res.ok === false && res.error.code === 'FORBIDDEN', res);
+
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, syncBooking, {
+  id: 'b_sync_agen', code: 'TA-AG', seats: ['A6'],
+  passengers: [{ name: 'Agen', seat: 'A6' }]
+})], deletes: [] } }, agenToken);
+ok('sync menolak agen membuat booking baru',
+  res.ok === false && res.error.code === 'FORBIDDEN', res);
+res = sync({ payments: { baseRev: revOf('payments'), upserts: [Object.assign({}, syncPayment, {
+  id: 'p_sync_agen'
+})], deletes: [] } }, agenToken);
+ok('sync menolak agen membuat pembayaran baru',
+  res.ok === false && res.error.code === 'FORBIDDEN', res);
+
+const driverBooking = {
+  id: 'b_driver_sync', code: 'TA-DRV', scheduleId: 's_2', userEmail: null, userPhone: null,
+  passengers: [{ name: 'Penumpang Driver', seat: 'A6' }], seats: ['A6'],
+  subtotal: 150000, discount: 0, total: 150000, status: 'pending', payMethod: 'cash',
+  voucher: '', source: 'driver', createdBy: 'd_1', createdAt: '2026-10-24T05:40:00.000Z',
+  paidAt: null, holdExpiry: '2026-10-24T05:55:00.000Z', tripStatus: 'scheduled', boarded: false
+};
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [driverBooking], deletes: [] } }, driverToken);
+ok('sync pengemudi membuat booking driver di jadwalnya',
+  res.ok === true, res);
+const driverPayment = {
+  id: 'p_driver_sync', bookingId: 'b_driver_sync', amount: 150000, method: 'cash',
+  status: 'pending', fee: 11111, time: '2026-10-24T05:41:00.000Z'
+};
+res = sync({ payments: { baseRev: revOf('payments'), upserts: [driverPayment], deletes: [] } }, driverToken);
+ok('sync pengemudi membuat pembayaran booking driver',
+  res.ok === true, res);
+res = sync({ payments: { baseRev: revOf('payments'), upserts: [Object.assign({}, driverPayment, {
+  status: 'paid'
+})], deletes: [] } }, driverToken);
+ok('sync menolak pembayaran lunas saat booking masih pending',
+  res.ok === false && res.error.code === 'VALIDATION', res);
+const driverFare = { ticket: 138889, service: 0, fee: 11111, total: 150000 };
+res = sync({
+  bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, driverBooking, {
+    status: 'paid', paidAt: '2026-10-24T05:42:00.000Z', holdExpiry: null, fare: driverFare
+  })], deletes: [] },
+  payments: { baseRev: revOf('payments'), upserts: [Object.assign({}, driverPayment, {
+    status: 'paid'
+  })], deletes: [] },
+  ledger: { baseRev: revOf('ledger'), upserts: [{
+    id: 'l_driver_sync', bookingId: 'b_driver_sync', scheduleId: 's_2', agencyId: 'ag_1',
+    driverId: 'd_2', userEmail: null, seats: ['A6'], ticket: 138889, service: 0,
+    fee: 11111, total: 150000, status: 'ditahan', createdAt: '2026-10-24T05:42:00.000Z'
+  }], deletes: [] }
+}, driverToken);
+ok('sync pengemudi menyelesaikan booking driver + ledger',
+  res.ok === true, res);
+
+const fakeMaintenanceCancel = Object.assign({}, bSyncPaid, {
+  status: 'cancelled', tripStatus: 'cancelled', maintenanceState: 'refunded',
+  maintenanceResolvedAt: '2026-10-24T05:50:00.000Z',
+  refundPct: 100, refundAmount: 150000, refundScope: 'total',
+  refundStatus: 'pending', refundPaidAt: null, cancelReason: 'Palsu',
+  cancelledBy: 'pelanggan', cancelledAt: '2026-10-24T05:50:00.000Z'
+});
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [fakeMaintenanceCancel], deletes: [] } }, custToken);
+ok('sync menolak refund maintenance tanpa jadwal maintenance',
+  res.ok === false && res.error.code === 'FORBIDDEN', res);
+
+const s1RefRow = spread.getSheetByName('schedules').rows.find((r) => String(r[0]) === 's_1');
+const s1Ref = s1RefRow ? JSON.parse(s1RefRow[2]) : null;
+const s2RefRow = spread.getSheetByName('schedules').rows.find((r) => String(r[0]) === 's_2');
+const s2Ref = s2RefRow ? JSON.parse(s2RefRow[2]) : null;
+res = sync({ schedules: { baseRev: revOf('schedules'), upserts: [
+  Object.assign({}, s1Ref, {
+    maintenanceStatus: 'active', maintenanceFrom: s1Ref.date, maintenanceUntil: s1Ref.date,
+    maintenanceRequestId: 'm_1'
+  }),
+  Object.assign({}, s2Ref, {
+    maintenanceStatus: 'active', maintenanceFrom: s2Ref.date, maintenanceUntil: s2Ref.date,
+    maintenanceRequestId: 'm_1'
+  })
+], deletes: [] } }, agenToken);
+ok('agen menandai jadwal maintenance untuk uji refund',
+  res.ok === true, res);
+
+const bDriverRow = spread.getSheetByName('bookings').rows.find((r) => String(r[0]) === 'b_driver_sync');
+const bDriverPaid = bDriverRow ? JSON.parse(bDriverRow[2]) : null;
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, bDriverPaid, {
+  status: 'cancelled', tripStatus: 'cancelled', maintenanceState: 'refunded',
+  maintenanceResolvedAt: '2026-10-24T05:51:00.000Z',
+  refundPct: 100, refundAmount: 150000, refundScope: 'total',
+  refundStatus: 'pending', refundPaidAt: null, cancelReason: 'Uji driver',
+  cancelledBy: 'pengemudi', cancelledAt: '2026-10-24T05:51:00.000Z'
+})], deletes: [] } }, driverToken);
+ok('sync menolak pengemudi refund di luar pembatalan jadwal',
+  res.ok === false && res.error.code === 'FORBIDDEN', res);
+
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, fakeMaintenanceCancel, {
+  maintenanceState: 'refunded', maintenanceResolvedAt: '2026-10-24T05:52:00.000Z'
+})], deletes: [] } }, custToken);
+ok('sync mengizinkan refund maintenance 100% saat jadwal maintenance',
+  res.ok === true, res);
+
+const n1Row = spread.getSheetByName('notifications').rows.find((r) => String(r[0]) === 'n_1');
+const n1Rec = n1Row ? JSON.parse(n1Row[2]) : null;
+const n2Row = spread.getSheetByName('notifications').rows.find((r) => String(r[0]) === 'n_2');
+const n2Rec = n2Row ? JSON.parse(n2Row[2]) : null;
+const notifBase = revOf('notifications');
+res = sync({ notifications: { baseRev: notifBase, upserts: [Object.assign({}, n1Rec, { read: true })], deletes: [] } }, custToken);
+ok('sync pelanggan menandai notifikasi sendiri', res.ok === true && res.data.revisions.notifications === notifBase + 1, res);
+res = sync({ notifications: { baseRev: revOf('notifications'), upserts: [Object.assign({}, n2Rec, { read: true })], deletes: [] } }, custToken);
+ok('sync pelanggan tidak boleh menandai notifikasi orang lain', res.ok === false && res.error.code === 'FORBIDDEN', res);
+
+const selfNotif = {
+  id: 'n_sync_self', to: 'cust1@test.local', title: 'Aktivitas saya',
+  msg: 'Notifikasi lokal untuk akun sendiri', ch: 'app',
+  time: '2026-10-24T05:25:00.000Z', read: false
+};
+const selfNotifBase = revOf('notifications');
+res = sync({ notifications: { baseRev: selfNotifBase, upserts: [selfNotif], deletes: [] } }, custToken);
+ok('sync pelanggan boleh membuat notifikasi untuk diri sendiri',
+  res.ok === true && res.data.revisions.notifications === selfNotifBase + 1, res);
+res = sync({ notifications: { baseRev: revOf('notifications'), upserts: [Object.assign({}, selfNotif, {
+  id: 'n_sync_other', to: 'cust2@test.local'
+})], deletes: [] } }, custToken);
+ok('sync pelanggan tidak boleh membuat notifikasi untuk orang lain',
+  res.ok === false && res.error.code === 'FORBIDDEN', res);
+
+const supportBase = revOf('supportTickets');
+const syncTicket = {
+  id: 'st_sync_1', code: 'ADU-S1', channel: 'report', userId: 'u_cust_1',
+  userEmail: 'cust1@test.local', userName: 'Rina', userPhone: '0812000005',
+  agencyId: null, isGuest: false, category: 'Lainnya', subject: 'Uji sync',
+  bookingCode: '', description: '', status: 'new', messages: [], statusHistory: [],
+  createdAt: '2026-10-24T05:30:00.000Z', updatedAt: '2026-10-24T05:30:00.000Z'
+};
+res = sync({ supportTickets: { baseRev: supportBase, upserts: [syncTicket], deletes: [] } }, custToken);
+ok('sync pelanggan membuat tiket support sendiri', res.ok === true && res.data.revisions.supportTickets === supportBase + 1, res);
+res = sync({ supportTickets: { baseRev: revOf('supportTickets'), upserts: [Object.assign({}, syncTicket, {
+  id: 'st_sync_2', code: 'ADU-S2', userId: 'u_cust_2', userEmail: 'cust2@test.local'
+})], deletes: [] } }, custToken);
+ok('sync pelanggan tidak boleh membuat tiket atas nama orang lain', res.ok === false && res.error.code === 'FORBIDDEN', res);
+
+const st2Row = spread.getSheetByName('supportTickets').rows.find((r) => String(r[0]) === 'st_2');
+const st2Rec = st2Row ? JSON.parse(st2Row[2]) : null;
+res = sync({ supportTickets: { baseRev: revOf('supportTickets'), upserts: [Object.assign({}, st2Rec, { status: 'resolved' })], deletes: [] } }, agenToken);
+ok('sync agen menangani tiket agensinya', res.ok === true, res);
+const st4Row = spread.getSheetByName('supportTickets').rows.find((r) => String(r[0]) === 'st_4');
+const st4Rec = st4Row ? JSON.parse(st4Row[2]) : null;
+res = sync({ supportTickets: { baseRev: revOf('supportTickets'), upserts: [Object.assign({}, st4Rec, { status: 'resolved' })], deletes: [] } }, agenToken);
+ok('sync agen tidak boleh menangani tiket agensi lain', res.ok === false && res.error.code === 'FORBIDDEN', res);
+
+const st1Row = spread.getSheetByName('supportTickets').rows.find((r) => String(r[0]) === 'st_1');
+const st1Rec = st1Row ? JSON.parse(st1Row[2]) : null;
+res = sync({ supportTickets: { baseRev: revOf('supportTickets'), upserts: [Object.assign({}, st1Rec, {
+  messages: [{ id: 'MSG_HACK', from: 'cs', text: 'Pesan CS palsu', author: 'CS', at: '2026-10-24T05:35:00.000Z' }]
+})], deletes: [] } }, custToken);
+ok('pelanggan tidak boleh menyisipkan pesan CS palsu', res.ok === false && res.error.code === 'FORBIDDEN', res);
+res = sync({ supportTickets: { baseRev: revOf('supportTickets'), upserts: [Object.assign({}, st1Rec, {
+  status: 'resolved'
+})], deletes: [] } }, custToken);
+ok('pelanggan tidak boleh menutup tiket sendiri secara paksa', res.ok === false && res.error.code === 'FORBIDDEN', res);
+res = sync({ supportTickets: { baseRev: revOf('supportTickets'), upserts: [Object.assign({}, syncTicket, {
+  id: 'st_sync_guest', code: 'ADU-GUEST', isGuest: true
+})], deletes: [] } }, custToken);
+ok('tiket guest tidak boleh disinkronkan sebagai tiket akun', res.ok === false && res.error.code === 'FORBIDDEN', res);
+res = sync({ supportTickets: { baseRev: revOf('supportTickets'), upserts: [Object.assign({}, syncTicket, {
+  id: 'st_sync_agency', code: 'ADU-AG', agencyId: 'ag_1'
+})], deletes: [] } }, custToken);
+ok('pelanggan tidak boleh menempelkan tiket ke agensi', res.ok === false && res.error.code === 'FORBIDDEN', res);
+
+const rrBase = revOf('routeRequests');
+const syncRr = { id: 'rr_sync_1', agencyId: 'ag_1', type: 'rute-baru', status: 'pending', from: 'X', to: 'Y' };
+res = sync({ routeRequests: { baseRev: rrBase, upserts: [syncRr], deletes: [] } }, agenToken);
+ok('sync agen membuat usulan rute sendiri', res.ok === true && res.data.revisions.routeRequests === rrBase + 1, res);
+res = sync({ routeRequests: { baseRev: revOf('routeRequests'), upserts: [Object.assign({}, syncRr, { id: 'rr_sync_2', agencyId: 'ag_2' })], deletes: [] } }, agenToken);
+ok('sync agen tidak boleh membuat usulan untuk agensi lain', res.ok === false && res.error.code === 'FORBIDDEN', res);
+
+const mBase = revOf('maintenanceRequests');
+const syncMaint = {
+  id: 'm_sync_1', agencyId: 'ag_1', driverId: 'd_1', vehicleId: 'v_1',
+  status: 'menunggu', from: futureDate(5), until: futureDate(6),
+  createdAt: '2026-10-24T05:40:00.000Z'
+};
+res = sync({ maintenanceRequests: { baseRev: mBase, upserts: [syncMaint], deletes: [] } }, driverToken);
+ok('sync pengemudi membuat maintenance sendiri', res.ok === true && res.data.revisions.maintenanceRequests === mBase + 1, res);
+res = sync({ maintenanceRequests: { baseRev: revOf('maintenanceRequests'), upserts: [Object.assign({}, syncMaint, {
+  id: 'm_sync_2', driverId: 'd_3'
+})], deletes: [] } }, driverToken);
+ok('sync pengemudi tidak boleh membuat maintenance pengemudi lain', res.ok === false && res.error.code === 'FORBIDDEN', res);
+const m1Row = spread.getSheetByName('maintenanceRequests').rows.find((r) => String(r[0]) === 'm_1');
+const m1Rec = m1Row ? JSON.parse(m1Row[2]) : null;
+res = sync({ maintenanceRequests: { baseRev: revOf('maintenanceRequests'), upserts: [Object.assign({}, m1Rec, {
+  status: 'disetujui', decidedAt: '2026-10-24T06:00:00.000Z',
+  decidedBy: 'driver1@test.local', decisionNote: 'Setujui sendiri'
+})], deletes: [] } }, driverToken);
+ok('sync pengemudi tidak boleh menyetujui maintenance sendiri',
+  res.ok === false && res.error.code === 'FORBIDDEN', res);
+res = sync({ maintenanceRequests: { baseRev: revOf('maintenanceRequests'), upserts: [Object.assign({}, syncMaint, {
+  status: 'dibatalkan', decidedAt: '2026-10-24T06:00:00.000Z',
+  decidedBy: 'driver1@test.local', decisionNote: 'Batal'
+})], deletes: [] } }, driverToken);
+ok('sync pengemudi boleh membatalkan maintenance sendiri yang menunggu',
+  res.ok === true, res);
+
+const driverSelfRow = spread.getSheetByName('drivers').rows.find((r) => String(r[0]) === 'd_1');
+const driverSelfRec = driverSelfRow ? JSON.parse(driverSelfRow[2]) : null;
+res = sync({ drivers: { baseRev: revOf('drivers'), upserts: [Object.assign({}, driverSelfRec, {
+  userEmail: 'driver3@test.local'
+})], deletes: [] } }, driverToken);
+ok('sync pengemudi tidak boleh mengganti email penaut data driver',
+  res.ok === false && res.error.code === 'FORBIDDEN', res);
+res = sync({ drivers: { baseRev: revOf('drivers'), upserts: [Object.assign({}, driverSelfRec, {
+  status: 'nonaktif'
+})], deletes: [] } }, driverToken);
+ok('sync pengemudi tidak boleh mengubah status driver sendiri',
+  res.ok === false && res.error.code === 'FORBIDDEN', res);
+res = sync({ drivers: { baseRev: revOf('drivers'), upserts: [Object.assign({}, driverSelfRec, {
+  phone: '081299990001'
+})], deletes: [] } }, driverToken);
+ok('sync pengemudi boleh mengubah kontak sendiri',
+  res.ok === true, res);
+res = sync({ drivers: { baseRev: revOf('drivers'), upserts: [{
+  id: 'd_self_duplicate', agencyId: 'ag_1', name: 'Duplikat',
+  userEmail: 'driver1@test.local', status: 'aktif'
+}], deletes: [] } }, driverToken);
+ok('sync pengemudi tidak boleh membuat data driver duplikat',
+  res.ok === false && res.error.code === 'FORBIDDEN', res);
+
+/* ------------------------------------------------------------------ */
 /* 10) throttle login & changePassword                                 */
 /* ------------------------------------------------------------------ */
 
@@ -882,7 +1563,7 @@ ok('setelah cache dibersihkan, ganti password sukses', res.ok === true, res);
 console.log('\n== 11) doGet / doPost (HTTP layer) ==');
 const healthOut = S.doGet({});
 const healthObj = JSON.parse(healthOut.text);
-ok('doGet health ok', healthObj.ok === true && healthObj.data.version === '1.1.0', healthObj);
+ok('doGet health ok', healthObj.ok === true && healthObj.data.version === '1.2.0', healthObj);
 
 const postOut = S.doPost({ postData: { contents: JSON.stringify({ action: 'login', proxyKey: 'proxy-salah-xyz', email: 'admin@transaceh.id', password: 'andai-sah' }) } });
 const postObj = JSON.parse(postOut.text);

@@ -6,7 +6,7 @@ tags:
   - type/note
   - area/arsitektur
 status: aktif
-updated: 2026-10-25
+updated: 2026-10-26
 source:
   - google-apps-script/seed.gs
   - google-apps-script/code.gs
@@ -14,6 +14,9 @@ source:
   - google-apps-script/README.md
   - google-apps-script/local-tests/mock-harness.mjs
   - transaceh-react/src/lib/db.js
+  - transaceh-react/src/lib/sheetsApi.js
+  - transaceh-react/src/lib/remote.js
+  - transaceh-react/src/store/AppContext.jsx
   - transaceh-react/src/lib/seed.js
 ---
 
@@ -21,14 +24,15 @@ source:
 
 ## Status
 
-Tahap **seed produksi** tervalidasi oleh pengguna di spreadsheet nyata. **Backend API `code.gs` mode direct selesai** dan lulus **155 asersi mock test lokal** (`google-apps-script/local-tests/mock-harness.mjs`). Artinya: browser memanggil Web App `/exec` langsung, tanpa Cloudflare Worker atau proxy database.
+Tahap **seed produksi** tervalidasi oleh pengguna di spreadsheet nyata. Backend `code.gs` mode direct sudah mencapai versi **1.2.0** dan lulus **265 asersi mock test lokal** (`google-apps-script/local-tests/mock-harness.mjs`). Browser memanggil Web App `/exec` langsung; tidak ada Cloudflare Worker/proxy database.
 
-Yang belum:
+Adapter frontend mode Sheets juga sudah ada: `sheetsApi.js`, `remote.js`, `db.js`, `boot.js`, `AppContext`, dan jalur tulis per peran. Namun:
 
-- Deploy Web App dan **probe CORS dari origin produksi** belum dilakukan. Ini gerbang utama sebelum frontend disentuh.
-- Aplikasi React **belum terhubung** ke Google Sheets. Sumber data aktif tetap `localStorage` lewat `DB.load()`/`DB.save()`.
-- Validasi booking/kursi/pembayaran di server belum ada.
-- Jangan menyimpan data pelanggan/KYC nyata sebelum probe CORS dan Fase B–C selesai.
+- Web App yang ter-deploy masih **1.1.0** dan menolak `sync` dengan `UNSUPPORTED_ACTION`.
+- Deploy `code.gs` 1.2.0, probe CORS dari browser, dan uji end-to-end belum dilakukan.
+- Mode default aplikasi masih perlu dijaga `local` sampai gerbang deploy lulus; jangan mencampur lokal dan Sheets.
+- Lifecycle domain (`cleanupHolds`, `syncScheduleLifecycle`, `syncMaintenanceResolutions`) dimatikan di mode Sheets karena memutasi data lintas pemilik; belum ada trigger server-side.
+- Data KYC/agensi nyata dan media base64 belum layak disimpan.
 
 ## Keputusan bentuk data
 
@@ -39,7 +43,7 @@ Yang belum:
 - Nested data seperti KYC, layout kursi, penumpang, dan pesan support tetap di dalam JSON.
 - `settings` memakai `key` sebagai ID baris (`platformFee`).
 - `fees` disimpan sebagai satu record legacy.
-- Revisi per koleksi disimpan sebagai `rev.<koleksi>` di `_meta`; `commit` memakai `baseRev` sebagai pesimistis-lock.
+- Revisi per koleksi disimpan sebagai `rev.<koleksi>` di `_meta`; `sync`/`commit` memakai `baseRev` sebagai pesimistis-lock.
 - Semua penulisan memegang `LockService.getScriptLock()`.
 
 ## Seed produksi
@@ -76,7 +80,7 @@ Script Properties seed: `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PHONE`, `ADMIN_PASSW
 - Jika klien mengirim `proxyKey`, nilainya tetap harus cocok dengan `API_PROXY_KEY`; ini mencegah salah konfigurasi.
 - `REQUIRE_PROXY_KEY=true` hanya untuk skenario proxy di masa depan.
 - Alasan direct: Apps Script tidak bisa membaca header HTTP dan tidak menangani `OPTIONS`, sehingga token/gerbang harus lewat body. Dengan `Content-Type: text/plain;charset=utf-8`, browser tidak mengirim preflight.
-- `setupBackend()` tetap membuat `API_PROXY_KEY` agar mode proxy bisa diaktifkan tanpa setup ulang, tetapi tidak dipakai oleh frontend saat direct.
+- `setupBackend()` tetap membuat `API_PROXY_KEY` agar mode proxy bisa diaktifkan tanpa setup ulang, tetapi tidak dipakai frontend saat direct.
 
 ### Autentikasi dan sesi
 
@@ -93,7 +97,7 @@ Script Properties seed: `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PHONE`, `ADMIN_PASSW
 - Field: `passHash`, `passSalt`, `passIter`, `passAlgo`.
 - User legacy dengan `pass` plaintext dimigrasi otomatis pada login pertama; `pass` dihapus dan `rev.users` dinaikkan.
 - Password baru (register/ganti/reset/admin create) minimal **8** karakter. Password legacy yang lebih pendek tetap bisa login sampai diganti.
-- Field rahasia (`pass*`, `password*`, `tokenVersion`) tidak pernah dikirim ke response dan ditolak jika masuk `commit`.
+- Field rahasia (`pass*`, `password*`, `tokenVersion`) tidak pernah dikirim ke response dan ditolak jika masuk `sync`/`commit`.
 
 ### Throttling
 
@@ -113,6 +117,7 @@ Berbasis `CacheService` (best effort):
 | `register` | `name`, `email`, `phone`, `password`, `role`, `agencyName?`, `agencyAddress?` | `{user, pending, token?, expiresAt?}` | publik |
 | `session` | `token` | `{user}` | token valid |
 | `bootstrap` | `token` opsional | `{user, role, records, revisions}` | token valid / publik |
+| `sync` | `token`, `changes` | `{touched, revisions}` | semua peran sesuai scope |
 | `commit` | `token`, `changes` | `{touched, revisions}` | hanya `superadmin` |
 | `changePassword` | `token`, `currentPassword`, `newPassword` | `{user}` | token valid |
 | `adminCreateUser` | `token`, data akun | `{user}` | hanya `superadmin` |
@@ -124,8 +129,8 @@ Berbasis `CacheService` (best effort):
 | :--- | :--- |
 | `superadmin` | semua 19 koleksi; record `users` disanitasi |
 | `agen` | agensi sendiri penuh + agensi aktif lain terproyeksi; `routes`, `reviews` (publik + miliknya), `banners` (proyeksi), `settings`, armada/jadwal sendiri penuh + lain terproyeksi, `drivers`/`maintenanceRequests`/`routeRequests`/`ledger` milik agensi, `bookings` jadwal agensi, `payments` booking tersebut, `vouchers`, `supportTickets` terkait, `notifications` miliknya + `all`, `users` dirinya + agen/pengemudi agensi, `audit` miliknya |
-| `pengemudi` | `routes`, `agencies` publik, `reviews` publik, `settings`, `drivers` dirinya penuh + rekan sesama jadwal minimal (`id`,`name`,`phone`,`photo`,`rating`,`status`), jadwal yang ditugaskan, booking jadwal tersebut, kendaraan jadwal tersebut, `maintenanceRequests` miliknya, `notifications` miliknya + `all`, `users` dirinya, `audit` miliknya |
-| `pelanggan` | `banners`, `routes`, `reviews`, `agencies` publik, `vehicles` publik, `schedules` publik + `takenSeats`, `settings`, `vouchers`, booking/payment/notifikasi/tiket/audit miliknya, `users` dirinya |
+| `pengemudi` | `routes`, `agencies` publik + agensi sendiri, `reviews` publik, `settings`, `drivers` dirinya penuh + rekan sesama jadwal minimal (`id`,`name`,`phone`,`photo`,`rating`,`status`), jadwal yang ditugaskan, booking jadwal tersebut, kendaraan jadwal tersebut tanpa data pemilik/STNK, `maintenanceRequests` miliknya, `notifications` miliknya + `all`, `users` dirinya, `audit` miliknya |
+| `pelanggan` | `banners`, `routes`, `reviews`, `agencies` publik, `vehicles` publik, `schedules` publik + `takenSeats`, `settings`, `vouchers`, booking/payment/ledger/notifikasi/tiket/audit miliknya, `users` dirinya, data pengemudi minimal untuk jadwal booking sendiri |
 | tanpa token | `banners`, `routes`, `reviews`, `agencies`, `vehicles`, `schedules` publik |
 
 ### Proyeksi publik
@@ -136,39 +141,74 @@ Berbasis `CacheService` (best effort):
 - `banners`, `routes`, `reviews`: dikirim apa adanya, tetap melewati penyaring field rahasia.
 - Agensi `pending` tidak muncul di katalog publik; jadwal/armada/ulasan milik agensi pending disaring.
 - `takenSeats` = kursi booking `paid`/`done`/`pending` + `blockedSeats` + `inactiveSeats` kendaraan, terurut. Frontend publik tidak menerima record booking.
-- `bank` agensi **sengaja tidak** masuk proyeksi publik. Instruksi transfer perlu aksi khusus yang hanya mengembalikan rekening tujuan untuk booking milik pelanggan (Fase C).
+- `bank` agensi **sengaja tidak** masuk proyeksi publik. Instruksi transfer perlu aksi khusus yang hanya mengembalikan rekening tujuan untuk booking milik pelanggan.
 
 ### Aksi akun
 
 - `register`: role hanya `pelanggan`/`agen`; validasi nama/email/telepon/password ≥ 8; pelanggan langsung token; agen membuat agensi + user `pending` tanpa token.
-- `login`: verifikasi hash; migrasi plaintext; akun `pending`/`suspended` ditolak.
+- `login`: verifikasi hash; migrasi plaintext; akun `pending`/`suspended` ditolak, kecuali agen pending yang boleh login hanya untuk KYC.
 - `changePassword`: password lama benar, password baru ≥ 8 dan berbeda; token lama dicabut.
 - `adminCreateUser`: hanya superadmin; role `agen`/`pengemudi`/`pelanggan`; satu agensi satu akun agen; pengemudi harus cocok dengan `drivers.userEmail` dan agensi sudah punya agen aktif; agensi pending memaksa user pending; pengemudi nonaktif tidak boleh punya jadwal aktif.
 - `adminSetPassword`: hanya superadmin; password ≥ 8; token lama user dicabut.
-- Semua aksi akun menaikkan `rev` koleksi yang ditulis agar commit klien dengan revisi lama tidak menimpa perubahan server.
+- Semua aksi akun menaikkan `rev` koleksi yang ditulis agar `sync`/`commit` klien dengan revisi lama tidak menimpa perubahan server.
 
-### `commit`
+### `sync` — jalur tulis per peran
 
-Format:
+Frontend memakai satu aksi `sync` ter-scope, bukan menulis ulang semua call site `DB.save`. Format:
 
 ```json
 {
+  "action": "sync",
+  "token": "<token>",
   "changes": {
-    "routes": { "baseRev": 3, "upserts": [ {"id":"r_1","name":"Banda Aceh - Takengon"} ], "deletes": [] }
+    "bookings": { "baseRev": 7, "upserts": [ { "id": "BK-1" } ], "deletes": [] }
   }
 }
 ```
 
 Aturan:
 
+- `baseRev` harus persis `rev.<koleksi>`; tidak cocok → `REV_CONFLICT`.
+- Koleksi yang boleh ditulis bergantung peran; `commit` generik tetap superadmin-only.
+- Server memuat referensi `users`, `agencies`, `routes`, `vehicles`, `drivers`, `schedules`, `bookings` sebelum validasi agar relasi lintas koleksi dalam satu batch dapat diperiksa.
+- Semua validasi berjalan sebelum penulisan; jika satu koleksi gagal, tidak ada koleksi dalam batch itu yang ditulis.
+- `apiSyncCrossValidate_` memeriksa kursi ganda, `blockedSeats`, dan kursi nonaktif pada jadwal yang tersentuh.
+- `apiSyncPrepareUsers_` menyalin secret lama sebelum diff, sehingga record klien yang tersanitasi tidak dianggap menghapus `passHash`/`tokenVersion`; password baru di-hash dan menaikkan versi token.
+
+Validasi domain utama:
+
+- **Bookings**: booking baru hanya `pending`; pelanggan hanya atas nama sendiri; pengemudi hanya booking `source:'driver'` dengan `createdBy` dirinya; agen tidak boleh membuat booking. Subtotal = harga jadwal × kursi; diskon sesuai voucher; total = subtotal − diskon; jumlah penumpang = jumlah kursi; jadwal masih bookable. Update hanya field operasional; total/subtotal/diskon/identitas tidak boleh berubah; transisi `pending→paid/cancelled`, `paid→done/cancelled`; pindah jadwal/kursi hanya lewat maintenance; refund dibatasi kebijakan agen; status refund dan `refundPaidAt` hanya admin.
+- **Payments**: satu payment per booking; nominal baru = total booking; fee = `splitFare`; status baru `pending`; update hanya status/fee/refund; `pending→paid/cancelled`; refund tidak melebihi refund booking; penyelesaian refund hanya admin; delete hanya superadmin.
+- **Ledger**: hanya untuk booking lunas, satu ledger per booking, payment harus sudah `paid`; identitas jadwal/agensi/pengemudi/email/kursi harus cocok; nominal harus sama dengan `splitFare` dan total booking; status `ditahan→layak/void`, `layak→dicairkan/void`; pindah hanya lewat maintenance; delete hanya superadmin.
+- **Voucher**: pelanggan hanya boleh menaikkan `used`; agen hanya boleh mengubah voucher miliknya; voucher global/agen lain hanya `used`; voucher baru agen wajib punya `id` dan `agencyId`; voucher agen hanya berlaku pada jadwal agensi tersebut.
+- **Routes/schedules/vehicles/drivers/maintenance**: agen hanya pada agensinya; agen tidak boleh membuat/menghapus rute, hanya menugaskan pengemudi agensinya; jadwal agen harus pada rute yang menawarkan agensinya; pengemudi hanya jadwal yang ditugaskan; kendaraan/jadwal yang masih dipakai tidak boleh dihapus; pengemudi yang masih terpasang di kendaraan/rute tidak boleh dihapus.
+- **Notifikasi**: pengguna hanya boleh membuat notifikasi untuk dirinya sendiri dan menghapus miliknya; superadmin dapat mengelola semua. Notifikasi lintas pengguna belum dibuat otomatis oleh server.
+- **Support tickets**: tiket baru atas nama akun sendiri, bukan guest, status `new`; pelanggan tidak boleh menempelkan `agencyId`; agen/pengemudi harus agensinya; update tiket sendiri hanya pesan/status/`updatedAt`; transisi `waiting→process`; agen boleh membalas tiket agensinya sebagai CS; pengemudi tidak boleh menghapus tiket.
+
+### `commit`
+
+Format sama dengan `sync`, tetapi hanya superadmin dan **tidak** menjalankan validator domain `sync`. Aturan:
+
 - Hanya `superadmin`; semua 19 koleksi diizinkan.
 - `baseRev` harus persis `rev.<koleksi>`; tidak cocok → `REV_CONFLICT`.
 - Upsert divalidasi: objek dengan `id` (atau `key` untuk `settings`/`fees`), tanpa field rahasia, tanpa ID duplikat, JSON ≤ 45000 karakter.
 - Delete sebelum upsert; urutan lama dipertahankan; record baru di akhir.
-- Field password/`tokenVersion` yang tidak dikirim klien dipertahankan dari record lama, sehingga commit profil user tidak menghapus hash.
+- Field password/`tokenVersion` yang tidak dikirim klien dipertahankan dari record lama.
 - Superadmin tidak boleh menghapus akunnya sendiri lewat `commit`.
-- `bookings`/`payments` **belum** divalidasi kapasitas/harga/status di server. Jangan menulis lewat commit sampai validasi domain ada.
 - Multi-koleksi belum atomik: jika tab kedua gagal, tab pertama bisa sudah berubah sementara `_meta.rev` belum diperbarui.
+
+`commit` adalah jalur darurat. Jangan memakainya untuk booking/payment/ledger kecuali pemulihan yang sudah diperiksa manual.
+
+## Frontend mode Sheets
+
+- `runtime.js` menentukan mode dari `VITE_DATA_MODE`; default `local`.
+- `sheetsApi.js` mengirim POST JSON `text/plain;charset=utf-8` ke `/exec`; token di body.
+- `boot.js` memuat snapshot publik/token sebelum React dirender; `BootGate` menahan UI saat boot.
+- `db.js` menyimpan cache optimistis, diff per koleksi, antrean debounce, `baseRev`, rollback, dan revisi. Password plaintext dihapus dari cache/snapshot user setelah sync sukses.
+- `remote.js` memuat bootstrap, hydrate `records` + `revisions`, login/register/logout, dan flush sebelum logout.
+- `AppContext` memasang handler error global: `REV_CONFLICT`/`SEAT_CONFLICT` memuat ulang snapshot; `UNAUTHORIZED`/`ACCOUNT_BLOCKED` membersihkan token/sesi/cache/draft checkout, kembali ke `home`, lalu memuat snapshot publik.
+- `session`, `lang`, `checkout_draft`, dan `guest_support_tickets` tetap di `localStorage`; data aplikasi lain di cache remote.
+- Di mode Sheets, `AppContext` tidak menjalankan `cleanupHolds`, `syncScheduleLifecycle`, atau `syncMaintenanceResolutions`. Interval lifecycle hanya aktif di mode `local` sampai ada trigger server-side yang memegang izin lintas data.
 
 ## Secret dan keamanan
 
@@ -176,75 +216,67 @@ Aturan:
 - Spreadsheet tetap privat; jangan mengaktifkan “Anyone with the link” pada file.
 - Web App: **Execute as** `Me`, **Who has access** `Anyone`. URL adalah gerbang akses.
 - `Content-Type` POST: `text/plain;charset=utf-8` untuk menghindari preflight.
-- 155 asersi mock memeriksa secret/plaintext password tidak muncul di response, log, atau sheet akun yang sudah dimigrasi.
-- Password frontend React masih dibandingkan di browser sampai Fase B selesai.
+- 265 asersi mock memeriksa secret/plaintext password tidak muncul di response/log/sheet akun yang sudah dimigrasi; token tamper/kedaluwarsa; revisi basi; seat conflict; whitelist field; hold booking server-side; pembayaran harus mengikuti booking; ledger; refund; tiket support; dan proyeksi KYC.
+- Jangan menaruh token/pepper/proxy key di frontend.
 
 ## Keamanan yang belum selesai
 
-- **CORS belum diuji** dari origin GitHub Pages/dev. Jika respons tidak terbaca, direct mode batal dan perlu proxy.
-- Login frontend masih client-side; jangan pakai akun nyata.
+- **CORS belum diuji dari browser.** Node probe melihat `Access-Control-Allow-Origin: *`, tetapi browser dari GitHub Pages belum diverifikasi.
+- Web App ter-deploy masih 1.1.0; `sync` belum tersedia.
+- **Lifecycle belum server-side.** Hold kedaluwarsa, jadwal lampau, dan resolusi maintenance tidak diproses otomatis di mode Sheets. Perlu trigger Apps Script atau keputusan batasan resmi sebelum data nyata.
 - Rate limit berbasis cache bisa hilang; rate limit per IP belum ada.
-- Validasi kapasitas kursi, slot jadwal, harga, dan pembayaran di server belum ada.
-- Registrasi/aksi admin belum menulis audit atau notifikasi selamat datang.
 - Multi-koleksi belum transaksional.
 - `takenSeats` membaca seluruh booking pada setiap bootstrap publik; performa perlu dipantau.
+- Notifikasi lintas pengguna belum otomatis.
+- Media/KYC base64 berpotensi melebihi `API_MAX_JSON_CHARS = 45000` dan batas sel 50.000 karakter. Jangan simpan media nyata sampai ada Drive privat + endpoint media/kompresi/guard.
 - Rekening agensi untuk instruksi transfer belum ada di jalur publik; perlu aksi scoped.
+- `commit` tetap melewati validator domain; hanya untuk superadmin/darurat.
 
 ## Rencana integrasi
 
 1. ~~Seed produksi + validasi database~~ — selesai.
-2. ~~Backend `code.gs` mode direct: autentikasi, proyeksi publik, filter baris, aksi akun, throttle, token revocation~~ — selesai, 155 asersi.
-3. **Probe CORS** dari origin produksi setelah deploy Web App.
-4. **Fase B** — adapter baca frontend (`sheetsApi.js`, bootstrap async, token sesi, cache memori); belum ada tulis remote.
-5. **Fase C** — aksi tulis per peran + validasi booking/kursi/pembayaran; audit/notifikasi; rekening scoped.
-6. **Fase D** — pindah semua peran ke `VITE_DATA_MODE=sheets`; hapus jalur localStorage untuk data aplikasi. Pertahankan `localStorage` hanya untuk `session`, `lang`, draft checkout, dan identitas guest support.
-7. Sinkronkan antar-tab lewat polling/`BroadcastChannel` bila perlu.
+2. ~~Backend `code.gs` mode direct: autentikasi, proyeksi publik, filter baris, aksi akun, throttle, token revocation~~ — selesai.
+3. ~~Fase B: adapter baca frontend + bootstrap async + token sesi + cache memori~~ — selesai di kode.
+4. ~~Fase C: `sync` ter-scope + validasi booking/kursi/payment/ledger + rollback frontend~~ — selesai di kode, 265 asersi.
+5. **Deploy + probe CORS** versi 1.2.0 dari origin produksi.
+6. **Uji end-to-end** semua peran dengan data sintetis.
+7. **Fase D**: aktifkan `VITE_DATA_MODE=sheets` setelah deploy, CORS, E2E, dan lifecycle server-side lulus; jangan mencampur mode.
+8. Selesaikan media/KYC dan keputusan notifikasi lintas pengguna.
+9. Sinkronkan antar-tab lewat polling/`BroadcastChannel` bila perlu.
 
-Lihat [[Lapisan Data dan Seed]] untuk perilaku data yang aktif sekarang, dan [[Technical Debt dan Jebakan]] untuk risiko arsitektur client-only.
+Lihat [[Lapisan Data dan Seed]] untuk perilaku data lokal, [[Build dan Deploy]] untuk langkah deploy, dan [[Technical Debt dan Jebakan]] untuk risiko arsitektur client-only.
 
 ## Uji lokal
 
-`google-apps-script/local-tests/mock-harness.mjs` menjalankan **155 asersi**:
+`google-apps-script/local-tests/mock-harness.mjs` menjalankan **265 asersi**:
 
 1. `setupBackend` + mode direct + `REQUIRE_PROXY_KEY`.
 2. Login legacy → migrasi hash; login hash; token tamper/expired; token dicabut setelah ganti/reset password.
 3. `bootstrap` superadmin/publik/agen/pengemudi/pelanggan; proyeksi tanpa KYC/NIK/rekening; filter baris; `takenSeats`; agensi pending.
 4. `commit`: upsert/delete/konflik/role/ID duplikat/field rahasia/self-delete; hash bertahan saat commit profil.
-5. `changePassword` + throttle login/ganti password.
-6. `register` pelanggan/agen, validasi, agen pending.
-7. `adminCreateUser`/`adminSetPassword`, aturan agen/pengemudi, pencabutan token.
-8. `doGet`/`doPost`, body bukan JSON, `proxyKey` salah.
-9. Tidak ada secret/plaintext password di response/log/sheet termigrasi.
+5. `sync`: kepemilikan, revisi, kursi ganda, booking/payment/ledger palsu, nominal, voucher, refund, transisi status, larangan delete, rute/armada/jadwal/pengemudi, tiket support, notifikasi.
+6. `changePassword` + throttle login/ganti password.
+7. `register` pelanggan/agen, validasi, agen pending.
+8. `adminCreateUser`/`adminSetPassword`, aturan agen/pengemudi, pencabutan token.
+9. `doGet`/`doPost`, body bukan JSON, `proxyKey` salah.
+10. Tidak ada secret/plaintext password di response/log/sheet termigrasi.
 
 ## Sumber
 
-- `google-apps-script/seed.gs:18-23` — versi skema dan header.
-- `google-apps-script/seed.gs:25-45` — daftar 19 koleksi.
-- `google-apps-script/seed.gs:63-163` — alur seed.
-- `google-apps-script/seed.gs:169-302` — validasi database.
-- `google-apps-script/seed.gs:314-339` — validasi Script Properties.
-- `google-apps-script/seed.gs:385-431` — penulisan koleksi dan `_meta`.
-- `google-apps-script/code.gs:1-114` — prinsip, versi, daftar aksi, 19 koleksi, proyeksi publik, field rahasia, nama Script Properties.
-- `google-apps-script/code.gs:116-186` — helper umum: error berkode, waktu, JSON, `apiSafeEqual_`, hex, base64url, sleep.
-- `google-apps-script/code.gs:187-239` — `apiConfig_` dan `setupBackend` (mode direct + secret).
-- `google-apps-script/code.gs:240-331` — throttling `CacheService`: guard, fail, clear, counter.
-- `google-apps-script/code.gs:332-373` — hashing password HMAC-SHA512 berulang + verifikasi.
-- `google-apps-script/code.gs:374-404` — token sesi + `pv` (token version).
-- `google-apps-script/code.gs:405-429` — parsing request.
-- `google-apps-script/code.gs:430-540` — I/O Sheets: baca/tulis koleksi, baca/perbarui `_meta`, bump rev.
-- `google-apps-script/code.gs:541-597` — ID record, sanitasi secret, validasi upsert.
-- `google-apps-script/code.gs:598-698` — proyeksi, filter, `takenSeats`.
-- `google-apps-script/code.gs:699-751` — user/role helper, token check, driver active schedule.
-- `google-apps-script/code.gs:752-822` — `doGet`, `doPost`, health, `apiDispatch_`, gerbang proxy opsional.
-- `google-apps-script/code.gs:823-903` — `login` + throttle + migrasi plaintext.
-- `google-apps-script/code.gs:904-1007` — `register` pelanggan/agen.
-- `google-apps-script/code.gs:1008-1016` — `session`.
-- `google-apps-script/code.gs:1017-1330` — `bootstrap` + filter/proyeksi per peran.
-- `google-apps-script/code.gs:1331-1404` — `changePassword` + throttle + pencabutan token.
-- `google-apps-script/code.gs:1405-1552` — `adminCreateUser`.
-- `google-apps-script/code.gs:1553-1595` — `adminSetPassword`.
-- `google-apps-script/code.gs:1596-1718` — `commit`, validasi revisi, self-delete guard, validasi batch, `apiApplyCollection_`, preservasi secret.
+- `google-apps-script/seed.gs:18-45` — versi skema, header, daftar 19 koleksi.
+- `google-apps-script/seed.gs:63-302` — alur seed dan validasi database.
+- `google-apps-script/seed.gs:314-431` — validasi Script Properties dan penulisan koleksi.
+- `google-apps-script/code.gs:1-120` — prinsip, versi 1.2.0, daftar aksi/koleksi, proyeksi publik, field rahasia.
+- `google-apps-script/code.gs:799-1058` — `doPost`, dispatch, health, gerbang proxy.
+- `google-apps-script/code.gs:1059-1744` — bootstrap + filter/proyeksi per peran.
+- `google-apps-script/code.gs:1745-2188` — `sync`, helper validasi, refund, voucher.
+- `google-apps-script/code.gs:2189-2840` — validasi user, rute, agensi, armada, pengemudi, jadwal, maintenance.
+- `google-apps-script/code.gs:2842-3381` - validasi booking, payment, ledger.
+- `google-apps-script/code.gs:3382-3731` - voucher, review, notifikasi, support tickets, route requests, dispatcher, cross-validate.
+- `google-apps-script/code.gs:3732-3850` - `commit`, penerapan koleksi, preservasi secret.
 - `google-apps-script/appsscript.json:1-10` — manifest dan OAuth scope.
-- `google-apps-script/README.md` — pemasangan, mode direct, probe CORS, kontrak API, risiko.
-- `google-apps-script/local-tests/mock-harness.mjs` — 155 asersi mock test.
-- `transaceh-react/src/lib/db.js:1-6` — adapter localStorage yang masih aktif.
+- `google-apps-script/local-tests/mock-harness.mjs` — 265 asersi mock.
+- `transaceh-react/src/lib/db.js:1-260` — cache, diff, antrean sync, rollback, hydrate.
+- `transaceh-react/src/lib/sheetsApi.js` — transport direct dan method `sync`.
+- `transaceh-react/src/lib/remote.js` — bootstrap, login, logout, hydrate revisi.
+- `transaceh-react/src/store/AppContext.jsx` — handler error sync dan pembersihan sesi.

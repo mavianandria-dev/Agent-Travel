@@ -39,7 +39,7 @@
  * tidak akan ditimpa bila sudah ada. Secret tidak pernah dicetak ke log.
  */
 
-var API_VERSION = '1.1.0';
+var API_VERSION = '1.2.0';
 var API_SERVICE_NAME = 'transaceh-db';
 
 var API_SCHEMA_VERSION = '1';
@@ -99,6 +99,39 @@ var API_PUBLIC_FIELDS = {
 var API_SECRET_FIELDS = [
   'pass', 'passHash', 'passSalt', 'passIter', 'passAlgo',
   'password', 'passwordHash', 'passwordSalt', 'tokenVersion'
+];
+
+/**
+ * Koleksi yang boleh ditulis tiap peran lewat aksi `sync`. Ini bukan commit
+ * bebas: setiap baris tetap melewati validasi kepemilikan dan field di
+ * apiSyncValidateCollection_(). `commit` tetap khusus superadmin.
+ */
+var API_SYNC_ALLOWED = {
+  pelanggan: [
+    'users', 'bookings', 'payments', 'ledger', 'vouchers', 'reviews',
+    'notifications', 'supportTickets'
+  ],
+  agen: [
+    'agencies', 'users', 'routes', 'vehicles', 'drivers', 'schedules',
+    'maintenanceRequests', 'bookings', 'payments', 'ledger', 'vouchers',
+    'notifications', 'supportTickets', 'routeRequests'
+  ],
+  pengemudi: [
+    'users', 'drivers', 'schedules', 'bookings', 'payments', 'ledger',
+    'vouchers', 'maintenanceRequests', 'notifications', 'supportTickets'
+  ],
+  superadmin: API_COLLECTION_KEYS
+};
+
+/** Agen pending hanya boleh menyimpan KYC agensinya dan profil sendiri. */
+var API_SYNC_PENDING_AGEN_ALLOWED = ['agencies', 'users'];
+
+/** Urutan terapkan/validasi: induk dulu, transaksi terakhir. */
+var API_SYNC_ORDER = [
+  'agencies', 'users', 'routes', 'routeRequests', 'vehicles', 'drivers',
+  'schedules', 'maintenanceRequests', 'bookings', 'payments', 'ledger',
+  'vouchers', 'reviews', 'notifications', 'supportTickets', 'banners',
+  'settings', 'fees', 'audit'
 ];
 
 var API_PROP_REQUIRE_PROXY_KEY = 'REQUIRE_PROXY_KEY';
@@ -547,6 +580,8 @@ function apiRecordId_(record) {
   if (record.id != null && record.id !== '') return String(record.id);
   if (record.key != null && record.key !== '') return String(record.key);
   if (record._id != null && record._id !== '') return String(record._id);
+  // Voucher lama hanya punya `code`; kode unik dan dipakai sebagai id baris.
+  if (record.code != null && record.code !== '') return String(record.code);
   return '';
 }
 
@@ -716,7 +751,8 @@ function apiAuthedUser_(req, cfg) {
   if (Number(payload.pv || 0) !== Number(user.tokenVersion || 0)) {
     throw apiError_('UNAUTHORIZED', 'Sesi sudah tidak berlaku. Silakan masuk lagi.');
   }
-  if (String(user.status || 'active') !== 'active') {
+  var accountStatus = String(user.status || 'active');
+  if (accountStatus !== 'active' && !(user.role === 'agen' && accountStatus === 'pending')) {
     throw apiError_('ACCOUNT_BLOCKED', 'Akun tidak aktif.');
   }
   return user;
@@ -812,6 +848,7 @@ function apiDispatch_(req) {
     case 'session': return apiSession_(req, cfg);
     case 'bootstrap': return apiBootstrap_(req, cfg);
     case 'commit': return apiCommit_(req, cfg);
+    case 'sync': return apiSync_(req, cfg);
     case 'changepassword': return apiChangePassword_(req, cfg);
     case 'admincreateuser': return apiAdminCreateUser_(req, cfg);
     case 'adminsetpassword': return apiAdminSetPassword_(req, cfg);
@@ -853,7 +890,8 @@ function apiLogin_(req, cfg) {
       apiSleep_(250);
       throw apiError_('UNAUTHORIZED', 'Email atau password salah.');
     }
-    if (String(user.status || 'active') !== 'active') {
+    var loginStatus = String(user.status || 'active');
+    if (loginStatus !== 'active' && !(user.role === 'agen' && loginStatus === 'pending')) {
       throw apiError_('ACCOUNT_BLOCKED', 'Akun tidak aktif.');
     }
     var verified = false;
@@ -1030,7 +1068,8 @@ function apiBootstrap_(req, cfg) {
     if (Number(tokenPayload.pv || 0) !== Number(user.tokenVersion || 0)) {
       throw apiError_('UNAUTHORIZED', 'Sesi sudah tidak berlaku. Silakan masuk lagi.');
     }
-    if (String(user.status || 'active') !== 'active') {
+    var bootStatus = String(user.status || 'active');
+    if (bootStatus !== 'active' && !(user.role === 'agen' && bootStatus === 'pending')) {
       throw apiError_('ACCOUNT_BLOCKED', 'Akun tidak aktif.');
     }
   }
@@ -1135,6 +1174,23 @@ function apiBootstrapData_(ss, meta, role, user) {
     return { records: records, revisions: revisions };
   }
 
+  /*
+   * Agen pending hanya boleh login untuk melengkapi KYC. Jangan kirim
+   * katalog publik/agensi lain; cukup agensinya sendiri + akunnya.
+   */
+  if (role === 'agen' && String(user && user.status || '') === 'pending') {
+    var pendingAgencyId = String((user && user.agencyId) || '');
+    var pendingAgency = null;
+    for (var pa = 0; pa < agencies.length; pa++) {
+      if (String(agencies[pa].id) === pendingAgencyId) { pendingAgency = agencies[pa]; break; }
+    }
+    put('agencies', pendingAgency ? [apiStripSecrets_(pendingAgency)] : []);
+    put('users', read('users').filter(function (u) {
+      return String((u && u.id) || '') === String((user && user.id) || '');
+    }));
+    return { records: records, revisions: revisions };
+  }
+
   var email = apiNormalizeEmail_(user && user.email);
   var userId = String((user && user.id) || '');
 
@@ -1149,11 +1205,61 @@ function apiBootstrapData_(ss, meta, role, user) {
     putProjected('reviews', publicReviews());
     putProjected('agencies', publicAgencies);
     putProjected('vehicles', publicVehicles(vehicles));
-    put('schedules', publicSchedules(schedules));
+
+    /* Pelanggan boleh melihat pengemudi hanya pada jadwal booking miliknya. */
+    var ownScheduleIds = {};
+    ownBookings.forEach(function (b) {
+      if (b && b.scheduleId) ownScheduleIds[String(b.scheduleId)] = true;
+    });
+    var ownScheduleMap = {};
+    schedules.forEach(function (sc) {
+      if (sc && ownScheduleIds[String(sc.id)]) ownScheduleMap[String(sc.id)] = sc;
+    });
+    var customerSchedules = publicSchedules(schedules).map(function (ps) {
+      var own = ownScheduleMap[String(ps.id)];
+      if (!own) return ps;
+      ps.driverId = own.driverId || '';
+      ps.driverName = own.driverName || '';
+      ps.backupDriverId = own.backupDriverId || '';
+      ps.backupName = own.backupName || '';
+      return ps;
+    });
+    Object.keys(ownScheduleMap).forEach(function (sid) {
+      var found = false;
+      for (var cs = 0; cs < customerSchedules.length; cs++) {
+        if (String(customerSchedules[cs].id) === String(sid)) { found = true; break; }
+      }
+      if (found) return;
+      var own = ownScheduleMap[sid];
+      var out = apiPickFields_(own, API_PUBLIC_FIELDS.schedules);
+      out.takenSeats = takenSeats[sid] || [];
+      out.driverId = own.driverId || '';
+      out.driverName = own.driverName || '';
+      out.backupDriverId = own.backupDriverId || '';
+      out.backupName = own.backupName || '';
+      customerSchedules.push(out);
+    });
+    put('schedules', customerSchedules);
+
+    var customerDriverIds = {};
+    Object.keys(ownScheduleMap).forEach(function (sid) {
+      var sc = ownScheduleMap[sid] || {};
+      if (sc.driverId) customerDriverIds[String(sc.driverId)] = true;
+      if (sc.backupDriverId) customerDriverIds[String(sc.backupDriverId)] = true;
+    });
+    put('drivers', read('drivers').filter(function (driver) {
+      return !!customerDriverIds[String((driver && driver.id) || '')];
+    }).map(function (driver) {
+      return apiPickFields_(driver, ['id', 'name', 'phone', 'photo', 'rating', 'status']);
+    }));
+
     put('settings', read('settings'));
     put('bookings', ownBookings);
     put('payments', read('payments').filter(function (p) {
       return ownBookingIds[String((p && p.bookingId) || '')];
+    }));
+    put('ledger', read('ledger').filter(function (entry) {
+      return ownBookingIds[String((entry && entry.bookingId) || '')];
     }));
     put('vouchers', read('vouchers'));
     put('notifications', read('notifications').filter(function (n) {
@@ -1209,17 +1315,39 @@ function apiBootstrapData_(ss, meta, role, user) {
     });
 
     put('routes', read('routes'));
-    putProjected('agencies', publicAgencies);
+    var driverAgencies = publicAgencies.slice();
+    var driverAgency = null;
+    if (ownDriver) {
+      for (var da = 0; da < agencies.length; da++) {
+        if (String(agencies[da].id) === String(ownDriver.agencyId || '')) { driverAgency = agencies[da]; break; }
+      }
+    }
+    if (driverAgency && !publicAgencyIds[String(driverAgency.id)]) {
+      driverAgencies.push(apiPickFields_(driverAgency, API_PUBLIC_FIELDS.agencies));
+    }
+    putProjected('agencies', driverAgencies);
     putProjected('reviews', publicReviews());
     put('settings', read('settings'));
     put('drivers', driverRecords);
     put('schedules', driverSchedules);
-    put('bookings', bookings.filter(function (b) {
+    var driverBookings = bookings.filter(function (b) {
       return driverScheduleIds[String((b && b.scheduleId) || '')];
+    });
+    put('bookings', driverBookings);
+    var driverBookingIds = apiIdSet_(driverBookings);
+    put('payments', read('payments').filter(function (p) {
+      return driverBookingIds[String((p && p.bookingId) || '')];
     }));
+    put('ledger', read('ledger').filter(function (entry) {
+      return driverScheduleIds[String((entry && entry.scheduleId) || '')] ||
+        driverBookingIds[String((entry && entry.bookingId) || '')];
+    }));
+    put('vouchers', read('vouchers'));
     put('vehicles', vehicles.filter(function (v) {
       var vid = String((v && v.id) || '');
       return driverVehicleIds[vid] || (driverId && String(v.coopDriverId || '') === driverId);
+    }).map(function (v) {
+      return apiPickFields_(v, API_PUBLIC_FIELDS.vehicles);
     }));
     put('maintenanceRequests', read('maintenanceRequests').filter(function (m) {
       return driverId && String((m && m.driverId) || '') === driverId;
@@ -1227,6 +1355,10 @@ function apiBootstrapData_(ss, meta, role, user) {
     put('notifications', read('notifications').filter(function (n) {
       var to = apiNormalizeEmail_(n && n.to);
       return to === email || to === 'all';
+    }));
+    put('supportTickets', read('supportTickets').filter(function (t) {
+      return apiNormalizeEmail_(t && t.userEmail) === email ||
+        String((t && t.userId) || '') === userId;
     }));
     put('users', read('users').filter(function (u) {
       if (!u) return false;
@@ -1371,7 +1503,11 @@ function apiChangePassword_(req, cfg) {
       }
     }
     if (!user) throw apiError_('UNAUTHORIZED', 'User tidak ditemukan.');
-    if (String(user.status || 'active') !== 'active') {
+    if (Number(payload.pv || 0) !== Number(user.tokenVersion || 0)) {
+      throw apiError_('UNAUTHORIZED', 'Sesi sudah tidak berlaku. Silakan masuk lagi.');
+    }
+    var pwStatus = String(user.status || 'active');
+    if (pwStatus !== 'active' && !(user.role === 'agen' && pwStatus === 'pending')) {
       throw apiError_('ACCOUNT_BLOCKED', 'Akun tidak aktif.');
     }
     var verified = false;
@@ -1597,8 +1733,2001 @@ function apiAdminSetPassword_(req, cfg) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Action: commit                                                      */
+/* Action: sync (tulis ter-scope per peran)                            */
 /* ------------------------------------------------------------------ */
+
+/**
+ * Menulis perubahan dari klien dengan batas koleksi + kepemilikan baris.
+ * Bentuk body sama dengan commit: {changes:{koleksi:{baseRev,upserts,deletes}}}.
+ * Berbeda dari commit, peran non-superadmin hanya boleh menyentuh koleksi
+ * yang tercantum di API_SYNC_ALLOWED dan setiap baris diverifikasi di sini.
+ */
+function apiSync_(req, cfg) {
+  var user = apiAuthedUser_(req, cfg);
+  var role = String(user.role || '');
+  var pendingAgen = role === 'agen' && String(user.status || 'active') === 'pending';
+  var allowed = pendingAgen ? API_SYNC_PENDING_AGEN_ALLOWED : (API_SYNC_ALLOWED[role] || []);
+  if (!allowed.length) {
+    throw apiError_('FORBIDDEN', 'Peran Anda belum diizinkan menulis data.');
+  }
+
+  var body = req.body || {};
+  var changes = body.changes;
+  if (!changes || typeof changes !== 'object' || Array.isArray(changes)) {
+    throw apiError_('VALIDATION', 'changes harus objek {koleksi:{baseRev,upserts,deletes}}.');
+  }
+  var rawKeys = Object.keys(changes);
+  if (!rawKeys.length) throw apiError_('VALIDATION', 'changes tidak boleh kosong.');
+  for (var i = 0; i < rawKeys.length; i++) {
+    var rawKey = rawKeys[i];
+    if (API_COLLECTION_KEYS.indexOf(rawKey) < 0) {
+      throw apiError_('VALIDATION', 'Koleksi tidak dikenal: ' + rawKey);
+    }
+    if (allowed.indexOf(rawKey) < 0) {
+      throw apiError_('FORBIDDEN', 'Peran tidak diizinkan menulis ' + rawKey + '.');
+    }
+  }
+
+  var keys = [];
+  API_SYNC_ORDER.forEach(function (key) {
+    if (Object.prototype.hasOwnProperty.call(changes, key)) keys.push(key);
+  });
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(API_LOCK_WAIT_MS)) {
+    throw apiError_('LOCK_TIMEOUT', 'Server sedang diproses. Coba lagi sebentar.');
+  }
+  try {
+    var ss = apiSpreadsheet_();
+    var meta = apiReadMeta_(ss);
+    var ctx = {
+      ss: ss,
+      meta: meta,
+      user: user,
+      role: role,
+      pendingAgen: pendingAgen,
+      changes: changes,
+      current: {},
+      currentMap: {},
+      pending: {},
+      deleted: {},
+      ownDriverId: '',
+      touchedSchedules: {}
+    };
+
+    var refKeys = ['users', 'agencies', 'routes', 'vehicles', 'drivers', 'schedules', 'bookings'];
+    for (var r = 0; r < refKeys.length; r++) {
+      var refKey = refKeys[r];
+      if (!Object.prototype.hasOwnProperty.call(ctx.current, refKey)) {
+        ctx.current[refKey] = apiReadCollection_(ss, refKey);
+        ctx.currentMap[refKey] = apiIndexById_(ctx.current[refKey]);
+      }
+    }
+
+    for (var k = 0; k < keys.length; k++) {
+      var key = keys[k];
+      var target = changes[key];
+      if (!target || typeof target !== 'object' || Array.isArray(target)) {
+        throw apiError_('VALIDATION', 'changes.' + key + ' harus objek.');
+      }
+      var cur = Number(meta['rev.' + key] || 0) || 0;
+      var want = Number(target.baseRev);
+      if (isNaN(want) || want !== cur) {
+        throw apiError_('REV_CONFLICT', 'Revisi koleksi ' + key + ' sudah berubah. Muat ulang data lalu coba lagi.');
+      }
+      apiSyncValidateTargetShape_(key, target);
+      if (!Object.prototype.hasOwnProperty.call(ctx.current, key)) {
+        ctx.current[key] = apiReadCollection_(ss, key);
+        ctx.currentMap[key] = apiIndexById_(ctx.current[key]);
+      }
+      ctx.pending[key] = apiIndexById_(target.upserts || []);
+      ctx.deleted[key] = {};
+      (target.deletes || []).forEach(function (id) {
+        ctx.deleted[key][String(id)] = true;
+      });
+    }
+
+    // Pengemudi perlu tahu record driver miliknya untuk validasi baris.
+    if (role === 'pengemudi') {
+      var email = apiNormalizeEmail_(user.email);
+      var currentDrivers = ctx.current.drivers || [];
+      var pendingDrivers = (changes.drivers && changes.drivers.upserts) || [];
+      var allDrivers = currentDrivers.concat(pendingDrivers);
+      for (var d = 0; d < allDrivers.length; d++) {
+        if (apiNormalizeEmail_(allDrivers[d].userEmail) === email) {
+          ctx.ownDriverId = String(allDrivers[d].id || '');
+          break;
+        }
+      }
+    }
+
+    if (changes.users) apiSyncPrepareUsers_(ctx, cfg);
+
+    for (var v = 0; v < keys.length; v++) {
+      if (keys[v] === 'users') continue;
+      apiSyncValidateCollection_(ctx, keys[v], changes[keys[v]]);
+    }
+    apiSyncCrossValidate_(ctx);
+
+    var revisions = {};
+    for (var a = 0; a < keys.length; a++) {
+      revisions[keys[a]] = apiApplyCollection_(ss, keys[a], changes[keys[a]], meta);
+    }
+    apiUpdateMeta_(ss, meta);
+    SpreadsheetApp.flush();
+    return { ok: true, data: { touched: keys, revisions: revisions } };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function apiSyncValidateTargetShape_(key, target) {
+  var upserts = target.upserts == null ? [] : target.upserts;
+  var deletes = target.deletes == null ? [] : target.deletes;
+  if (!Array.isArray(upserts) || !Array.isArray(deletes)) {
+    throw apiError_('VALIDATION', 'upserts dan deletes pada ' + key + ' harus array.');
+  }
+  if (!upserts.length && !deletes.length) {
+    throw apiError_('VALIDATION', 'Koleksi ' + key + ' tidak punya perubahan.');
+  }
+  var seen = {};
+  for (var i = 0; i < upserts.length; i++) {
+    var rec = upserts[i];
+    if (!rec || typeof rec !== 'object' || Array.isArray(rec)) {
+      throw apiError_('VALIDATION', 'Record pada ' + key + ' harus objek.');
+    }
+    var id = apiRecordId_(rec);
+    if (!id) throw apiError_('VALIDATION', 'Record di ' + key + ' tidak punya id.');
+    if (seen[id]) throw apiError_('VALIDATION', 'Id duplikat di ' + key + ': ' + id);
+    seen[id] = true;
+    var hasPass = Object.prototype.hasOwnProperty.call(rec, 'pass');
+    var hasPassword = Object.prototype.hasOwnProperty.call(rec, 'password');
+    if (hasPass && hasPassword) {
+      throw apiError_('VALIDATION', 'Gunakan hanya salah satu field pass/password.');
+    }
+    for (var f = 0; f < API_SECRET_FIELDS.length; f++) {
+      var field = API_SECRET_FIELDS[f];
+      if (!Object.prototype.hasOwnProperty.call(rec, field)) continue;
+      if (key === 'users' && (field === 'pass' || field === 'password')) continue;
+      throw apiError_('VALIDATION', 'Field rahasia "' + field + '" tidak boleh ditulis dari klien.');
+    }
+    var json = JSON.stringify(rec);
+    if (json.length > API_MAX_JSON_CHARS) {
+      throw apiError_('VALIDATION', 'Record ' + id + ' pada ' + key + ' melebihi batas ' + API_MAX_JSON_CHARS + ' karakter.');
+    }
+  }
+  var delSeen = {};
+  for (var d = 0; d < deletes.length; d++) {
+    var delId = String(deletes[d] == null ? '' : deletes[d]);
+    if (!delId) throw apiError_('VALIDATION', 'Id delete pada ' + key + ' kosong.');
+    if (delSeen[delId]) throw apiError_('VALIDATION', 'Id delete duplikat di ' + key + ': ' + delId);
+    if (seen[delId]) throw apiError_('VALIDATION', 'Id ' + delId + ' tidak boleh di-upsert dan dihapus sekaligus.');
+    delSeen[delId] = true;
+  }
+}
+
+function apiSyncChangedFields_(rec, old) {
+  var keys = {};
+  Object.keys(rec || {}).forEach(function (k) { keys[k] = true; });
+  Object.keys(old || {}).forEach(function (k) { keys[k] = true; });
+  var out = [];
+  Object.keys(keys).forEach(function (k) {
+    if (JSON.stringify(rec ? rec[k] : undefined) !== JSON.stringify(old ? old[k] : undefined)) out.push(k);
+  });
+  return out;
+}
+
+/** Tolak field yang tidak ada di whitelist. Dipakai untuk record baru agar
+ *  klien tidak bisa menyelipkan field refund/maintenance/otorisasi. */
+function apiSyncRejectUnknownFields_(rec, allowed, label) {
+  var keys = Object.keys(rec || {});
+  for (var i = 0; i < keys.length; i++) {
+    if (!Object.prototype.hasOwnProperty.call(allowed, keys[i])) {
+      throw apiError_('FORBIDDEN', 'Field "' + keys[i] + '" tidak boleh diisi pada ' + label + '.');
+    }
+  }
+}
+
+function apiSyncVoucherRestoreCount_(ctx, code) {
+  var needle = String(code || '').trim().toUpperCase();
+  if (!needle) return 0;
+  var bookings = (ctx.changes.bookings && ctx.changes.bookings.upserts) || [];
+  var current = ctx.currentMap.bookings || {};
+  var count = 0;
+  for (var i = 0; i < bookings.length; i++) {
+    var next = bookings[i] || {};
+    var old = current[apiRecordId_(next)] || null;
+    if (!old) continue;
+    var oldCode = String(old.voucher || old.voucherCode || '').trim().toUpperCase();
+    if (oldCode !== needle) continue;
+    if (String(old.status || '') === 'cancelled' || String(next.status || '') !== 'cancelled') continue;
+    if (apiSyncNumber_(old.discount, 0) <= 0) continue;
+    count += 1;
+  }
+  return count;
+}
+
+function apiSyncSameExcept_(rec, old, except) {
+  var skip = except || {};
+  var changed = apiSyncChangedFields_(rec, old);
+  for (var i = 0; i < changed.length; i++) {
+    if (!skip[changed[i]]) return false;
+  }
+  return true;
+}
+
+function apiSyncEnsureCollection_(ctx, key) {
+  if (Object.prototype.hasOwnProperty.call(ctx.current, key)) return ctx.current[key];
+  ctx.current[key] = apiReadCollection_(ctx.ss, key);
+  ctx.currentMap[key] = apiIndexById_(ctx.current[key]);
+  return ctx.current[key];
+}
+
+function apiSyncFind_(ctx, key, id) {
+  var sid = String(id == null ? '' : id);
+  if (!sid) return null;
+  if (ctx.deleted[key] && ctx.deleted[key][sid]) return null;
+  if (ctx.pending[key] && ctx.pending[key][sid]) return ctx.pending[key][sid];
+  if (!ctx.currentMap[key]) apiSyncEnsureCollection_(ctx, key);
+  return (ctx.currentMap[key] && ctx.currentMap[key][sid]) || null;
+}
+
+function apiSyncFindUserByEmail_(ctx, email) {
+  var needle = apiNormalizeEmail_(email);
+  if (!needle) return null;
+  var users = ctx.current.users || [];
+  var upserts = (ctx.changes.users && ctx.changes.users.upserts) || [];
+  var all = users.concat(upserts);
+  for (var i = 0; i < all.length; i++) {
+    if (apiNormalizeEmail_(all[i].email) === needle) return all[i];
+  }
+  return null;
+}
+
+function apiSyncMergeList_(ctx, key) {
+  var map = {};
+  var current = apiSyncEnsureCollection_(ctx, key) || [];
+  for (var i = 0; i < current.length; i++) {
+    var id = apiRecordId_(current[i]);
+    if (id) map[id] = current[i];
+  }
+  var upserts = (ctx.changes[key] && ctx.changes[key].upserts) || [];
+  for (var u = 0; u < upserts.length; u++) {
+    var uid = apiRecordId_(upserts[u]);
+    if (uid) map[uid] = upserts[u];
+  }
+  var deletes = (ctx.changes[key] && ctx.changes[key].deletes) || [];
+  for (var d = 0; d < deletes.length; d++) delete map[String(deletes[d])];
+  return Object.keys(map).map(function (k) { return map[k]; });
+}
+
+function apiSyncNumber_(value, fallback) {
+  var n = Number(value);
+  return isFinite(n) ? n : fallback;
+}
+
+function apiSyncScheduleDepartureMs_(schedule) {
+  if (!schedule || !schedule.date) return NaN;
+  var date = String(schedule.date || '');
+  var time = String(schedule.time || '00:00');
+  var ms = new Date(date + 'T' + (time.length === 5 ? time : time.slice(0, 5)) + ':00').getTime();
+  if (schedule.delayUntil) {
+    var delayed = new Date(schedule.delayUntil).getTime();
+    if (isFinite(delayed) && delayed > ms) ms = delayed;
+  }
+  return ms;
+}
+
+function apiSyncScheduleBookable_(schedule) {
+  if (!schedule) return false;
+  if (String(schedule.status || '') !== 'open') return false;
+  if (['ontrip', 'arrived', 'missed', 'cancelled'].indexOf(String(schedule.tripStatus || 'scheduled')) >= 0) {
+    return false;
+  }
+  if (String(schedule.maintenanceStatus || '') === 'active') {
+    var date = String(schedule.date || '');
+    var from = String(schedule.maintenanceFrom || '');
+    var until = String(schedule.maintenanceUntil || '');
+    if ((!from || date >= from) && (!until || date <= until)) return false;
+  }
+  var departure = apiSyncScheduleDepartureMs_(schedule);
+  return isFinite(departure) && departure > Date.now();
+}
+
+function apiSyncPlatformFee_(ctx) {
+  var settings = apiSyncEnsureCollection_(ctx, 'settings') || [];
+  for (var i = 0; i < settings.length; i++) {
+    if (String(settings[i].key || '') === 'platformFee' && settings[i].value) {
+      return settings[i].value;
+    }
+  }
+  return { type: 'percent', value: 8 };
+}
+
+function apiSyncServicePerSeat_(ctx, schedule) {
+  var agency = schedule ? apiSyncFind_(ctx, 'agencies', schedule.agencyId) : null;
+  return apiSyncNumber_(agency && agency.serviceFee != null ? agency.serviceFee : 10000, 10000);
+}
+
+function apiSyncSplitFare_(ctx, schedule, seatCount, discount, source) {
+  var n = Math.max(1, apiSyncNumber_(seatCount, 1));
+  var paid = Math.max(0, apiSyncNumber_(schedule && schedule.price, 0) * n - apiSyncNumber_(discount, 0));
+  var pf = apiSyncPlatformFee_(ctx) || { type: 'percent', value: 8 };
+  var base = String(pf.type || 'percent') === 'flat'
+    ? Math.max(0, paid - apiSyncNumber_(pf.value, 0))
+    : paid / (1 + apiSyncNumber_(pf.value, 8) / 100);
+  var service = String(source || '') === 'driver'
+    ? 0
+    : Math.min(apiSyncServicePerSeat_(ctx, schedule) * n, Math.round(base));
+  var ticket = Math.max(0, Math.round(base) - service);
+  var fee = Math.max(0, paid - ticket - service);
+  return { ticket: ticket, service: service, fee: fee, total: paid };
+}
+
+function apiSyncRefundPolicy_(ctx, schedule) {
+  var agency = schedule ? apiSyncFind_(ctx, 'agencies', schedule.agencyId) : null;
+  var raw = agency && Array.isArray(agency.refundPolicy) ? agency.refundPolicy : [];
+  if (!raw.length) {
+    raw = [
+      { minH: 72, pct: 100 },
+      { minH: 24, pct: 50 },
+      { minH: 0, pct: 0 }
+    ];
+  }
+  var out = [];
+  raw.forEach(function (item) {
+    var minH = Math.max(0, Math.round(apiSyncNumber_(item && item.minH, 0)));
+    var pct = Math.max(0, Math.min(100, apiSyncNumber_(item && item.pct, 0)));
+    out.push({ minH: minH, pct: pct });
+  });
+  out.sort(function (a, b) { return b.minH - a.minH; });
+  if (!out.some(function (x) { return x.minH === 0; })) out.push({ minH: 0, pct: 0 });
+  return out;
+}
+
+function apiSyncRefundExpectation_(ctx, booking, schedule, next) {
+  if (!booking || !schedule) return { pct: 0, amount: 0, scope: 'ticket' };
+  if (String(booking.status || '') === 'pending') {
+    return { pct: 0, amount: 0, scope: 'total' };
+  }
+  /* Refund 100% hanya untuk pembatalan karena maintenance yang sedang
+     diproses atau baru saja direfund. Booking yang pernah dipindahkan
+     (maintenanceState 'replaced') kembali ke kebijakan normal. */
+  var maintenanceRefund = String(booking.maintenanceState || '') === 'choice_pending' ||
+    (String((next && next.maintenanceState) || '') === 'refunded' &&
+      String(schedule.maintenanceStatus || '') === 'active');
+  var fullRefund = maintenanceRefund ||
+    String(schedule.status || '') === 'cancelled' ||
+    String(schedule.tripStatus || '') === 'cancelled';
+  if (fullRefund) {
+    return {
+      pct: 100,
+      amount: Math.max(0, apiSyncNumber_(booking.total, 0)),
+      scope: 'total'
+    };
+  }
+  var fare = booking.fare;
+  var ticket = fare && isFinite(Number(fare.ticket))
+    ? Number(fare.ticket)
+    : apiSyncSplitFare_(ctx, schedule, (booking.seats || []).length,
+        booking.discount || 0, booking.source || '').ticket;
+  var departure = apiSyncScheduleDepartureMs_(schedule);
+  var hours = isFinite(departure) ? Math.max(0, (departure - Date.now()) / 36e5) : 0;
+  var policy = apiSyncRefundPolicy_(ctx, schedule);
+  var rule = policy[policy.length - 1];
+  for (var i = 0; i < policy.length; i++) {
+    if (hours >= policy[i].minH) { rule = policy[i]; break; }
+  }
+  return {
+    pct: Math.max(0, Math.min(100, apiSyncNumber_(rule && rule.pct, 0))),
+    amount: Math.round(Math.max(0, ticket) * Math.max(0, Math.min(100, apiSyncNumber_(rule && rule.pct, 0))) / 100),
+    scope: 'ticket'
+  };
+}
+
+function apiSyncVoucherDiscount_(ctx, schedule, seatCount, voucherCode) {
+  var code = String(voucherCode || '').trim().toUpperCase();
+  if (!code) return { ok: true, discount: 0, voucher: null };
+  var vouchers = apiSyncEnsureCollection_(ctx, 'vouchers') || [];
+  var voucher = null;
+  for (var i = 0; i < vouchers.length; i++) {
+    if (String(vouchers[i].code || '').toUpperCase() === code) {
+      voucher = vouchers[i];
+      break;
+    }
+  }
+  if (!voucher) return { ok: false, msg: 'Voucher tidak ditemukan.' };
+  if (!voucher.active) return { ok: false, msg: 'Voucher sudah tidak aktif.' };
+  if (voucher.quota != null && apiSyncNumber_(voucher.used, 0) >= apiSyncNumber_(voucher.quota, 0)) {
+    return { ok: false, msg: 'Kuota voucher sudah habis.' };
+  }
+  if (voucher.agencyId && String(voucher.agencyId) !== String(schedule.agencyId || '')) {
+    return { ok: false, msg: 'Voucher tidak berlaku untuk agensi jadwal ini.' };
+  }
+  var subtotal = apiSyncNumber_(schedule.price, 0) * Math.max(1, apiSyncNumber_(seatCount, 1));
+  var discount = String(voucher.type || '') === 'percent'
+    ? Math.min(Math.round((subtotal * apiSyncNumber_(voucher.value, 0)) / 100), apiSyncNumber_(voucher.maxDisc, subtotal))
+    : Math.min(apiSyncNumber_(voucher.value, 0), subtotal);
+  return { ok: true, discount: Math.max(0, discount), voucher: voucher };
+}
+
+function apiSyncBookingTransitionAllowed_(from, to) {
+  if (from === to) return true;
+  var map = {
+    pending: { paid: 1, cancelled: 1 },
+    paid: { cancelled: 1, done: 1 },
+    done: {},
+    cancelled: {}
+  };
+  return !!(map[from] && map[from][to]);
+}
+
+function apiSyncLedgerTransitionAllowed_(from, to) {
+  if (from === to) return true;
+  var map = {
+    ditahan: { layak: 1, void: 1 },
+    layak: { dicairkan: 1, void: 1 },
+    void: {},
+    dicairkan: {}
+  };
+  return !!(map[from] && map[from][to]);
+}
+
+function apiSyncRequireAgency_(ctx, agencyId) {
+  var id = String(agencyId || '');
+  if (!id) throw apiError_('VALIDATION', 'agencyId wajib diisi.');
+  var agency = apiSyncFind_(ctx, 'agencies', id);
+  if (!agency) throw apiError_('VALIDATION', 'Agensi tidak ditemukan: ' + id);
+  return agency;
+}
+
+function apiSyncValidateAgencyRef_(ctx, agencyId, label) {
+  if (!agencyId) return null;
+  return apiSyncRequireAgency_(ctx, agencyId);
+}
+
+/* ---------------------------- users ------------------------------- */
+
+function apiSyncPrepareUsers_(ctx, cfg) {
+  var target = ctx.changes.users;
+  var currentMap = ctx.currentMap.users || {};
+  var pendingMap = ctx.pending.users || {};
+  var selfId = String(ctx.user.id || '');
+  var role = ctx.role;
+
+  function emailTaken(email, exceptId) {
+    var needle = apiNormalizeEmail_(email);
+    if (!needle) return false;
+    var users = ctx.current.users || [];
+    for (var i = 0; i < users.length; i++) {
+      if (exceptId && String(users[i].id) === String(exceptId)) continue;
+      if (apiNormalizeEmail_(users[i].email) === needle) return true;
+    }
+    var upserts = target.upserts || [];
+    for (var u = 0; u < upserts.length; u++) {
+      if (exceptId && String(upserts[u].id) === String(exceptId)) continue;
+      if (apiNormalizeEmail_(upserts[u].email) === needle) return true;
+    }
+    return false;
+  }
+
+  (target.upserts || []).forEach(function (rec) {
+    var id = apiRecordId_(rec);
+    var old = currentMap[id] || null;
+    var isNew = !old;
+    var hasPass = Object.prototype.hasOwnProperty.call(rec, 'pass') ||
+      Object.prototype.hasOwnProperty.call(rec, 'password');
+    var pass = hasPass ? String(rec.pass != null ? rec.pass : rec.password) : '';
+    delete rec.pass;
+    delete rec.password;
+    if (hasPass && !pass) hasPass = false;
+
+    if (ctx.pendingAgen) {
+      if (!old || String(old.id) !== selfId) {
+        throw apiError_('FORBIDDEN', 'Agen pending hanya boleh mengubah profil sendiri.');
+      }
+      if (hasPass) throw apiError_('FORBIDDEN', 'Ganti password lewat aksi changePassword.');
+    } else if (role === 'superadmin') {
+      if (isNew && String(rec.role || '') === 'superadmin') {
+        throw apiError_('VALIDATION', 'Akun superadmin tidak boleh dibuat lewat sync.');
+      }
+    } else if (role === 'agen') {
+      if (isNew) {
+        if (String(rec.role || '') !== 'pengemudi') {
+          throw apiError_('FORBIDDEN', 'Agen hanya boleh membuat akun pengemudi.');
+        }
+        if (String(rec.agencyId || '') !== String(ctx.user.agencyId || '')) {
+          throw apiError_('FORBIDDEN', 'Pengemudi harus berada di agensi Anda.');
+        }
+        apiSyncRequireAgency_(ctx, rec.agencyId);
+        if (!hasPass) throw apiError_('VALIDATION', 'Password pengemudi baru wajib diisi.');
+      } else if (String(old.id) !== selfId &&
+                 !(String(old.role || '') === 'pengemudi' &&
+                   String(old.agencyId || '') === String(ctx.user.agencyId || ''))) {
+        throw apiError_('FORBIDDEN', 'Anda hanya boleh mengelola akun pengemudi agensi sendiri.');
+      } else if (String(old.id) === selfId && hasPass) {
+        throw apiError_('FORBIDDEN', 'Ganti password sendiri lewat aksi changePassword.');
+      }
+    } else {
+      if (!old || String(old.id) !== selfId) {
+        throw apiError_('FORBIDDEN', 'Anda hanya boleh mengubah profil sendiri.');
+      }
+      if (hasPass) throw apiError_('FORBIDDEN', 'Ganti password lewat aksi changePassword.');
+    }
+
+    if (isNew) {
+      if (emailTaken(rec.email, id)) throw apiError_('VALIDATION', 'Email sudah terdaftar.');
+      if (!apiIsEmail_(rec.email)) throw apiError_('VALIDATION', 'Format email belum benar.');
+      if (!String(rec.name || '').trim()) throw apiError_('VALIDATION', 'Nama wajib diisi.');
+      if (apiPhoneDigits_(rec.phone).length < 9) {
+        throw apiError_('VALIDATION', 'No HP minimal 9 digit angka.');
+      }
+      var newRole = String(rec.role || '');
+      if (['agen', 'pengemudi', 'pelanggan'].indexOf(newRole) < 0) {
+        throw apiError_('VALIDATION', 'Role akun tidak valid.');
+      }
+      var newStatus = String(rec.status || 'active');
+      if (['active', 'pending', 'suspended'].indexOf(newStatus) < 0) {
+        throw apiError_('VALIDATION', 'Status akun tidak valid.');
+      }
+      rec.status = newStatus;
+      if (newRole === 'pelanggan') {
+        rec.agencyId = null;
+      } else {
+        var agency = apiSyncRequireAgency_(ctx, rec.agencyId);
+        if (newRole === 'agen') {
+          var users = (ctx.current.users || []).concat(target.upserts || []);
+          for (var au = 0; au < users.length; au++) {
+            if (String(users[au].id) === id) continue;
+            if (users[au].role === 'agen' && String(users[au].agencyId || '') === String(agency.id)) {
+              throw apiError_('VALIDATION', 'Travel ini sudah punya akun agen.');
+            }
+          }
+        }
+        if (String(agency.status || '') === 'pending' && newStatus === 'active') {
+          rec.status = 'pending';
+        }
+      }
+      if (!hasPass) {
+        throw apiError_('VALIDATION', 'Password akun baru wajib diisi.');
+      }
+      if (newRole === 'pelanggan' && !Array.isArray(rec.favorites)) rec.favorites = [];
+      rec.tokenVersion = 0;
+    } else {
+      if (String(rec.role || '') !== String(old.role || '')) {
+        throw apiError_('VALIDATION', 'Role akun tidak boleh diubah.');
+      }
+      if (String(rec.agencyId || '') !== String(old.agencyId || '')) {
+        throw apiError_('VALIDATION', 'agencyId akun tidak boleh diubah.');
+      }
+      if (role !== 'superadmin' && apiNormalizeEmail_(rec.email) !== apiNormalizeEmail_(old.email)) {
+        throw apiError_('VALIDATION', 'Email akun tidak boleh diubah.');
+      }
+      if (role === 'superadmin' && emailTaken(rec.email, id)) {
+        throw apiError_('VALIDATION', 'Email sudah terdaftar.');
+      }
+      /* Salin secret lama dulu supaya perbandingan field tidak melihat
+         passHash/tokenVersion yang memang tidak pernah dikirim klien. */
+      apiCopyMissingSecrets_(rec, old);
+      var allowedFields = {};
+      if (role === 'superadmin') {
+        allowedFields = {
+          name: 1, phone: 1, wa: 1, photo: 1, address: 1, status: 1,
+          email: 1, profileStep: 1, suspendedByParent: 1,
+          parentSuspendedDriverStatus: 1
+        };
+      } else if (String(old.id) === selfId) {
+        allowedFields = { name: 1, phone: 1, wa: 1, photo: 1, address: 1, profileStep: 1 };
+        if (old.role === 'pelanggan') allowedFields.favorites = 1;
+      } else {
+        allowedFields = { name: 1, phone: 1, wa: 1, photo: 1, status: 1, profileStep: 1 };
+      }
+      var changed = apiSyncChangedFields_(rec, old);
+      for (var c = 0; c < changed.length; c++) {
+        if (!allowedFields[changed[c]]) {
+          throw apiError_('FORBIDDEN', 'Field "' + changed[c] + '" tidak boleh diubah pada akun ini.');
+        }
+      }
+      if (Object.prototype.hasOwnProperty.call(rec, 'status')) {
+        var st = String(rec.status || '');
+        if (['active', 'pending', 'suspended'].indexOf(st) < 0) {
+          throw apiError_('VALIDATION', 'Status akun tidak valid.');
+        }
+      }
+      apiCopyMissingSecrets_(rec, old);
+    }
+
+    if (hasPass) {
+      if (pass.length < API_MIN_PASSWORD_LENGTH) {
+        throw apiError_('VALIDATION', 'Password minimal ' + API_MIN_PASSWORD_LENGTH + ' karakter.');
+      }
+      apiHashForUser_(rec, pass, cfg);
+      delete rec.pass;
+      delete rec.password;
+      rec.tokenVersion = old ? (Number(old.tokenVersion || 0) || 0) + 1 : 0;
+    } else if (!isNew) {
+      apiCopyMissingSecrets_(rec, old);
+    }
+
+    pendingMap[id] = rec;
+  });
+
+  (target.deletes || []).forEach(function (rawId) {
+    var id = String(rawId);
+    var old = currentMap[id];
+    if (!old) throw apiError_('NOT_FOUND', 'Akun tidak ditemukan: ' + id);
+    if (ctx.pendingAgen) {
+      throw apiError_('FORBIDDEN', 'Agen pending tidak boleh menghapus akun.');
+    }
+    if (role === 'superadmin') {
+      if (id === selfId) throw apiError_('VALIDATION', 'Akun sendiri tidak boleh dihapus.');
+    } else if (role === 'agen') {
+      if (String(old.role || '') !== 'pengemudi' ||
+          String(old.agencyId || '') !== String(ctx.user.agencyId || '')) {
+        throw apiError_('FORBIDDEN', 'Anda hanya boleh menghapus akun pengemudi agensi sendiri.');
+      }
+      var driver = null;
+      var drivers = (ctx.current.drivers || []).concat((ctx.changes.drivers && ctx.changes.drivers.upserts) || []);
+      for (var dd = 0; dd < drivers.length; dd++) {
+        if (apiNormalizeEmail_(drivers[dd].userEmail) === apiNormalizeEmail_(old.email)) {
+          driver = drivers[dd];
+          break;
+        }
+      }
+      if (driver) {
+        var schedules = (ctx.current.schedules || []).concat((ctx.changes.schedules && ctx.changes.schedules.upserts) || []);
+        for (var ds = 0; ds < schedules.length; ds++) {
+          var sc = schedules[ds];
+          if (String(sc.driverId || '') !== String(driver.id) &&
+              String(sc.backupDriverId || '') !== String(driver.id)) continue;
+          if (String(sc.status || 'open') !== 'open') continue;
+          if (String(sc.tripStatus || 'scheduled') === 'cancelled') continue;
+          if (String(sc.date || '') >= apiTodayKey_()) {
+            throw apiError_('VALIDATION', 'Pengemudi masih punya jadwal aktif.');
+          }
+        }
+      }
+    } else {
+      throw apiError_('FORBIDDEN', 'Anda tidak boleh menghapus akun.');
+    }
+  });
+}
+
+/* ----------------------------- routes ----------------------------- */
+
+/** Agen hanya boleh membersihkan penugasan pengemudi pada rute agensinya. */
+function apiRouteAllowsAgency_(route, agencyId) {
+  if (!route) return false;
+  var ids = Array.isArray(route.agencyIds) ? route.agencyIds.map(String) : [];
+  if (ids.length) return ids.indexOf(String(agencyId)) >= 0;
+  if (route.agencyId) return String(route.agencyId) === String(agencyId);
+  return true;
+}
+
+function apiSyncValidateRoutes_(ctx, target) {
+  var currentMap = ctx.currentMap.routes || {};
+  if (ctx.role === 'superadmin') return;
+  if (ctx.role !== 'agen') {
+    throw apiError_('FORBIDDEN', 'Peran ini tidak boleh menulis rute.');
+  }
+  var ownAgency = String(ctx.user.agencyId || '');
+  (target.upserts || []).forEach(function (rec) {
+    var id = apiRecordId_(rec);
+    var old = currentMap[id] || null;
+    if (!old) throw apiError_('FORBIDDEN', 'Agen tidak boleh membuat rute baru.');
+    var routeAgencies = Array.isArray(old.agencyIds) ? old.agencyIds.map(String) : [];
+    if (String(old.agencyId || '') !== ownAgency && routeAgencies.indexOf(ownAgency) < 0) {
+      throw apiError_('FORBIDDEN', 'Rute ini bukan milik agensi Anda.');
+    }
+    var changed = apiSyncChangedFields_(rec, old);
+    for (var i = 0; i < changed.length; i++) {
+      if (changed[i] !== 'driverId' && changed[i] !== 'driverIds') {
+        throw apiError_('FORBIDDEN', 'Agen hanya boleh mengubah penugasan pengemudi pada rute.');
+      }
+    }
+    var beforeIds = Array.isArray(old.driverIds) ? old.driverIds.map(String) : [];
+    var afterIds = Array.isArray(rec.driverIds) ? rec.driverIds.map(String) : [];
+    var removed = [];
+    var added = [];
+    beforeIds.forEach(function (did) {
+      if (afterIds.indexOf(did) < 0) removed.push(did);
+    });
+    afterIds.forEach(function (did) {
+      if (beforeIds.indexOf(did) < 0) added.push(did);
+    });
+    removed.forEach(function (did) {
+      var driver = (ctx.pending.drivers && ctx.pending.drivers[did]) ||
+        (ctx.currentMap.drivers && ctx.currentMap.drivers[did]);
+      if (!driver || String(driver.agencyId || '') !== ownAgency) {
+        throw apiError_('FORBIDDEN', 'Agen hanya boleh mengubah pengemudi agensinya pada rute.');
+      }
+    });
+    added.forEach(function (did) {
+      var driver = apiSyncFind_(ctx, 'drivers', did);
+      if (!driver || String(driver.agencyId || '') !== ownAgency) {
+        throw apiError_('FORBIDDEN', 'Agen hanya boleh menambah pengemudi agensinya pada rute.');
+      }
+    });
+    afterIds.forEach(function (did) {
+      if (ctx.deleted.drivers && ctx.deleted.drivers[did]) {
+        throw apiError_('VALIDATION', 'Rute masih merujuk pengemudi yang dihapus.');
+      }
+    });
+    var nextMain = String(rec.driverId || '');
+    if (nextMain && afterIds.indexOf(nextMain) < 0) {
+      throw apiError_('VALIDATION', 'driverId rute harus ada di driverIds.');
+    }
+    if (nextMain && beforeIds.indexOf(nextMain) < 0) {
+      var mainDriver = apiSyncFind_(ctx, 'drivers', nextMain);
+      if (!mainDriver || String(mainDriver.agencyId || '') !== ownAgency) {
+        throw apiError_('FORBIDDEN', 'Pengemudi utama rute harus dari agensi Anda.');
+      }
+    }
+  });
+  if (target.deletes && target.deletes.length) {
+    throw apiError_('FORBIDDEN', 'Agen tidak boleh menghapus rute.');
+  }
+}
+
+/* --------------------------- agencies ----------------------------- */
+
+function apiSyncValidateAgencies_(ctx, target) {
+  var currentMap = ctx.currentMap.agencies || {};
+  (target.upserts || []).forEach(function (rec) {
+    var id = apiRecordId_(rec);
+    var old = currentMap[id] || null;
+    if (ctx.pendingAgen) {
+      if (!old || id !== String(ctx.user.agencyId || '')) {
+        throw apiError_('FORBIDDEN', 'Agen pending hanya boleh menyimpan KYC agensinya.');
+      }
+    }
+    if (ctx.role === 'agen') {
+      if (!old || id !== String(ctx.user.agencyId || '')) {
+        throw apiError_('FORBIDDEN', 'Anda hanya boleh mengubah agensi sendiri.');
+      }
+      var allowed = {
+        name: 1, logo: 1, photo: 1, address: 1, phone: 1, wa: 1, email: 1,
+        bank: 1, kyc: 1, description: 1
+      };
+      var changed = apiSyncChangedFields_(rec, old);
+      for (var i = 0; i < changed.length; i++) {
+        if (!allowed[changed[i]]) {
+          throw apiError_('FORBIDDEN', 'Field agensi "' + changed[i] + '" tidak boleh diubah agen.');
+        }
+      }
+      if (Object.prototype.hasOwnProperty.call(rec, 'status') &&
+          String(rec.status || '') !== String(old.status || '')) {
+        throw apiError_('FORBIDDEN', 'Status agensi hanya boleh diubah superadmin.');
+      }
+    } else if (ctx.role === 'superadmin') {
+      if (!old) {
+        if (!String(rec.name || '').trim()) throw apiError_('VALIDATION', 'Nama agensi wajib diisi.');
+        var st = String(rec.status || 'pending');
+        if (['active', 'pending', 'suspended'].indexOf(st) < 0) {
+          throw apiError_('VALIDATION', 'Status agensi tidak valid.');
+        }
+        rec.status = st;
+        if (!rec.feeType) rec.feeType = 'percent';
+        if (rec.feeValue == null) rec.feeValue = 8;
+        if (!Array.isArray(rec.refundPolicy)) rec.refundPolicy = API_DEFAULT_REFUND_POLICY;
+      }
+    }
+  });
+  (target.deletes || []).forEach(function (id) {
+    if (ctx.role !== 'superadmin') {
+      throw apiError_('FORBIDDEN', 'Hanya superadmin yang boleh menghapus agensi.');
+    }
+    if (!currentMap[String(id)]) throw apiError_('NOT_FOUND', 'Agensi tidak ditemukan: ' + id);
+  });
+}
+
+/* --------------------------- vehicles ----------------------------- */
+
+function apiSyncValidateVehicles_(ctx, target) {
+  var currentMap = ctx.currentMap.vehicles || {};
+  var pendingMap = ctx.pending.vehicles || {};
+  (target.upserts || []).forEach(function (rec) {
+    var id = apiRecordId_(rec);
+    var old = currentMap[id] || null;
+    var agencyId = String(rec.agencyId || (old && old.agencyId) || '');
+    if (ctx.role === 'agen') {
+      if (agencyId !== String(ctx.user.agencyId || '')) {
+        throw apiError_('FORBIDDEN', 'Armada harus berada di agensi Anda.');
+      }
+      if (old && String(old.agencyId || '') !== agencyId) {
+        throw apiError_('FORBIDDEN', 'agencyId armada tidak boleh diubah.');
+      }
+    } else if (ctx.role !== 'superadmin') {
+      throw apiError_('FORBIDDEN', 'Peran ini tidak boleh menulis armada.');
+    }
+    if (!old && !String(rec.plate || '').trim()) {
+      throw apiError_('VALIDATION', 'Plat nomor armada wajib diisi.');
+    }
+    ['driverId', 'backDriverId', 'coopDriverId'].forEach(function (field) {
+      var did = String(rec[field] || '');
+      if (!did) return;
+      var driver = apiSyncFind_(ctx, 'drivers', did);
+      if (!driver) throw apiError_('VALIDATION', 'Pengemudi pada armada tidak ditemukan: ' + did);
+      if (String(driver.agencyId || '') !== agencyId) {
+        throw apiError_('VALIDATION', 'Pengemudi armada harus dari agensi yang sama.');
+      }
+    });
+    if (old && JSON.stringify(rec.inactiveSeats || []) !== JSON.stringify(old.inactiveSeats || [])) {
+      var schedules = (ctx.current.schedules || []).concat((ctx.changes.schedules && ctx.changes.schedules.upserts) || []);
+      schedules.forEach(function (s) {
+        if (String(s.vehicleId || '') === id) ctx.touchedSchedules[String(s.id)] = true;
+      });
+    }
+  });
+  (target.deletes || []).forEach(function (rawId) {
+    var id = String(rawId);
+    var old = currentMap[id];
+    if (!old) throw apiError_('NOT_FOUND', 'Armada tidak ditemukan: ' + id);
+    if (ctx.role !== 'superadmin' && String(old.agencyId || '') !== String(ctx.user.agencyId || '')) {
+      throw apiError_('FORBIDDEN', 'Anda hanya boleh menghapus armada agensi sendiri.');
+    }
+    var schedules = (ctx.current.schedules || []).concat((ctx.changes.schedules && ctx.changes.schedules.upserts) || []);
+    for (var i = 0; i < schedules.length; i++) {
+      if (String(schedules[i].vehicleId || '') !== id) continue;
+      if (String(schedules[i].status || '') === 'cancelled' ||
+          String(schedules[i].tripStatus || '') === 'cancelled') continue;
+      throw apiError_('VALIDATION', 'Armada masih dipakai jadwal aktif.');
+    }
+  });
+}
+
+/* ---------------------------- drivers ----------------------------- */
+
+function apiSyncValidateDrivers_(ctx, target) {
+  var currentMap = ctx.currentMap.drivers || {};
+  (target.upserts || []).forEach(function (rec) {
+    var id = apiRecordId_(rec);
+    var old = currentMap[id] || null;
+    var agencyId = String(rec.agencyId || (old && old.agencyId) || '');
+    if (ctx.role === 'agen') {
+      if (agencyId !== String(ctx.user.agencyId || '')) {
+        throw apiError_('FORBIDDEN', 'Pengemudi harus berada di agensi Anda.');
+      }
+      if (old && String(old.agencyId || '') !== agencyId) {
+        throw apiError_('FORBIDDEN', 'agencyId pengemudi tidak boleh diubah.');
+      }
+    } else if (ctx.role === 'pengemudi') {
+      var selfEmail = apiNormalizeEmail_(ctx.user.email);
+      if (old) {
+        if (String(old.id) !== String(ctx.ownDriverId || '')) {
+          throw apiError_('FORBIDDEN', 'Anda hanya boleh mengubah data pengemudi sendiri.');
+        }
+        /* Email penaut harus tetap milik akun ini; jangan sampai pengemudi
+           memindahkan record ke email pengemudi lain lalu mendapat aksesnya. */
+        if (apiNormalizeEmail_(rec.userEmail) !== selfEmail) {
+          throw apiError_('FORBIDDEN', 'Email pengemudi tidak boleh diubah.');
+        }
+        var driverSelfAllowed = {
+          phone: 1, address: 1, emName: 1, emPhone: 1, emRelation: 1,
+          bank: 1, photo: 1, wa: 1, pendingProfile: 1, pendingAt: 1, updatedAt: 1
+        };
+        var driverSelfChanged = apiSyncChangedFields_(rec, old);
+        for (var dsc = 0; dsc < driverSelfChanged.length; dsc++) {
+          if (!Object.prototype.hasOwnProperty.call(driverSelfAllowed, driverSelfChanged[dsc])) {
+            throw apiError_('FORBIDDEN', 'Field pengemudi "' + driverSelfChanged[dsc] + '" tidak boleh diubah sendiri.');
+          }
+        }
+      } else {
+        if (ctx.ownDriverId) {
+          throw apiError_('FORBIDDEN', 'Akun ini sudah punya data pengemudi.');
+        }
+        if (apiNormalizeEmail_(rec.userEmail) !== selfEmail) {
+          throw apiError_('FORBIDDEN', 'Data pengemudi baru harus memakai email akun Anda.');
+        }
+      }
+      if (agencyId !== String(ctx.user.agencyId || '')) {
+        throw apiError_('FORBIDDEN', 'agencyId pengemudi tidak valid.');
+      }
+    } else if (ctx.role !== 'superadmin') {
+      throw apiError_('FORBIDDEN', 'Peran ini tidak boleh menulis pengemudi.');
+    }
+    var email = apiNormalizeEmail_(rec.userEmail);
+    if (email) {
+      var user = apiSyncFindUserByEmail_(ctx, email);
+      if (!user || String(user.role || '') !== 'pengemudi') {
+        throw apiError_('VALIDATION', 'Email pengemudi belum punya akun pengemudi.');
+      }
+      if (String(user.agencyId || '') !== agencyId) {
+        throw apiError_('VALIDATION', 'Akun pengemudi harus berada di agensi yang sama.');
+      }
+    }
+    if (!old && !String(rec.name || '').trim()) {
+      throw apiError_('VALIDATION', 'Nama pengemudi wajib diisi.');
+    }
+  });
+  (target.deletes || []).forEach(function (rawId) {
+    var id = String(rawId);
+    var old = currentMap[id];
+    if (!old) throw apiError_('NOT_FOUND', 'Pengemudi tidak ditemukan: ' + id);
+    if (ctx.role === 'pengemudi') {
+      throw apiError_('FORBIDDEN', 'Pengemudi tidak boleh menghapus data sendiri.');
+    }
+    if (ctx.role !== 'superadmin' && String(old.agencyId || '') !== String(ctx.user.agencyId || '')) {
+      throw apiError_('FORBIDDEN', 'Anda hanya boleh menghapus pengemudi agensi sendiri.');
+    }
+    var linkedVehicles = apiSyncMergeList_(ctx, 'vehicles');
+    for (var lv = 0; lv < linkedVehicles.length; lv++) {
+      var vehicle = linkedVehicles[lv] || {};
+      if (String(vehicle.driverId || '') === id ||
+          String(vehicle.backDriverId || '') === id ||
+          String(vehicle.coopDriverId || '') === id) {
+        throw apiError_('VALIDATION', 'Pengemudi masih terpasang di armada.');
+      }
+    }
+    var schedules = (ctx.current.schedules || []).concat((ctx.changes.schedules && ctx.changes.schedules.upserts) || []);
+    for (var i = 0; i < schedules.length; i++) {
+      var s = schedules[i];
+      if (String(s.driverId || '') !== id && String(s.backupDriverId || '') !== id) continue;
+      if (String(s.status || 'open') !== 'open') continue;
+      if (String(s.tripStatus || 'scheduled') === 'cancelled') continue;
+      if (String(s.date || '') >= apiTodayKey_()) {
+        throw apiError_('VALIDATION', 'Pengemudi masih punya jadwal aktif.');
+      }
+    }
+  });
+}
+
+/* --------------------------- schedules ---------------------------- */
+
+function apiSyncValidateSchedules_(ctx, target) {
+  var currentMap = ctx.currentMap.schedules || {};
+  var driverAllowed = {
+    status: 1, tripStatus: 1, departedAt: 1, departedBy: 1, earlyStartReason: 1,
+    arrivedAt: 1, lateCompletion: 1, delayUntil: 1, delayReason: 1, delayNote: 1,
+    delayReportedAt: 1, delayReportedBy: 1, tripDelayInfo: 1, cancelReason: 1,
+    cancelledAt: 1, cancelledBy: 1, reviewedAt: 1, reviewResult: 1, refundPct: 1
+  };
+  (target.upserts || []).forEach(function (rec) {
+    var id = apiRecordId_(rec);
+    var old = currentMap[id] || null;
+    var agencyId = String(rec.agencyId || (old && old.agencyId) || '');
+    if (ctx.role === 'agen') {
+      if (agencyId !== String(ctx.user.agencyId || '')) {
+        throw apiError_('FORBIDDEN', 'Jadwal harus berada di agensi Anda.');
+      }
+      if (old && String(old.agencyId || '') !== agencyId) {
+        throw apiError_('FORBIDDEN', 'agencyId jadwal tidak boleh diubah.');
+      }
+    } else if (ctx.role === 'pengemudi') {
+      if (!old || (String(old.driverId || '') !== String(ctx.ownDriverId || '') &&
+                   String(old.backupDriverId || '') !== String(ctx.ownDriverId || ''))) {
+        throw apiError_('FORBIDDEN', 'Anda hanya boleh mengubah jadwal yang ditugaskan.');
+      }
+      var changed = apiSyncChangedFields_(rec, old);
+      for (var c = 0; c < changed.length; c++) {
+        if (!driverAllowed[changed[c]]) {
+          throw apiError_('FORBIDDEN', 'Field jadwal "' + changed[c] + '" tidak boleh diubah pengemudi.');
+        }
+      }
+    } else if (ctx.role !== 'superadmin') {
+      throw apiError_('FORBIDDEN', 'Peran ini tidak boleh menulis jadwal.');
+    }
+    var vehicle = apiSyncFind_(ctx, 'vehicles', rec.vehicleId);
+    if (!vehicle) throw apiError_('VALIDATION', 'Armada jadwal tidak ditemukan.');
+    if (String(vehicle.agencyId || '') !== agencyId) {
+      throw apiError_('VALIDATION', 'Armada jadwal harus dari agensi yang sama.');
+    }
+    var route = apiSyncFind_(ctx, 'routes', rec.routeId);
+    if (!route) throw apiError_('VALIDATION', 'Rute jadwal tidak ditemukan.');
+    if (ctx.role === 'agen' && !apiRouteAllowsAgency_(route, agencyId)) {
+      throw apiError_('FORBIDDEN', 'Rute jadwal tidak tersedia untuk agensi Anda.');
+    }
+    ['driverId', 'backupDriverId'].forEach(function (field) {
+      var did = String(rec[field] || '');
+      if (!did) return;
+      var driver = apiSyncFind_(ctx, 'drivers', did);
+      if (!driver) throw apiError_('VALIDATION', 'Pengemudi jadwal tidak ditemukan: ' + did);
+      if (String(driver.agencyId || '') !== agencyId) {
+        throw apiError_('VALIDATION', 'Pengemudi jadwal harus dari agensi yang sama.');
+      }
+    });
+    ctx.touchedSchedules[id] = true;
+  });
+  (target.deletes || []).forEach(function (rawId) {
+    var id = String(rawId);
+    var old = currentMap[id];
+    if (!old) throw apiError_('NOT_FOUND', 'Jadwal tidak ditemukan: ' + id);
+    if (ctx.role === 'pengemudi') {
+      throw apiError_('FORBIDDEN', 'Pengemudi tidak boleh menghapus jadwal.');
+    }
+    if (ctx.role !== 'superadmin' && String(old.agencyId || '') !== String(ctx.user.agencyId || '')) {
+      throw apiError_('FORBIDDEN', 'Anda hanya boleh menghapus jadwal agensi sendiri.');
+    }
+    var bookings = (ctx.current.bookings || []).concat((ctx.changes.bookings && ctx.changes.bookings.upserts) || []);
+    for (var b = 0; b < bookings.length; b++) {
+      if (String(bookings[b].scheduleId || '') !== id) continue;
+      if (String(bookings[b].status || '') === 'cancelled') continue;
+      throw apiError_('VALIDATION', 'Jadwal masih punya booking aktif.');
+    }
+  });
+}
+
+/* ------------------------ maintenance ----------------------------- */
+
+function apiSyncValidateMaintenance_(ctx, target) {
+  var currentMap = ctx.currentMap.maintenanceRequests || {};
+  (target.upserts || []).forEach(function (rec) {
+    var id = apiRecordId_(rec);
+    var old = currentMap[id] || null;
+    var agencyId = String(rec.agencyId || (old && old.agencyId) || '');
+    if (ctx.role === 'agen') {
+      if (agencyId !== String(ctx.user.agencyId || '')) {
+        throw apiError_('FORBIDDEN', 'Maintenance harus berada di agensi Anda.');
+      }
+      if (old && String(old.agencyId || '') !== agencyId) {
+        throw apiError_('FORBIDDEN', 'agencyId maintenance tidak boleh diubah.');
+      }
+    } else if (ctx.role === 'pengemudi') {
+      if (String(rec.driverId || (old && old.driverId) || '') !== String(ctx.ownDriverId || '')) {
+        throw apiError_('FORBIDDEN', 'Anda hanya boleh mengubah maintenance sendiri.');
+      }
+      if (old) {
+        /* Pengemudi hanya boleh membatalkan pengajuan yang masih menunggu;
+           keputusan setuju/tolak tetap milik agen. */
+        if (String(old.status || '') !== 'menunggu' || String(rec.status || '') !== 'dibatalkan') {
+          throw apiError_('FORBIDDEN', 'Pengemudi hanya boleh membatalkan pengajuan maintenance yang masih menunggu.');
+        }
+        var maintSelfAllowed = { status: 1, decidedAt: 1, decidedBy: 1, decisionNote: 1, updatedAt: 1 };
+        var maintSelfChanged = apiSyncChangedFields_(rec, old);
+        for (var msc = 0; msc < maintSelfChanged.length; msc++) {
+          if (!Object.prototype.hasOwnProperty.call(maintSelfAllowed, maintSelfChanged[msc])) {
+            throw apiError_('FORBIDDEN', 'Field maintenance "' + maintSelfChanged[msc] + '" tidak boleh diubah pengemudi.');
+          }
+        }
+      } else if (String(rec.status || '') !== 'menunggu') {
+        throw apiError_('VALIDATION', 'Pengajuan maintenance baru harus berstatus menunggu.');
+      }
+      if (agencyId !== String(ctx.user.agencyId || '')) {
+        throw apiError_('FORBIDDEN', 'Maintenance harus berada di agensi Anda.');
+      }
+      if (old && String(old.agencyId || '') !== agencyId) {
+        throw apiError_('FORBIDDEN', 'agencyId maintenance tidak boleh diubah.');
+      }
+    } else if (ctx.role !== 'superadmin') {
+      throw apiError_('FORBIDDEN', 'Peran ini tidak boleh menulis maintenance.');
+    }
+    var vehicle = apiSyncFind_(ctx, 'vehicles', rec.vehicleId);
+    if (!vehicle) throw apiError_('VALIDATION', 'Armada maintenance tidak ditemukan.');
+    if (String(vehicle.agencyId || '') !== agencyId) {
+      throw apiError_('VALIDATION', 'Armada maintenance harus dari agensi yang sama.');
+    }
+    if (ctx.role === 'pengemudi' && !old) {
+      var ownDriver = String(ctx.ownDriverId || '');
+      var assignedToDriver = !!ownDriver &&
+        (String(vehicle.driverId || '') === ownDriver ||
+         String(vehicle.backDriverId || '') === ownDriver ||
+         String(vehicle.coopDriverId || '') === ownDriver);
+      if (!assignedToDriver) {
+        var vehicleSchedules = ctx.current.schedules || [];
+        for (var vs = 0; vs < vehicleSchedules.length; vs++) {
+          var vsRec = vehicleSchedules[vs] || {};
+          if (String(vsRec.vehicleId || '') !== String(vehicle.id || '')) continue;
+          if (String(vsRec.driverId || '') === ownDriver ||
+              String(vsRec.backupDriverId || '') === ownDriver) {
+            assignedToDriver = true;
+            break;
+          }
+        }
+      }
+      if (!assignedToDriver) {
+        throw apiError_('FORBIDDEN', 'Armada ini bukan armada yang Anda kemudikan.');
+      }
+    }
+    if (rec.driverId) {
+      var driver = apiSyncFind_(ctx, 'drivers', rec.driverId);
+      if (!driver) throw apiError_('VALIDATION', 'Pengemudi maintenance tidak ditemukan.');
+      if (String(driver.agencyId || '') !== agencyId) {
+        throw apiError_('VALIDATION', 'Pengemudi maintenance harus dari agensi yang sama.');
+      }
+    }
+  });
+  (target.deletes || []).forEach(function (rawId) {
+    var id = String(rawId);
+    var old = currentMap[id];
+    if (!old) throw apiError_('NOT_FOUND', 'Maintenance tidak ditemukan: ' + id);
+    if (ctx.role === 'pengemudi') {
+      throw apiError_('FORBIDDEN', 'Pengemudi tidak boleh menghapus maintenance.');
+    }
+    if (ctx.role !== 'superadmin' && String(old.agencyId || '') !== String(ctx.user.agencyId || '')) {
+      throw apiError_('FORBIDDEN', 'Anda hanya boleh menghapus maintenance agensi sendiri.');
+    }
+  });
+}
+
+/* --------------------------- bookings ----------------------------- */
+
+function apiSyncBookingAccess_(ctx, booking, schedule, old) {
+  if (ctx.role === 'superadmin') return true;
+  if (ctx.pendingAgen) return false;
+  if (!booking || !schedule) return false;
+  if (ctx.role === 'pelanggan') {
+    if (apiNormalizeEmail_(booking.userEmail) !== apiNormalizeEmail_(ctx.user.email)) return false;
+    if (old && apiNormalizeEmail_(old.userEmail) !== apiNormalizeEmail_(ctx.user.email)) return false;
+    return true;
+  }
+  if (ctx.role === 'agen') {
+    if (String(schedule.agencyId || '') !== String(ctx.user.agencyId || '')) return false;
+    if (old) {
+      var oldSchedule = apiSyncFind_(ctx, 'schedules', old.scheduleId);
+      if (!oldSchedule || String(oldSchedule.agencyId || '') !== String(ctx.user.agencyId || '')) return false;
+    }
+    return true;
+  }
+  if (ctx.role === 'pengemudi') {
+    var own = String(ctx.ownDriverId || '');
+    if (!own) return false;
+    if (String(schedule.driverId || '') !== own && String(schedule.backupDriverId || '') !== own) return false;
+    if (old) {
+      var oldSchedule = apiSyncFind_(ctx, 'schedules', old.scheduleId);
+      if (!oldSchedule ||
+          (String(oldSchedule.driverId || '') !== own && String(oldSchedule.backupDriverId || '') !== own)) return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+function apiSyncValidateBookings_(ctx, target) {
+  var currentMap = ctx.currentMap.bookings || {};
+  var allowedExisting = {
+    status: 1, tripStatus: 1, paidAt: 1, holdExpiry: 1, fare: 1, rating: 1,
+    boarded: 1, scheduleId: 1, seats: 1, passengers: 1, pickupCoords: 1,
+    refundPct: 1, refundAmount: 1, refundScope: 1, refundStatus: 1, refundPaidAt: 1,
+    cancelReason: 1, cancelledBy: 1, cancelledAt: 1,
+    maintenanceState: 1, maintenanceResolvedAt: 1, maintenanceChoiceDeadline: 1,
+    maintenanceOriginalScheduleId: 1, maintenanceRequestId: 1, maintenanceFrom: 1,
+    maintenanceUntil: 1, maintenanceRefundAmount: 1,
+    replacementScheduleId: 1, replacementAt: 1, replacementBy: 1
+  };
+  (target.upserts || []).forEach(function (rec) {
+    var id = apiRecordId_(rec);
+    var old = currentMap[id] || null;
+    var schedule = apiSyncFind_(ctx, 'schedules', rec.scheduleId);
+    if (!schedule) throw apiError_('VALIDATION', 'Jadwal booking tidak ditemukan.');
+    if (!apiSyncBookingAccess_(ctx, rec, schedule, old)) {
+      throw apiError_('FORBIDDEN', 'Booking ini bukan milik Anda.');
+    }
+    var status = String(rec.status || '');
+    var seats = Array.isArray(rec.seats) ? rec.seats.map(String) : [];
+    if (['pending', 'paid', 'done'].indexOf(status) >= 0) {
+      if (!seats.length) throw apiError_('VALIDATION', 'Booking aktif harus punya kursi.');
+      var seen = {};
+      for (var s = 0; s < seats.length; s++) {
+        if (seen[seats[s]]) throw apiError_('VALIDATION', 'Kursi booking duplikat: ' + seats[s]);
+        seen[seats[s]] = true;
+      }
+    }
+
+    if (!old && ctx.role !== 'superadmin') {
+      var allowedNewBooking = {
+        id: 1, code: 1, scheduleId: 1, userEmail: 1, userPhone: 1,
+        seats: 1, passengers: 1, pickupCoords: 1, subtotal: 1, discount: 1,
+        total: 1, status: 1, payMethod: 1, voucher: 1, source: 1,
+        createdBy: 1, createdAt: 1, paidAt: 1, holdExpiry: 1,
+        tripStatus: 1, boarded: 1
+      };
+      apiSyncRejectUnknownFields_(rec, allowedNewBooking, 'booking baru');
+      if (ctx.role === 'pelanggan' && String(rec.createdBy || '')) {
+        throw apiError_('FORBIDDEN', 'Booking pelanggan tidak boleh mengisi createdBy.');
+      }
+      /* Field operasional ini hanya boleh muncul lewat alur setelah booking
+         dibuat; jangan percaya nilai awal dari klien. */
+      rec.paidAt = null;
+      rec.boarded = false;
+      rec.tripStatus = 'scheduled';
+      /* Hold selalu ditentukan server: klien tidak boleh mengunci kursi
+         dengan holdExpiry jauh di masa depan. */
+      rec.holdExpiry = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+      if (ctx.role === 'agen') {
+        throw apiError_('FORBIDDEN', 'Agen tidak boleh membuat booking baru.');
+      }
+      if (!apiSyncScheduleBookable_(schedule)) {
+        throw apiError_('VALIDATION', 'Jadwal sudah lewat/tidak bisa dipesan.');
+      }
+      if (ctx.role === 'pelanggan') {
+        if (apiNormalizeEmail_(rec.userEmail) !== apiNormalizeEmail_(ctx.user.email)) {
+          throw apiError_('FORBIDDEN', 'Booking baru harus atas nama akun Anda.');
+        }
+        if (String(rec.source || '') === 'driver') {
+          throw apiError_('FORBIDDEN', 'Booking pelanggan tidak boleh bertanda driver.');
+        }
+      } else if (ctx.role === 'pengemudi') {
+        if (String(rec.userEmail || '')) {
+          throw apiError_('FORBIDDEN', 'Booking driver tidak boleh memakai email pelanggan.');
+        }
+        if (String(rec.source || '') !== 'driver') {
+          throw apiError_('FORBIDDEN', 'Booking pengemudi harus bertanda driver.');
+        }
+        if (String(rec.createdBy || '') !== String(ctx.ownDriverId || '')) {
+          throw apiError_('FORBIDDEN', 'Booking harus dibuat oleh pengemudi sendiri.');
+        }
+      }
+      if (status !== 'pending') {
+        throw apiError_('VALIDATION', 'Booking baru harus berstatus pending.');
+      }
+      if (!Array.isArray(rec.passengers) || rec.passengers.length !== seats.length) {
+        throw apiError_('VALIDATION', 'Jumlah penumpang harus sama dengan jumlah kursi.');
+      }
+      for (var p = 0; p < rec.passengers.length; p++) {
+        if (seats.indexOf(String((rec.passengers[p] || {}).seat || '')) < 0) {
+          throw apiError_('VALIDATION', 'Kursi penumpang tidak sesuai dengan kursi booking.');
+        }
+      }
+      var subtotal = apiSyncNumber_(rec.subtotal, NaN);
+      var discount = apiSyncNumber_(rec.discount, 0);
+      var total = apiSyncNumber_(rec.total, NaN);
+      var expectedSubtotal = apiSyncNumber_(schedule.price, 0) * seats.length;
+      if (!isFinite(subtotal) || !isFinite(discount) || !isFinite(total)) {
+        throw apiError_('VALIDATION', 'Nominal booking tidak valid.');
+      }
+      if (Math.abs(subtotal - expectedSubtotal) > 0.5) {
+        throw apiError_('VALIDATION', 'Subtotal booking tidak sesuai harga jadwal.');
+      }
+      if (discount < 0 || discount > subtotal) {
+        throw apiError_('VALIDATION', 'Diskon booking tidak valid.');
+      }
+      if (Math.abs(total - (subtotal - discount)) > 0.5) {
+        throw apiError_('VALIDATION', 'Total booking tidak sesuai subtotal dan diskon.');
+      }
+      var voucherCheck = apiSyncVoucherDiscount_(ctx, schedule, seats.length, rec.voucher);
+      if (!voucherCheck.ok) {
+        throw apiError_('VALIDATION', voucherCheck.msg || 'Voucher booking tidak valid.');
+      }
+      if (Math.abs(apiSyncNumber_(voucherCheck.discount, 0) - discount) > 0.5) {
+        throw apiError_('VALIDATION', 'Diskon tidak sesuai aturan voucher.');
+      }
+      if (ctx.role === 'pengemudi' && String(rec.voucher || '')) {
+        throw apiError_('FORBIDDEN', 'Booking driver tidak boleh memakai voucher.');
+      }
+    }
+
+    if (old && ctx.role !== 'superadmin') {
+      var changed = apiSyncChangedFields_(rec, old);
+      for (var c = 0; c < changed.length; c++) {
+        if (!allowedExisting[changed[c]]) {
+          throw apiError_('FORBIDDEN', 'Field booking "' + changed[c] + '" tidak boleh diubah.');
+        }
+      }
+      var oldStatus = String(old.status || '');
+      var newStatus = String(rec.status || '');
+      if (changed.indexOf('holdExpiry') >= 0) {
+        /* Hold tidak boleh diperpanjang/dihapus oleh klien saat masih pending.
+           Null hanya boleh menyertai transisi keluar dari pending. */
+        if (Date.parse(old.holdExpiry)) {
+          if (Date.parse(rec.holdExpiry) &&
+              Math.abs(Date.parse(rec.holdExpiry) - Date.parse(old.holdExpiry)) > 60000) {
+            throw apiError_('FORBIDDEN', 'Hold booking tidak boleh diperpanjang.');
+          }
+          if (!Date.parse(rec.holdExpiry) && ['paid', 'cancelled', 'done'].indexOf(newStatus) < 0) {
+            throw apiError_('FORBIDDEN', 'Hold booking tidak boleh dihapus saat pending.');
+          }
+        } else if (Date.parse(rec.holdExpiry) &&
+                   (Date.parse(rec.holdExpiry) < Date.now() ||
+                     Date.parse(rec.holdExpiry) > Date.now() + 20 * 60 * 1000)) {
+          throw apiError_('VALIDATION', 'Hold booking baru tidak valid.');
+        }
+      }
+      if (!apiSyncBookingTransitionAllowed_(oldStatus, newStatus)) {
+        throw apiError_('FORBIDDEN', 'Perubahan status booking tidak diizinkan.');
+      }
+      if (oldStatus === 'pending' && newStatus === 'paid' &&
+          Date.parse(old.holdExpiry) && Date.parse(old.holdExpiry) <= Date.now()) {
+        throw apiError_('FORBIDDEN', 'Hold booking sudah kedaluwarsa.');
+      }
+      var scheduleChanged = String(rec.scheduleId || '') !== String(old.scheduleId || '');
+      var seatsChanged = JSON.stringify(rec.seats || []) !== JSON.stringify(old.seats || []);
+      if ((scheduleChanged || seatsChanged) &&
+          !(String(old.maintenanceState || '') === 'choice_pending' &&
+            String(rec.maintenanceState || '') === 'replaced')) {
+        throw apiError_('FORBIDDEN', 'Jadwal/kursi booking hanya boleh berubah lewat pemindahan maintenance.');
+      }
+      if (changed.indexOf('refundStatus') >= 0 &&
+          ['done', 'diproses'].indexOf(String(rec.refundStatus || '')) >= 0) {
+        throw apiError_('FORBIDDEN', 'Status refund hanya boleh diubah admin.');
+      }
+      if (changed.indexOf('refundPaidAt') >= 0 && rec.refundPaidAt) {
+        throw apiError_('FORBIDDEN', 'Tanggal refund dibayar hanya boleh diisi admin.');
+      }
+      var refundChanged = ['refundAmount', 'refundPct', 'refundScope', 'refundStatus', 'refundPaidAt']
+        .some(function (field) { return changed.indexOf(field) >= 0; });
+      if (refundChanged) {
+        var refundAmount = apiSyncNumber_(rec.refundAmount, 0);
+        var refundPct = apiSyncNumber_(rec.refundPct, 0);
+        if (refundAmount < 0 || refundPct < 0 || refundPct > 100) {
+          throw apiError_('VALIDATION', 'Nominal/persentase refund booking tidak valid.');
+        }
+        if (newStatus !== 'cancelled' && oldStatus !== 'cancelled') {
+          throw apiError_('FORBIDDEN', 'Refund hanya boleh diubah saat pembatalan.');
+        }
+        if (oldStatus === 'cancelled') {
+          if (refundAmount > apiSyncNumber_(old.refundAmount, 0) ||
+              refundPct > apiSyncNumber_(old.refundPct, 0)) {
+            throw apiError_('FORBIDDEN', 'Refund booking yang sudah dibatalkan tidak boleh dinaikkan.');
+          }
+        } else {
+          var expectedRefund = apiSyncRefundExpectation_(ctx, old, schedule, rec);
+          if (refundAmount > expectedRefund.amount + 0.5 ||
+              refundPct > expectedRefund.pct + 0.5) {
+            throw apiError_('FORBIDDEN', 'Refund melebihi kebijakan pembatalan.');
+          }
+        }
+        if (ctx.role === 'pengemudi' &&
+            String(schedule.status || '') !== 'cancelled' &&
+            String(schedule.tripStatus || '') !== 'cancelled') {
+          throw apiError_('FORBIDDEN', 'Pengemudi hanya boleh memproses refund lewat pembatalan jadwal.');
+        }
+      }
+    }
+
+    ctx.touchedSchedules[String(schedule.id)] = true;
+    if (old) ctx.touchedSchedules[String(old.scheduleId)] = true;
+  });
+  (target.deletes || []).forEach(function (rawId) {
+    var id = String(rawId);
+    var old = currentMap[id];
+    if (!old) throw apiError_('NOT_FOUND', 'Booking tidak ditemukan: ' + id);
+    if (ctx.role !== 'superadmin') {
+      throw apiError_('FORBIDDEN', 'Booking tidak boleh dihapus.');
+    }
+    var schedule = apiSyncFind_(ctx, 'schedules', old.scheduleId);
+    if (!apiSyncBookingAccess_(ctx, old, schedule, old)) {
+      throw apiError_('FORBIDDEN', 'Booking ini bukan milik Anda.');
+    }
+    ctx.touchedSchedules[String(old.scheduleId)] = true;
+  });
+}
+
+function apiSyncValidatePayments_(ctx, target) {
+  var currentMap = ctx.currentMap.payments || {};
+  function check(rec, old) {
+    var recId = apiRecordId_(rec);
+    var booking = apiSyncFind_(ctx, 'bookings', rec.bookingId);
+    if (!booking) throw apiError_('VALIDATION', 'Booking pembayaran tidak ditemukan.');
+    var schedule = apiSyncFind_(ctx, 'schedules', booking.scheduleId);
+    if (!apiSyncBookingAccess_(ctx, booking, schedule, null)) {
+      throw apiError_('FORBIDDEN', 'Pembayaran ini bukan milik Anda.');
+    }
+    if (old) {
+      var oldBooking = apiSyncFind_(ctx, 'bookings', old.bookingId);
+      var oldSchedule = oldBooking ? apiSyncFind_(ctx, 'schedules', oldBooking.scheduleId) : null;
+      if (!apiSyncBookingAccess_(ctx, oldBooking, oldSchedule, null)) {
+        throw apiError_('FORBIDDEN', 'Pembayaran ini bukan milik Anda.');
+      }
+    }
+    var amount = apiSyncNumber_(rec.amount, NaN);
+    if (!isFinite(amount) || amount < 0) {
+      throw apiError_('VALIDATION', 'Nominal pembayaran tidak valid.');
+    }
+
+    if (!old) {
+      if (ctx.role === 'superadmin') return;
+      apiSyncRejectUnknownFields_(rec, {
+        id: 1, bookingId: 1, amount: 1, method: 1, status: 1, time: 1, fee: 1
+      }, 'pembayaran baru');
+      if (ctx.role === 'agen') {
+        throw apiError_('FORBIDDEN', 'Agen tidak boleh membuat pembayaran baru.');
+      }
+      if (ctx.role === 'pengemudi' && String(booking.userEmail || '')) {
+        throw apiError_('FORBIDDEN', 'Pengemudi hanya boleh membuat pembayaran untuk booking driver.');
+      }
+      if (String(rec.status || '') !== 'pending') {
+        throw apiError_('VALIDATION', 'Pembayaran baru harus berstatus pending.');
+      }
+      if (Math.abs(amount - apiSyncNumber_(booking.total, 0)) > 0.5) {
+        throw apiError_('VALIDATION', 'Nominal pembayaran harus sama dengan total booking.');
+      }
+      var newFee = apiSyncNumber_(rec.fee, 0);
+      if (newFee < 0 || newFee > amount) {
+        throw apiError_('VALIDATION', 'Fee pembayaran tidak valid.');
+      }
+      var newFare = apiSyncSplitFare_(ctx, schedule, (booking.seats || []).length,
+        booking.discount || 0, booking.source || '');
+      if (Math.abs(newFee - apiSyncNumber_(newFare.fee, 0)) > 0.5) {
+        throw apiError_('VALIDATION', 'Fee pembayaran tidak sesuai perhitungan.');
+      }
+      var payList = (ctx.current.payments || []).concat(
+        (ctx.changes.payments && ctx.changes.payments.upserts) || []
+      );
+      for (var pi = 0; pi < payList.length; pi++) {
+        if (apiRecordId_(payList[pi]) === recId) continue;
+        if (String(payList[pi].bookingId || '') === String(rec.bookingId || '')) {
+          throw apiError_('VALIDATION', 'Booking ini sudah punya pembayaran.');
+        }
+      }
+      return;
+    }
+
+    if (ctx.role === 'superadmin') return;
+    if (!apiSyncSameExcept_(rec, old, {
+      status: 1, fee: 1, refundAmount: 1, refundPct: 1, refundScope: 1,
+      refundStatus: 1, refundRequestedAt: 1, refundedAt: 1, refundPaidAt: 1,
+      refundProcessedAt: 1
+    })) {
+      throw apiError_('FORBIDDEN', 'Hanya status/fee/refund pembayaran yang boleh diubah.');
+    }
+    var oldStatus = String(old.status || '');
+    var newStatus = String(rec.status || '');
+    if (newStatus !== oldStatus) {
+      var transitions = {
+        pending: { paid: 1, cancelled: 1 },
+        paid: {},
+        cancelled: {},
+        refunded: {}
+      };
+      if (!(transitions[oldStatus] && transitions[oldStatus][newStatus])) {
+        throw apiError_('FORBIDDEN', 'Perubahan status pembayaran tidak diizinkan.');
+      }
+    }
+    if (newStatus === 'paid' && String(booking.status || '') !== 'paid') {
+      throw apiError_('VALIDATION', 'Pembayaran lunas harus disertai booking lunas.');
+    }
+    var fee = apiSyncNumber_(rec.fee, 0);
+    if (fee < 0 || fee > amount) {
+      throw apiError_('VALIDATION', 'Fee pembayaran tidak valid.');
+    }
+    var changed = apiSyncChangedFields_(rec, old);
+    if (changed.indexOf('fee') >= 0) {
+      if (oldStatus !== 'pending') {
+        throw apiError_('FORBIDDEN', 'Fee pembayaran hanya boleh diubah saat pending.');
+      }
+      var existingFare = apiSyncSplitFare_(ctx, schedule, (booking.seats || []).length,
+        booking.discount || 0, booking.source || '');
+      if (Math.abs(fee - apiSyncNumber_(existingFare.fee, 0)) > 0.5) {
+        throw apiError_('VALIDATION', 'Fee pembayaran tidak sesuai perhitungan.');
+      }
+    }
+    if (changed.indexOf('refundAmount') >= 0) {
+      var refundAmount = apiSyncNumber_(rec.refundAmount, 0);
+      if (refundAmount < 0 || refundAmount > apiSyncNumber_(booking.total, 0)) {
+        throw apiError_('VALIDATION', 'Nominal refund pembayaran tidak valid.');
+      }
+    }
+    if (changed.indexOf('refundPct') >= 0) {
+      var refundPct = apiSyncNumber_(rec.refundPct, 0);
+      if (refundPct < 0 || refundPct > 100) {
+        throw apiError_('VALIDATION', 'Persentase refund pembayaran tidak valid.');
+      }
+    }
+    if (changed.indexOf('refundStatus') >= 0 &&
+        ['done', 'diproses'].indexOf(String(rec.refundStatus || '')) >= 0) {
+      throw apiError_('FORBIDDEN', 'Status refund hanya boleh diubah admin.');
+    }
+    if ((changed.indexOf('refundPaidAt') >= 0 && rec.refundPaidAt) ||
+        (changed.indexOf('refundedAt') >= 0 && rec.refundedAt) ||
+        (changed.indexOf('refundProcessedAt') >= 0 && rec.refundProcessedAt)) {
+      throw apiError_('FORBIDDEN', 'Penyelesaian refund hanya boleh diisi admin.');
+    }
+    var paymentRefundChanged = ['refundAmount', 'refundPct', 'refundScope', 'refundStatus']
+      .some(function (field) { return changed.indexOf(field) >= 0; });
+    if (paymentRefundChanged) {
+      if (String(booking.status || '') !== 'cancelled') {
+        throw apiError_('FORBIDDEN', 'Refund pembayaran hanya boleh diubah saat booking dibatalkan.');
+      }
+      if (apiSyncNumber_(rec.refundAmount, 0) > apiSyncNumber_(booking.refundAmount, 0) + 0.5 ||
+          apiSyncNumber_(rec.refundPct, 0) > apiSyncNumber_(booking.refundPct, 0) + 0.5) {
+        throw apiError_('FORBIDDEN', 'Refund pembayaran melebihi refund booking.');
+      }
+    }
+  }
+  (target.upserts || []).forEach(function (rec) {
+    check(rec, currentMap[apiRecordId_(rec)] || null);
+  });
+  (target.deletes || []).forEach(function (rawId) {
+    var old = currentMap[String(rawId)];
+    if (!old) throw apiError_('NOT_FOUND', 'Pembayaran tidak ditemukan: ' + rawId);
+    if (ctx.role !== 'superadmin') {
+      throw apiError_('FORBIDDEN', 'Pembayaran tidak boleh dihapus.');
+    }
+    check(old, old);
+  });
+}
+
+function apiSyncValidateLedger_(ctx, target) {
+  var currentMap = ctx.currentMap.ledger || {};
+  function check(entry, old) {
+    var entryId = apiRecordId_(entry);
+    var booking = entry.bookingId ? apiSyncFind_(ctx, 'bookings', entry.bookingId) : null;
+    var schedule = booking ? apiSyncFind_(ctx, 'schedules', booking.scheduleId) : null;
+    if (booking) {
+      if (!apiSyncBookingAccess_(ctx, booking, schedule, null)) {
+        throw apiError_('FORBIDDEN', 'Ledger ini bukan milik Anda.');
+      }
+    } else if (ctx.role !== 'superadmin') {
+      throw apiError_('VALIDATION', 'Ledger harus terhubung ke booking.');
+    }
+    if (ctx.role === 'agen' && booking && String(entry.agencyId || '') !== String(ctx.user.agencyId || '')) {
+      throw apiError_('FORBIDDEN', 'Ledger harus berada di agensi Anda.');
+    }
+    if (old && String(old.bookingId || '') !== String(entry.bookingId || '') && ctx.role !== 'superadmin') {
+      throw apiError_('VALIDATION', 'bookingId ledger tidak boleh diubah.');
+    }
+
+    if (!old) {
+      if (ctx.role === 'superadmin') return;
+      apiSyncRejectUnknownFields_(entry, {
+        id: 1, agencyId: 1, bookingId: 1, scheduleId: 1, driverId: 1,
+        userEmail: 1, seats: 1, ticket: 1, service: 1, fee: 1, total: 1,
+        status: 1, createdAt: 1, releasedAt: 1, paidOutAt: 1
+      }, 'ledger baru');
+      if (entry.paidOutAt) {
+        throw apiError_('FORBIDDEN', 'Pencairan ledger hanya boleh dilakukan admin.');
+      }
+      if (!booking || String(booking.status || '') !== 'paid') {
+        throw apiError_('VALIDATION', 'Ledger hanya boleh dibuat untuk booking lunas.');
+      }
+      if (!schedule) throw apiError_('VALIDATION', 'Jadwal ledger tidak ditemukan.');
+      var ledgerList = (ctx.current.ledger || []).concat(
+        (ctx.changes.ledger && ctx.changes.ledger.upserts) || []
+      );
+      for (var li = 0; li < ledgerList.length; li++) {
+        if (apiRecordId_(ledgerList[li]) === entryId) continue;
+        if (String(ledgerList[li].bookingId || '') === String(entry.bookingId || '')) {
+          throw apiError_('VALIDATION', 'Booking ini sudah punya ledger.');
+        }
+      }
+      var payList = apiSyncMergeList_(ctx, 'payments');
+      var paidPayment = false;
+      for (var pp = 0; pp < payList.length; pp++) {
+        if (String(payList[pp].bookingId || '') === String(entry.bookingId || '') &&
+            String(payList[pp].status || '') === 'paid') {
+          paidPayment = true;
+          break;
+        }
+      }
+      if (!paidPayment) {
+        throw apiError_('VALIDATION', 'Ledger hanya boleh dibuat setelah pembayaran lunas.');
+      }
+      if (String(entry.status || '') !== 'ditahan') {
+        throw apiError_('VALIDATION', 'Ledger baru harus berstatus ditahan.');
+      }
+      if (String(entry.scheduleId || '') !== String(booking.scheduleId || '') ||
+          String(entry.agencyId || '') !== String(schedule.agencyId || '')) {
+        throw apiError_('VALIDATION', 'Jadwal/agensi ledger tidak sesuai booking.');
+      }
+      if (String(entry.driverId || '') !== String(schedule.driverId || '')) {
+        throw apiError_('VALIDATION', 'Pengemudi ledger tidak sesuai jadwal.');
+      }
+      if (apiNormalizeEmail_(entry.userEmail) !== apiNormalizeEmail_(booking.userEmail)) {
+        throw apiError_('VALIDATION', 'Email ledger tidak sesuai booking.');
+      }
+      if (JSON.stringify(entry.seats || []) !== JSON.stringify(booking.seats || [])) {
+        throw apiError_('VALIDATION', 'Kursi ledger tidak sesuai booking.');
+      }
+      var expected = apiSyncSplitFare_(
+        ctx, schedule, (booking.seats || []).length,
+        booking.discount || 0, booking.source || ''
+      );
+      ['ticket', 'service', 'fee', 'total'].forEach(function (field) {
+        if (Math.abs(apiSyncNumber_(entry[field], 0) - apiSyncNumber_(expected[field], 0)) > 0.5) {
+          throw apiError_('VALIDATION', 'Nominal ' + field + ' ledger tidak sesuai perhitungan.');
+        }
+      });
+      if (Math.abs(apiSyncNumber_(entry.total, 0) - apiSyncNumber_(booking.total, 0)) > 0.5) {
+        throw apiError_('VALIDATION', 'Total ledger tidak sesuai total booking.');
+      }
+      return;
+    }
+
+    if (ctx.role === 'superadmin') return;
+    var changed = apiSyncChangedFields_(entry, old);
+    var allowed = {
+      status: 1, releasedAt: 1, paidOutAt: 1, voidedAt: 1, updatedAt: 1,
+      scheduleId: 1, agencyId: 1, driverId: 1, seats: 1,
+      ticket: 1, service: 1, fee: 1, total: 1, replacedFromScheduleId: 1
+    };
+    for (var c = 0; c < changed.length; c++) {
+      if (!allowed[changed[c]]) {
+        throw apiError_('FORBIDDEN', 'Field ledger "' + changed[c] + '" tidak boleh diubah.');
+      }
+    }
+    var moved = changed.indexOf('scheduleId') >= 0 || changed.indexOf('agencyId') >= 0 ||
+      changed.indexOf('driverId') >= 0 || changed.indexOf('seats') >= 0 ||
+      changed.indexOf('ticket') >= 0 || changed.indexOf('service') >= 0 ||
+      changed.indexOf('fee') >= 0 || changed.indexOf('total') >= 0 ||
+      changed.indexOf('replacedFromScheduleId') >= 0;
+    if (moved) {
+      if (!booking || String(booking.maintenanceState || '') !== 'replaced' ||
+          String(booking.scheduleId || '') !== String(entry.scheduleId || '')) {
+        throw apiError_('FORBIDDEN', 'Ledger hanya boleh dipindah lewat maintenance.');
+      }
+      var targetSchedule = apiSyncFind_(ctx, 'schedules', entry.scheduleId);
+      if (!targetSchedule ||
+          String(entry.agencyId || '') !== String(targetSchedule.agencyId || '') ||
+          String(entry.driverId || '') !== String(targetSchedule.driverId || '')) {
+        throw apiError_('VALIDATION', 'Jadwal/agensi/pengemudi ledger tidak sesuai.');
+      }
+      if (JSON.stringify(entry.seats || []) !== JSON.stringify(booking.seats || [])) {
+        throw apiError_('VALIDATION', 'Kursi ledger tidak sesuai booking.');
+      }
+      var movedExpected = apiSyncSplitFare_(
+        ctx, targetSchedule, (booking.seats || []).length,
+        booking.discount || 0, booking.source || ''
+      );
+      ['ticket', 'service', 'fee', 'total'].forEach(function (field) {
+        if (Math.abs(apiSyncNumber_(entry[field], 0) - apiSyncNumber_(movedExpected[field], 0)) > 0.5) {
+          throw apiError_('VALIDATION', 'Nominal ' + field + ' ledger tidak sesuai perhitungan.');
+        }
+      });
+    }
+    var oldStatus = String(old.status || '');
+    var newStatus = String(entry.status || '');
+    if (!apiSyncLedgerTransitionAllowed_(oldStatus, newStatus)) {
+      throw apiError_('FORBIDDEN', 'Perubahan status ledger tidak diizinkan.');
+    }
+    if (newStatus === 'dicairkan' && oldStatus !== 'dicairkan') {
+      throw apiError_('FORBIDDEN', 'Pencairan ledger hanya boleh dilakukan admin.');
+    }
+    if (changed.indexOf('paidOutAt') >= 0 && entry.paidOutAt) {
+      throw apiError_('FORBIDDEN', 'Pencairan ledger hanya boleh dilakukan admin.');
+    }
+  }
+  (target.upserts || []).forEach(function (rec) {
+    check(rec, currentMap[apiRecordId_(rec)] || null);
+  });
+  (target.deletes || []).forEach(function (rawId) {
+    var old = currentMap[String(rawId)];
+    if (!old) throw apiError_('NOT_FOUND', 'Ledger tidak ditemukan: ' + rawId);
+    if (ctx.role !== 'superadmin') {
+      throw apiError_('FORBIDDEN', 'Ledger tidak boleh dihapus.');
+    }
+    check(old, old);
+  });
+}
+
+/* --------------------------- vouchers ----------------------------- */
+
+function apiSyncValidateVouchers_(ctx, target) {
+  var currentMap = ctx.currentMap.vouchers || {};
+  (target.upserts || []).forEach(function (rec) {
+    var id = apiRecordId_(rec);
+    var old = currentMap[id] || null;
+    if (ctx.role === 'superadmin') return;
+    if (ctx.role === 'agen') {
+      if (!old) {
+        if (String(rec.agencyId || '') !== String(ctx.user.agencyId || '')) {
+          throw apiError_('FORBIDDEN', 'Voucher baru harus milik agensi Anda.');
+        }
+      } else if (!old.agencyId || String(old.agencyId || '') !== String(ctx.user.agencyId || '')) {
+        /* Voucher global/agen lain bisa dipakai pada jadwal agen ini; saat
+           pembatalan, agen hanya boleh mengembalikan jumlah pemakaian. */
+        if (!apiSyncSameExcept_(rec, old, { used: 1 })) {
+          throw apiError_('FORBIDDEN', 'Hanya jumlah pemakaian voucher ini yang boleh berubah.');
+        }
+        var globalAfter = Number(rec.used || 0) || 0;
+        if (globalAfter < 0) {
+          throw apiError_('VALIDATION', 'Jumlah pemakaian voucher tidak valid.');
+        }
+        if (globalAfter < (Number(old.used || 0) || 0)) {
+          var globalRestore = apiSyncVoucherRestoreCount_(ctx, old.code || rec.code || id);
+          if ((Number(old.used || 0) || 0) - globalAfter > globalRestore) {
+            throw apiError_('FORBIDDEN', 'Pengurangan pemakaian voucher harus berasal dari pembatalan booking.');
+          }
+        }
+        return;
+      }
+      if (old && String(rec.agencyId || '') !== String(old.agencyId || '')) {
+        throw apiError_('FORBIDDEN', 'agencyId voucher tidak boleh diubah.');
+      }
+      if (Number(rec.used || 0) < 0) {
+        throw apiError_('VALIDATION', 'Jumlah pemakaian voucher tidak valid.');
+      }
+      return;
+    }
+    if (!old) throw apiError_('FORBIDDEN', 'Anda tidak boleh membuat voucher.');
+    if (!apiSyncSameExcept_(rec, old, { used: 1 })) {
+      throw apiError_('FORBIDDEN', 'Hanya jumlah pemakaian voucher yang boleh berubah.');
+    }
+    var after = Number(rec.used || 0) || 0;
+    if (after < 0) {
+      throw apiError_('VALIDATION', 'Jumlah pemakaian voucher tidak valid.');
+    }
+    if (after < (Number(old.used || 0) || 0)) {
+      var restore = apiSyncVoucherRestoreCount_(ctx, old.code || rec.code || id);
+      if ((Number(old.used || 0) || 0) - after > restore) {
+        throw apiError_('FORBIDDEN', 'Pengurangan pemakaian voucher harus berasal dari pembatalan booking.');
+      }
+    }
+    /* Satu pembatalan jadwal bisa mengembalikan beberapa pemakaian sekaligus,
+       jadi selisih tidak dibatasi satu; field lain tetap tidak boleh berubah. */
+    if (after > Number(old.used || 0) && old.quota != null && after > Number(old.quota || 0)) {
+      throw apiError_('VALIDATION', 'Pemakaian voucher melebihi kuota.');
+    }
+  });
+  (target.deletes || []).forEach(function (rawId) {
+    var old = currentMap[String(rawId)];
+    if (!old) throw apiError_('NOT_FOUND', 'Voucher tidak ditemukan: ' + rawId);
+    if (ctx.role === 'superadmin') return;
+    if (ctx.role !== 'agen' || String(old.agencyId || '') !== String(ctx.user.agencyId || '')) {
+      throw apiError_('FORBIDDEN', 'Anda tidak boleh menghapus voucher ini.');
+    }
+  });
+}
+
+/* ---------------------------- reviews ----------------------------- */
+
+function apiSyncValidateReviews_(ctx, target) {
+  var currentMap = ctx.currentMap.reviews || {};
+  (target.upserts || []).forEach(function (rec) {
+    var id = apiRecordId_(rec);
+    var old = currentMap[id] || null;
+    if (ctx.role === 'superadmin') return;
+    if (ctx.role !== 'pelanggan') throw apiError_('FORBIDDEN', 'Peran ini tidak boleh menulis ulasan.');
+    if (old) throw apiError_('FORBIDDEN', 'Ulasan yang sudah ada tidak boleh diubah.');
+    var agency = apiSyncFind_(ctx, 'agencies', rec.agencyId);
+    if (!agency || String(agency.status || 'active') !== 'active') {
+      throw apiError_('VALIDATION', 'Agensi ulasan tidak valid.');
+    }
+    var rating = Number(rec.rating);
+    if (isNaN(rating) || rating < 1 || rating > 5) {
+      throw apiError_('VALIDATION', 'Rating ulasan harus 1-5.');
+    }
+  });
+  if (target.deletes && target.deletes.length && ctx.role !== 'superadmin') {
+    throw apiError_('FORBIDDEN', 'Anda tidak boleh menghapus ulasan.');
+  }
+}
+
+/* ------------------------- notifications -------------------------- */
+
+function apiSyncValidateNotifications_(ctx, target) {
+  var currentMap = ctx.currentMap.notifications || {};
+  (target.upserts || []).forEach(function (rec) {
+    var id = apiRecordId_(rec);
+    var old = currentMap[id] || null;
+    if (ctx.role === 'superadmin') return;
+    var to = apiNormalizeEmail_(rec.to);
+    var selfEmail = apiNormalizeEmail_(ctx.user.email);
+    if (!old) {
+      /* Notifikasi baru hanya untuk diri sendiri; notifikasi staf/pelanggan
+         lain dibuat oleh alur server atau terlihat dari data transaksi. */
+      if (to !== selfEmail) {
+        throw apiError_('FORBIDDEN', 'Anda hanya boleh membuat notifikasi untuk diri sendiri.');
+      }
+      return;
+    }
+    if (to !== selfEmail && to !== 'all') {
+      throw apiError_('FORBIDDEN', 'Notifikasi ini bukan milik Anda.');
+    }
+    if (!apiSyncSameExcept_(rec, old, { read: 1 })) {
+      throw apiError_('FORBIDDEN', 'Hanya status baca notifikasi yang boleh diubah.');
+    }
+  });
+  (target.deletes || []).forEach(function (rawId) {
+    var old = currentMap[String(rawId)];
+    if (!old) throw apiError_('NOT_FOUND', 'Notifikasi tidak ditemukan: ' + rawId);
+    if (ctx.role === 'superadmin') return;
+    var to = apiNormalizeEmail_(old.to);
+    if (to !== apiNormalizeEmail_(ctx.user.email)) {
+      throw apiError_('FORBIDDEN', 'Anda hanya boleh menghapus notifikasi sendiri.');
+    }
+  });
+}
+
+/* ------------------------ support tickets ------------------------- */
+
+function apiSyncSupportAccess_(ctx, ticket, old) {
+  if (ctx.role === 'superadmin') return true;
+  var email = apiNormalizeEmail_(ctx.user.email);
+  if (ctx.role === 'pelanggan') {
+    if (apiNormalizeEmail_(ticket.userEmail) !== email &&
+        String(ticket.userId || '') !== String(ctx.user.id || '')) return false;
+    if (old && apiNormalizeEmail_(old.userEmail) !== email &&
+        String(old.userId || '') !== String(ctx.user.id || '')) return false;
+    return true;
+  }
+  if (ctx.role === 'pengemudi') {
+    if (apiNormalizeEmail_(ticket.userEmail) !== email) return false;
+    if (old && apiNormalizeEmail_(old.userEmail) !== email) return false;
+    return true;
+  }
+  if (ctx.role === 'agen') {
+    if (String(ticket.agencyId || '') === String(ctx.user.agencyId || '')) return true;
+    if (old && String(old.agencyId || '') === String(ctx.user.agencyId || '')) return true;
+    var code = String(ticket.bookingCode || '');
+    if (!code) return false;
+    var bookings = apiSyncMergeList_(ctx, 'bookings');
+    var schedules = apiSyncMergeList_(ctx, 'schedules');
+    var scheduleMap = apiIndexById_(schedules);
+    for (var i = 0; i < bookings.length; i++) {
+      if (String(bookings[i].code || '') !== code) continue;
+      var sc = scheduleMap[String(bookings[i].scheduleId || '')];
+      if (sc && String(sc.agencyId || '') === String(ctx.user.agencyId || '')) return true;
+    }
+    return false;
+  }
+  return false;
+}
+
+function apiSyncTicketMessagesAppend_(oldMessages, newMessages, allowedFroms) {
+  var before = Array.isArray(oldMessages) ? oldMessages : [];
+  var after = Array.isArray(newMessages) ? newMessages : [];
+  if (after.length < before.length) return false;
+  for (var i = 0; i < before.length; i++) {
+    if (JSON.stringify(before[i]) !== JSON.stringify(after[i])) return false;
+  }
+  for (var j = before.length; j < after.length; j++) {
+    var msg = after[j] || {};
+    if (allowedFroms.indexOf(String(msg.from || '')) < 0) return false;
+  }
+  return true;
+}
+
+function apiSyncValidateSupportTickets_(ctx, target) {
+  var currentMap = ctx.currentMap.supportTickets || {};
+  (target.upserts || []).forEach(function (rec) {
+    var id = apiRecordId_(rec);
+    var old = currentMap[id] || null;
+    if (!apiSyncSupportAccess_(ctx, rec, old)) {
+      throw apiError_('FORBIDDEN', 'Tiket ini bukan milik Anda.');
+    }
+    if (ctx.role === 'superadmin') return;
+
+    var selfEmail = apiNormalizeEmail_(ctx.user.email);
+    if (!old) {
+      /* Tiket baru harus dibuat atas nama akun yang sedang login. */
+      if (apiNormalizeEmail_(rec.userEmail) !== selfEmail ||
+          String(rec.userId || '') !== String(ctx.user.id || '')) {
+        throw apiError_('FORBIDDEN', 'Tiket baru harus atas nama akun Anda.');
+      }
+      if (rec.isGuest) {
+        throw apiError_('FORBIDDEN', 'Tiket guest tidak disinkronkan.');
+      }
+      if (String(rec.status || '') !== 'new') {
+        throw apiError_('VALIDATION', 'Status tiket baru harus new.');
+      }
+      if (!apiSyncTicketMessagesAppend_([], rec.messages, ['user', 'system'])) {
+        throw apiError_('FORBIDDEN', 'Pesan tiket baru tidak valid.');
+      }
+      if (ctx.role === 'pelanggan' && String(rec.agencyId || '')) {
+        throw apiError_('FORBIDDEN', 'Tiket pelanggan tidak boleh menempel ke agensi.');
+      }
+      if ((ctx.role === 'agen' || ctx.role === 'pengemudi') &&
+          String(rec.agencyId || '') !== String(ctx.user.agencyId || '')) {
+        throw apiError_('FORBIDDEN', 'Tiket harus berada di agensi Anda.');
+      }
+      return;
+    }
+
+    var ownTicket = apiNormalizeEmail_(old.userEmail) === selfEmail;
+    if (ctx.role === 'agen' && !ownTicket) {
+      /* Agen boleh menanggapi tiket agensinya sebagai CS. */
+      if (!apiSyncSameExcept_(rec, old, { messages: 1, status: 1, statusHistory: 1, updatedAt: 1 })) {
+        throw apiError_('FORBIDDEN', 'Agen hanya boleh mengubah pesan/status tiket agensinya.');
+      }
+      if (['new', 'process', 'waiting', 'resolved'].indexOf(String(rec.status || '')) < 0) {
+        throw apiError_('VALIDATION', 'Status tiket tidak valid.');
+      }
+      if (!apiSyncTicketMessagesAppend_(old.messages, rec.messages, ['cs', 'system'])) {
+        throw apiError_('FORBIDDEN', 'Balasan agen harus berupa pesan CS.');
+      }
+      return;
+    }
+
+    if (!ownTicket) {
+      throw apiError_('FORBIDDEN', 'Tiket ini bukan milik Anda.');
+    }
+    if (!apiSyncSameExcept_(rec, old, { messages: 1, status: 1, statusHistory: 1, updatedAt: 1 })) {
+      throw apiError_('FORBIDDEN', 'Hanya pesan/status tiket yang boleh diubah.');
+    }
+    if (!apiSyncTicketMessagesAppend_(old.messages, rec.messages, ['user'])) {
+      throw apiError_('FORBIDDEN', 'Pelanggan hanya boleh menambah pesan sendiri.');
+    }
+    var oldStatus = String(old.status || '');
+    var newStatus = String(rec.status || '');
+    if (newStatus !== oldStatus && !(oldStatus === 'waiting' && newStatus === 'process')) {
+      throw apiError_('FORBIDDEN', 'Perubahan status tiket tidak diizinkan.');
+    }
+  });
+  (target.deletes || []).forEach(function (rawId) {
+    var old = currentMap[String(rawId)];
+    if (!old) throw apiError_('NOT_FOUND', 'Tiket tidak ditemukan: ' + rawId);
+    if (!apiSyncSupportAccess_(ctx, old, old)) {
+      throw apiError_('FORBIDDEN', 'Tiket ini bukan milik Anda.');
+    }
+    if (ctx.role === 'pengemudi') throw apiError_('FORBIDDEN', 'Pengemudi tidak boleh menghapus tiket.');
+  });
+}
+
+/* ------------------------- route requests ------------------------- */
+
+function apiSyncValidateRouteRequests_(ctx, target) {
+  var currentMap = ctx.currentMap.routeRequests || {};
+  (target.upserts || []).forEach(function (rec) {
+    var id = apiRecordId_(rec);
+    var old = currentMap[id] || null;
+    if (ctx.role === 'superadmin') return;
+    if (ctx.role !== 'agen') throw apiError_('FORBIDDEN', 'Peran ini tidak boleh menulis usulan rute.');
+    if (old) throw apiError_('FORBIDDEN', 'Usulan rute tidak boleh diubah agen.');
+    if (String(rec.agencyId || '') !== String(ctx.user.agencyId || '')) {
+      throw apiError_('FORBIDDEN', 'Usulan rute harus untuk agensi Anda.');
+    }
+    if (String(rec.status || 'pending') !== 'pending') {
+      throw apiError_('VALIDATION', 'Status usulan rute baru harus pending.');
+    }
+  });
+  if (target.deletes && target.deletes.length && ctx.role !== 'superadmin') {
+    throw apiError_('FORBIDDEN', 'Agen tidak boleh menghapus usulan rute.');
+  }
+}
+
+/* -------------------------- dispatcher ---------------------------- */
+
+function apiSyncValidateCollection_(ctx, key, target) {
+  switch (key) {
+    case 'agencies': apiSyncValidateAgencies_(ctx, target); return;
+    case 'routes': apiSyncValidateRoutes_(ctx, target); return;
+    case 'vehicles': apiSyncValidateVehicles_(ctx, target); return;
+    case 'drivers': apiSyncValidateDrivers_(ctx, target); return;
+    case 'schedules': apiSyncValidateSchedules_(ctx, target); return;
+    case 'maintenanceRequests': apiSyncValidateMaintenance_(ctx, target); return;
+    case 'bookings': apiSyncValidateBookings_(ctx, target); return;
+    case 'payments': apiSyncValidatePayments_(ctx, target); return;
+    case 'ledger': apiSyncValidateLedger_(ctx, target); return;
+    case 'vouchers': apiSyncValidateVouchers_(ctx, target); return;
+    case 'reviews': apiSyncValidateReviews_(ctx, target); return;
+    case 'notifications': apiSyncValidateNotifications_(ctx, target); return;
+    case 'supportTickets': apiSyncValidateSupportTickets_(ctx, target); return;
+    case 'routeRequests': apiSyncValidateRouteRequests_(ctx, target); return;
+    default:
+      if (ctx.role !== 'superadmin') {
+        throw apiError_('FORBIDDEN', 'Peran tidak diizinkan menulis ' + key + '.');
+      }
+  }
+}
+
+/**
+ * Validasi lintas koleksi: kursi pada jadwal yang tersentuh tidak boleh
+ * dobel, dan tidak boleh menabrak blockedSeats/kursi nonaktif.
+ */
+function apiSyncCrossValidate_(ctx) {
+  var touched = Object.keys(ctx.touchedSchedules);
+  if (!touched.length) return;
+  var schedules = apiSyncMergeList_(ctx, 'schedules');
+  var vehicles = apiSyncMergeList_(ctx, 'vehicles');
+  var bookings = apiSyncMergeList_(ctx, 'bookings');
+  var scheduleMap = apiIndexById_(schedules);
+  var vehicleMap = apiIndexById_(vehicles);
+  var bySchedule = {};
+  bookings.forEach(function (b) {
+    var status = String((b && b.status) || '');
+    if (['pending', 'paid', 'done'].indexOf(status) < 0) return;
+    var sid = String((b && b.scheduleId) || '');
+    if (!sid) return;
+    if (!bySchedule[sid]) bySchedule[sid] = [];
+    bySchedule[sid].push(b);
+  });
+  for (var i = 0; i < touched.length; i++) {
+    var sid = touched[i];
+    var schedule = scheduleMap[sid];
+    if (!schedule) continue;
+    if (String(schedule.status || '') === 'cancelled' ||
+        String(schedule.tripStatus || '') === 'cancelled') continue;
+    var taken = {};
+    var blocked = Array.isArray(schedule.blockedSeats) ? schedule.blockedSeats : [];
+    blocked.forEach(function (seat) { taken[String(seat)] = true; });
+    var vehicle = vehicleMap[String(schedule.vehicleId || '')];
+    var inactive = vehicle && Array.isArray(vehicle.inactiveSeats) ? vehicle.inactiveSeats : [];
+    inactive.forEach(function (seat) { taken[String(seat)] = true; });
+    var list = bySchedule[sid] || [];
+    for (var b = 0; b < list.length; b++) {
+      var seats = Array.isArray(list[b].seats) ? list[b].seats : [];
+      for (var s = 0; s < seats.length; s++) {
+        var seat = String(seats[s]);
+        if (taken[seat]) {
+          throw apiError_('SEAT_CONFLICT', 'Kursi ' + seat + ' pada jadwal ' + sid + ' sudah terpakai.');
+        }
+        taken[seat] = true;
+      }
+    }
+  }
+}
+
+
 
 function apiCommit_(req, cfg) {
   var user = apiAuthedUser_(req, cfg);

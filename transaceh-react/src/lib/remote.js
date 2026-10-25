@@ -6,7 +6,7 @@ import { sheetsApi, setToken, clearToken } from './sheetsApi.js';
 
 export async function loadSnapshot(token) {
   const snap = await sheetsApi.bootstrap(token || null);
-  DB.hydrate(snap.records);
+  DB.hydrate(snap.records, snap.revisions);
   return snap;
 }
 
@@ -40,10 +40,13 @@ export async function registerRemote(payload) {
 }
 
 export async function signOutRemote() {
+  try {
+    await DB.flush();
+  } catch { /* tetap keluar walau sinkronisasi terakhir gagal */ }
   clearToken();
   setSession(null);
   DB.clear();
   const snap = await sheetsApi.bootstrap(null);
-  DB.hydrate(snap.records);
+  DB.hydrate(snap.records, snap.revisions);
   return snap;
 }

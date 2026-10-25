@@ -6,7 +6,7 @@ tags:
   - type/note
   - area/produk
 status: aktif
-updated: 2026-10-23
+updated: 2026-10-26
 source:
   - transaceh-react/src/lib/domain.js
   - transaceh-react/src/pages/Search.jsx
@@ -48,10 +48,10 @@ Lihat [[Alur Ledger dan Settlement]] dan [[Data - payments dan ledger]].
 ## Batasan penting
 
 > [!warning] Ini prototipe simulasi
-> - Tidak ada backend database; data disimpan di `localStorage`.
-> - Password disimpan plaintext di data demo.
+> - Mode default masih `localStorage`; adapter Google Sheets sudah ada tetapi belum diaktifkan sampai deploy/CORS/uji per peran/lifecycle server-side lulus.
+> - Password data demo bisa plaintext sampai migrasi hash saat login.
 > - Pembayaran QRIS/VA/e-wallet hanya simulasi, bukan integrasi nyata.
-> - Tidak ada autentikasi server; guard akses berjalan di client.
+> - Saat mode Sheets, autentikasi dan guard utama berjalan di Apps Script; `commit` superadmin tetap melewati validator domain.
 > - AI memakai Worker terpisah; API key tidak ada di frontend.
 
 ## Cakupan rute

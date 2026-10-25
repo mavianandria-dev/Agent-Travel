@@ -6,7 +6,7 @@ tags:
   - type/reference
   - area/referensi
 status: aktif
-updated: 2026-10-25
+updated: 2026-10-26
 source:
   - transaceh-react/package.json
   - .github/workflows/deploy-pages.yml
@@ -53,16 +53,18 @@ location.reload();
 
 Data seed akan dibuat ulang saat halaman dimuat. Rute, jadwal, dan booking tetap kosong; siapkan lewat alur agen → admin.
 
-## Seed database Google Sheets
+## Database Google Sheets
 
-Backend Sheets masih tahap seed dan belum terhubung ke aplikasi.
+Backend `code.gs` 1.2.0 dan adapter frontend sudah ada, tetapi Web App ter-deploy masih 1.1.0 dan menolak `sync`. Mode aplikasi tetap `local` sampai deploy, probe CORS, uji end-to-end, dan lifecycle server-side selesai.
 
 1. Buka spreadsheet kosong → **Extensions → Apps Script**.
-2. Pasang `google-apps-script/seed.gs` dan `google-apps-script/appsscript.json`.
+2. Pasang `google-apps-script/seed.gs`, `code.gs`, dan `appsscript.json`.
 3. Isi Script Properties: `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PHONE`, `ADMIN_PASSWORD`.
 4. Jalankan `seedProduction()`, lalu `validateDatabase()`.
+5. Jalankan `setupBackend()`, deploy Web App, lalu probe CORS.
+6. Uji lokal: `node google-apps-script/local-tests/mock-harness.mjs` (265 asersi).
 
-Jangan deploy Web App atau memasukkan data pelanggan nyata sebelum probe CORS dan autentikasi frontend selesai. Detail di [[Database Google Sheets]].
+Jangan mengaktifkan `VITE_DATA_MODE=sheets` atau memasukkan data pelanggan/KYC nyata sebelum probe CORS dan uji semua peran selesai. Detail di [[Database Google Sheets]].
 
 ## File yang paling sering dibuka
 

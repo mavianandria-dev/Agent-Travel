@@ -6,9 +6,10 @@ tags:
   - type/note
   - area/arsitektur
 status: aktif
-updated: 2026-10-24
+updated: 2026-10-26
 source:
   - transaceh-react/src/store/AppContext.jsx
+  - transaceh-react/src/lib/boot.js
   - transaceh-react/src/lib/domain.js
 ---
 
@@ -53,13 +54,16 @@ komponen render ulang dan baca DB lagi
 
 ## Sinkronisasi lifecycle dan maintenance
 
-Saat modul `AppContext` dimuat:
+Di mode `local`, `boot.js` menjalankan:
 
 1. `initDB()` menyiapkan seed/migrasi.
 2. `syncScheduleLifecycle()` menutup jadwal lampau (melewati jadwal maintenance).
 3. `syncMaintenanceResolutions()` menyelesaikan periode maintenance, refund otomatis, dan menutup jadwal maintenance yang sudah lampau.
 
-Keduanya juga dipanggil berkala lewat interval dan pada event `storage`, sehingga approval/refund dari tab lain terlihat tanpa reload. Pelanggan yang sedang di `PaymentModal` juga memantau booking sendiri setiap detik.
+`AppContext` juga memasang interval `cleanupHolds()` setiap 10 detik dan lifecycle/maintenance setiap 60 detik. Pelanggan yang sedang di `PaymentModal` memantau booking sendiri setiap detik.
+
+> [!warning] Mode Sheets belum punya lifecycle
+> Di mode Sheets, interval lifecycle dimatikan. `cleanupHolds`, penutupan jadwal lampau, dan resolusi maintenance memutasi data lintas pemilik sehingga harus dipindahkan ke trigger Apps Script/server-side. Sampai itu ada, mode Sheets belum setara dengan mode local.
 
 ## Konsekuensi
 
@@ -93,11 +97,13 @@ Bentuk awal dari `freshBW()`:
 
 ## Sumber
 
-- `transaceh-react/src/store/AppContext.jsx:8-10` — init + sync lifecycle/maintenance.
-- `transaceh-react/src/store/AppContext.jsx:15` — `freshBW`.
-- `transaceh-react/src/store/AppContext.jsx:34-46` — state.
-- `transaceh-react/src/store/AppContext.jsx:49-51` — `refresh`, `user`.
-- `transaceh-react/src/store/AppContext.jsx:100-121` — timer, sinkronisasi, dan `storage`.
-- `transaceh-react/src/store/AppContext.jsx:131-137` — value context.
+- `transaceh-react/src/lib/boot.js:1-47` — boot local/Sheets.
+- `transaceh-react/src/store/AppContext.jsx:8-10` — import lifecycle dan mode.
+- `transaceh-react/src/store/AppContext.jsx:14` — `freshBW`.
+- `transaceh-react/src/store/AppContext.jsx:21-60` — state global.
+- `transaceh-react/src/store/AppContext.jsx:87-105` — logout remote/local.
+- `transaceh-react/src/store/AppContext.jsx:107-145` — handler error sync.
+- `transaceh-react/src/store/AppContext.jsx:147-169` — interval lifecycle (local) dan `storage`.
+- `transaceh-react/src/store/AppContext.jsx:170+` — value context.
 
 Lihat [[Pola Mutasi Data]].
