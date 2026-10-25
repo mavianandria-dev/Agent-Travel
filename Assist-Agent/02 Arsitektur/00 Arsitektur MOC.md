@@ -6,13 +6,14 @@ tags:
   - type/moc
   - area/arsitektur
 status: aktif
-updated: 2026-10-23
-source: []
+updated: 2026-10-24
+source:
+  - google-apps-script/seed.gs
 ---
 
 # Arsitektur — MOC
 
-Aplikasi adalah SPA React dengan data di `localStorage` dan satu Worker untuk AI.
+Aplikasi adalah SPA React dengan data di `localStorage` dan satu Worker untuk AI. Sejak 2026-10-24 ada backend Google Sheets tahap seed; backend itu belum terhubung ke aplikasi.
 
 ```mermaid
 flowchart TB
@@ -47,6 +48,7 @@ flowchart TB
 - [[Navigasi dan View Router]] — cara `view` menggantikan React Router.
 - [[State Management]] — state global, `tick`, modal, toast, checkout draft.
 - [[Lapisan Data dan Seed]] — `DB.load/save`, seed, migrasi.
+- [[Database Google Sheets]] — seed produksi, skema tab, dan rencana migrasi.
 - [[Lapisan Domain]] — aturan bisnis di `domain.js`.
 - [[UI dan Desain]] — Tailwind, komponen UI, ikon, peta, chart.
 - [[Pusat Bantuan dan AI]] — chatbot, Worker, privasi.
@@ -54,7 +56,7 @@ flowchart TB
 
 ## Prinsip besar
 
-1. **Client-only** — tidak ada API aplikasi; semua data di browser.
+1. **Client-only (masih)** — belum ada API aplikasi; semua data aktif di browser. Google Sheets baru tahap seed.
 2. **State global minimal** — Context menyimpan navigasi dan UI, bukan seluruh data.
 3. **Data dibaca langsung** — komponen memanggil `DB.load()` saat render.
 4. **Refresh manual** — `refresh()` menaikkan `tick` agar render ulang.

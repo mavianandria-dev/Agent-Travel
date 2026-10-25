@@ -224,7 +224,7 @@ function AccountManageModal({ id }) {
     const changePassword = !!(pw || pw2);
     if (changePassword && (!pw || !pw2)) { toast('Isi password baru dan ulanginya', 'err'); return; }
     if (changePassword && pw !== pw2) { toast('Ulangi password tidak sama', 'err'); return; }
-    if (changePassword && pw.length < 6) { toast('Password minimal 6 karakter', 'err'); return; }
+    if (changePassword && pw.length < 8) { toast('Password minimal 8 karakter', 'err'); return; }
     const res = updateManagedAccount(u.id, { name, phone, password: changePassword ? pw : '' });
     if (!res.ok) { toast(res.msg, 'err'); return; }
     setPw('');

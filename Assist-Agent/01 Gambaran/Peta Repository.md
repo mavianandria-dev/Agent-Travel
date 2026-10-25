@@ -6,10 +6,14 @@ tags:
   - type/note
   - area/arsitektur
 status: aktif
-updated: 2026-10-24
+updated: 2026-10-25
 source:
   - .github/workflows/deploy-pages.yml
   - transaceh-react/package.json
+  - google-apps-script/seed.gs
+  - google-apps-script/code.gs
+  - google-apps-script/README.md
+  - google-apps-script/local-tests/mock-harness.mjs
 ---
 
 # Peta Repository
@@ -21,6 +25,7 @@ Agent Travel/
 ├─ .github/workflows/       # deploy GitHub Pages
 ├─ .opencode/               # skill OpenCode
 ├─ docs/                    # dokumentasi AI
+├─ google-apps-script/      # seed database Google Sheets
 ├─ transaceh-react/         # aplikasi React aktif
 ├─ Assist-Agent/            # vault memori ini
 ├─ index.html               # versi legacy single-file
@@ -50,6 +55,20 @@ transaceh-react/
 └─ package.json
 ```
 
+## Backend data: `google-apps-script/`
+
+```text
+google-apps-script/
+├─ seed.gs                  # seed produksi minimal + validasi
+├─ code.gs                  # API Web App mode direct
+├─ appsscript.json          # manifest bound script
+├─ local-tests/
+│  └─ mock-harness.mjs      # 155 asersi mock Apps Script
+└─ README.md                # pemasangan, probe CORS, kontrak API
+```
+
+Script terikat ke spreadsheet. `code.gs` sudah memakai mode direct (tanpa proxy DB) dan lulus 155 asersi lokal, tetapi belum dipanggil aplikasi React; database aktif masih `localStorage`. Lihat [[Database Google Sheets]].
+
 ## File kunci dan ukuran
 
 | File | Baris | Peran |
@@ -65,6 +84,10 @@ transaceh-react/
 | `src/pages/TicketDetail.jsx` | 246 | Detail tiket + refund/pindah |
 | `src/admin/Accounts.jsx` | 509 | Manajemen akun |
 | `src/pages/help/ChatSection.jsx` | 429 | Chat AI |
+| `google-apps-script/seed.gs` | 476 | Seed database Sheets + validasi |
+| `google-apps-script/code.gs` | 1.718 | API Web App mode direct |
+| `google-apps-script/local-tests/mock-harness.mjs` | 955 | 155 asersi mock `code.gs` |
+| `google-apps-script/README.md` | 330 | Pemasangan, probe CORS, kontrak API |
 | `index.html` (root) | 2.053 | Versi legacy single-file |
 
 ## Entry point
@@ -86,5 +109,9 @@ transaceh-react/
 - `.github/workflows/deploy-pages.yml`
 - `transaceh-react/package.json`
 - `transaceh-react/vite.config.js`
+- `google-apps-script/seed.gs`
+- `google-apps-script/code.gs`
+- `google-apps-script/README.md`
+- `google-apps-script/local-tests/mock-harness.mjs`
 
 Lihat [[File Index]] untuk daftar file lebih lengkap.

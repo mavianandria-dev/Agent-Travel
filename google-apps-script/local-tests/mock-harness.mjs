@@ -1,0 +1,955 @@
+/**
+ * Mock harness untuk menguji `code.gs` (Apps Script) di lokal via Node + vm.
+ * Tidak menyentuh spreadsheet Google; semua I/O di-mock supaya perilaku
+ * code.gs bisa diverifikasi sebelum dipasang di produksi.
+ *
+ * Cara jalankan: node google-apps-script/local-tests/mock-harness.mjs
+ */
+
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import vm from 'node:vm';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const source = readFileSync(path.join(__dirname, '..', 'code.gs'), 'utf8');
+
+/* ------------------------------------------------------------------ */
+/* Mock Spreadsheet                                                    */
+/* ------------------------------------------------------------------ */
+
+class MockRange {
+  constructor(sheet, row, col, numRows, numCols) {
+    this.sheet = sheet;
+    this.row = row;
+    this.col = col;
+    this.numRows = numRows;
+    this.numCols = numCols;
+  }
+  getValues() {
+    const out = [];
+    for (let i = 0; i < this.numRows; i++) {
+      const src = this.sheet.rows[this.row - 1 + i] || [];
+      const line = [];
+      for (let j = 0; j < this.numCols; j++) {
+        const v = src[this.col - 1 + j];
+        line.push(v == null ? '' : v);
+      }
+      out.push(line);
+    }
+    return out;
+  }
+  setValues(values) {
+    for (let i = 0; i < values.length; i++) {
+      const rowIndex = this.row - 1 + i;
+      while (this.sheet.rows.length <= rowIndex) this.sheet.rows.push([]);
+      const line = this.sheet.rows[rowIndex];
+      const src = values[i];
+      for (let j = 0; j < src.length; j++) line[this.col - 1 + j] = src[j];
+    }
+    return this;
+  }
+  clearContent() {
+    for (let i = 0; i < this.numRows; i++) {
+      const line = this.sheet.rows[this.row - 1 + i];
+      if (!line) continue;
+      for (let j = 0; j < this.numCols; j++) line[this.col - 1 + j] = '';
+    }
+    return this;
+  }
+}
+
+class MockSheet {
+  constructor(name) { this.name = name; this.rows = []; }
+  getLastRow() {
+    let lastRow = 0;
+    for (let i = 0; i < this.rows.length; i++) {
+      const row = this.rows[i] || [];
+      if (row.some((cell) => String(cell == null ? '' : cell).trim() !== '')) lastRow = i + 1;
+    }
+    return lastRow;
+  }
+  getRange(row, col, numRows = 1, numCols = 1) {
+    return new MockRange(this, row, col, numRows, numCols);
+  }
+}
+
+class MockSpreadsheet {
+  constructor() { this.sheetMap = new Map(); }
+  getSheetByName(name) { return this.sheetMap.get(name) || null; }
+  addSheet(name) {
+    const sheet = new MockSheet(name);
+    this.sheetMap.set(name, sheet);
+    return sheet;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Mock layanan Apps Script                                            */
+/* ------------------------------------------------------------------ */
+
+const spread = new MockSpreadsheet();
+const scriptProperties = new Map();
+const logs = [];
+const responses = [];
+const cacheStore = new Map();
+const sleepCalls = [];
+
+class ScriptProperties {
+  getProperty(key) { return scriptProperties.get(String(key)) || null; }
+  setProperty(key, value) { scriptProperties.set(String(key), String(value)); }
+  deleteProperty(key) { scriptProperties.delete(String(key)); }
+  getKeys() { return Array.from(scriptProperties.keys()); }
+}
+
+class MockLock {
+  tryLock() { return true; }
+  releaseLock() {}
+}
+
+const Utilities = {
+  getUuid: () => crypto.randomUUID(),
+  base64EncodeWebSafe: (value) => {
+    const buf = typeof value === 'string' ? Buffer.from(value, 'utf8') : Buffer.from(value);
+    return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  },
+  base64Decode: (value) => {
+    const text = String(value).replace(/-/g, '+').replace(/_/g, '/');
+    return Array.from(Buffer.from(text, 'base64'));
+  },
+  computeHmacSha256Signature: (value, key) => {
+    const kb = typeof key === 'string' ? Buffer.from(key, 'utf8') : Buffer.from(key);
+    const vb = typeof value === 'string' ? Buffer.from(value, 'utf8') : Buffer.from(value);
+    return Array.from(crypto.createHmac('sha256', kb).update(vb).digest());
+  },
+  computeDigest: (algo, value, charset) => {
+    const buf = Buffer.from(String(value), 'utf8');
+    const hash = (algo === 'SHA_512') ? 'sha512' : 'sha256';
+    return Array.from(crypto.createHash(hash).update(buf).digest());
+  },
+  DigestAlgorithm: { SHA_512: 'SHA_512', SHA_256: 'SHA_256' },
+  Charset: { UTF_8: 'UTF_8' },
+  newBlob: (data) => ({
+    getDataAsString: () => Buffer.from(data).toString('utf8'),
+    getData: () => data
+  }),
+  sleep: (ms) => { sleepCalls.push(Number(ms) || 0); }
+};
+
+const CacheService = {
+  getScriptCache: () => ({
+    get: (key) => (cacheStore.has(String(key)) ? cacheStore.get(String(key)) : null),
+    put: (key, value) => { cacheStore.set(String(key), String(value)); },
+    remove: (key) => { cacheStore.delete(String(key)); }
+  })
+};
+
+const ContentService = {
+  MimeType: { JSON: 'JSON' },
+  createTextOutput: (text) => {
+    const out = { text };
+    out.setMimeType = () => out;
+    return out;
+  }
+};
+
+const Logger = {
+  log: (msg) => logs.push(String(msg))
+};
+
+const sandbox = {
+  Utilities,
+  CacheService,
+  ContentService,
+  Logger,
+  LockService: { getScriptLock: () => new MockLock() },
+  PropertiesService: { getScriptProperties: () => new ScriptProperties() },
+  SpreadsheetApp: {
+    flush: () => {},
+    getActiveSpreadsheet: () => spread
+  }
+};
+
+vm.createContext(sandbox);
+const script = new vm.Script(source);
+try {
+  script.runInContext(sandbox);
+} catch (err) {
+  console.error('PARSE/LOAD ERROR:', err.stack || err.message);
+  process.exit(1);
+}
+
+const S = sandbox;
+const seedKeys = S.API_COLLECTION_KEYS;
+
+/* ------------------------------------------------------------------ */
+/* Fixture data                                                        */
+/* ------------------------------------------------------------------ */
+
+const LEGACY_ADMIN_PW = 'legacy-plaintext-admin-pw';
+const LEGACY_AGEN_PW = 'legacy-plaintext-agen-pw';
+const LEGACY_AGEN2_PW = 'legacy-plaintext-agen2-pw';
+const LEGACY_DRIVER1_PW = 'legacy-plaintext-driver1-pw';
+const LEGACY_CUST1_PW = 'legacy-plaintext-cust1-pw';
+const LEGACY_CUST2_PW = 'legacy-plaintext-cust2-pw';
+const NEW_ADMIN_PW = 'new-pw-fixture-42';
+const REG_PAX_PW = 'newcust-pw-123';
+const REG_AGEN_PW = 'newagen-pw-123';
+const THROTTLE_PW = 'throttle-pw-123';
+const CHPW_PW = 'chpw-pw-123';
+const NEW_CUST2_PW = 'cust2-new-pw-456';
+const CHPW_FINAL_PW = 'chpw-final-pw-321';
+const DRIVER_NEW_PW = 'driver-baru-pw-123';
+const AGEN_NEW_PW = 'agen-baru-pw-123';
+
+function futureDate(days) {
+  return new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+}
+
+seedKeys.forEach((key) => {
+  const sheet = spread.addSheet(key);
+  sheet.rows.push(['id', 'ord', 'json', 'updated_at']);
+});
+const metaSheet = spread.addSheet('_meta');
+metaSheet.rows.push(['key', 'value']);
+metaSheet.rows.push(['schemaVersion', '1']);
+metaSheet.rows.push(['seedVersion', 'production-1']);
+metaSheet.rows.push(['databaseMode', 'produksi-minimal']);
+metaSheet.rows.push(['seededAt', '2026-10-24T00:00:00.000Z']);
+seedKeys.forEach((key) => metaSheet.rows.push(['rev.' + key, '1']));
+
+function seedCollection(key, records) {
+  const sheet = spread.getSheetByName(key);
+  records.forEach((rec, i) => {
+    sheet.rows.push([rec.id ?? rec.key ?? '', i + 1, JSON.stringify(rec), '2026-10-24T00:00:00.000Z']);
+  });
+}
+
+const kyc1 = {
+  nama: 'H. Muhammad Nur',
+  nik: '1173010101800001',
+  npwp: '12.345.678.9-101.000',
+  bank: 'BCA',
+  rekeningNo: '8210-9921-11',
+  rekeningNama: 'Barakah Travel',
+  fotoKtp: 'data:image/png;base64,AAAAKTP1',
+  fotoSelfie: 'data:image/png;base64,AAAASELFIE1'
+};
+const kyc2 = {
+  nama: 'Cut Putra',
+  nik: '1171010101850002',
+  npwp: '98.765.432.1-101.000',
+  bank: 'Mandiri',
+  rekeningNo: '8900-1122-33',
+  rekeningNama: 'Putra Jaya',
+  fotoKtp: 'data:image/png;base64,AAAAKTP2',
+  fotoSelfie: 'data:image/png;base64,AAAASELFIE2'
+};
+
+seedCollection('users', [
+  { id: 'u_admin_1', name: 'Admin Utama', email: 'admin@transaceh.id', phone: '0812000000', role: 'superadmin', status: 'active', pass: LEGACY_ADMIN_PW },
+  { id: 'u_agen_1', name: 'Agen Barakah', email: 'agen1@test.local', phone: '0812000001', role: 'agen', agencyId: 'ag_1', status: 'active', pass: LEGACY_AGEN_PW },
+  { id: 'u_agen_2', name: 'Agen Putra Jaya', email: 'agen2@test.local', phone: '0812000002', role: 'agen', agencyId: 'ag_2', status: 'active', pass: LEGACY_AGEN2_PW },
+  { id: 'u_driver_1', name: 'Bang Jamil', email: 'driver1@test.local', phone: '0812000003', role: 'pengemudi', agencyId: 'ag_1', status: 'active', pass: LEGACY_DRIVER1_PW, profileStep: 'done' },
+  { id: 'u_driver_3', name: 'Bang Hendra', email: 'driver3@test.local', phone: '0812000004', role: 'pengemudi', agencyId: 'ag_2', status: 'active', pass: LEGACY_DRIVER1_PW, profileStep: 'done' },
+  { id: 'u_cust_1', name: 'Rina Amelia', email: 'cust1@test.local', phone: '0812000005', role: 'pelanggan', status: 'active', favorites: [], pass: LEGACY_CUST1_PW },
+  { id: 'u_cust_2', name: 'Dedi Pelanggan', email: 'cust2@test.local', phone: '0812000006', role: 'pelanggan', status: 'active', favorites: [], pass: LEGACY_CUST2_PW }
+]);
+
+seedCollection('agencies', [
+  {
+    id: 'ag_1', name: 'Barakah Travel', logo: '', address: 'Jl. Merdeka No.12, Calang',
+    phone: '0654-20112', bank: 'BCA 8210-9921-11 a.n. Barakah Travel', status: 'active',
+    feeType: 'percent', feeValue: 8,
+    refundPolicy: [{ minH: 72, pct: 100 }, { minH: 24, pct: 50 }, { minH: 0, pct: 0 }],
+    rating: 4.8, trips: 120, kyc: kyc1
+  },
+  {
+    id: 'ag_2', name: 'Putra Jaya', logo: '', address: 'Jl. T. Umar No.88, Banda Aceh',
+    phone: '0651-77821', bank: 'Mandiri 8900-1122-33 a.n. Putra Jaya', status: 'active',
+    feeType: 'percent', feeValue: 10,
+    refundPolicy: [{ minH: 72, pct: 100 }, { minH: 24, pct: 50 }, { minH: 0, pct: 0 }],
+    rating: 4.6, trips: 80, kyc: kyc2
+  },
+  {
+    id: 'ag_new', name: 'Travel Baru', logo: '', address: 'Jl. Baru No.1', phone: '0651-000000',
+    bank: '-', status: 'pending', feeType: 'percent', feeValue: 8,
+    refundPolicy: [{ minH: 72, pct: 100 }, { minH: 24, pct: 50 }, { minH: 0, pct: 0 }],
+    rating: 5.0, trips: 0
+  },
+  {
+    id: 'ag_4', name: 'Cahaya Perkasa', logo: '', address: 'Jl. Diponegoro No.7', phone: '0655-31212',
+    bank: '-', status: 'pending', feeType: 'percent', feeValue: 8,
+    refundPolicy: [{ minH: 72, pct: 100 }, { minH: 24, pct: 50 }, { minH: 0, pct: 0 }],
+    rating: 5.0, trips: 0
+  }
+]);
+
+seedCollection('routes', [
+  { id: 'rt_1', from: 'Calang', to: 'Banda Aceh', distanceKm: 170, durationMin: 240, prices: { ag_1: 150000, ag_2: 160000 }, agencyIds: ['ag_1', 'ag_2'] },
+  { id: 'rt_2', from: 'Banda Aceh', to: 'Medan', distanceKm: 430, durationMin: 600, prices: { ag_2: 260000 }, agencyIds: ['ag_2'] }
+]);
+
+seedCollection('vehicles', [
+  {
+    id: 'v_1', agencyId: 'ag_1', brand: 'Toyota', model: 'Innova Reborn', year: 2022,
+    color: 'Hitam', plate: 'BL 1234 AA', chassis: 'MHFXW41G2N2001001', engine: '2GD2001001',
+    vtype: 'MPV', baggage: 'Besar', capacity: 6, photo: '', facilities: ['AC', 'USB'],
+    status: 'aktif', ownerName: 'H. Muhammad Nur', ownerNik: '1173010101800001',
+    ownerPhone: '0812000001', stnkPhoto: 'data:image/png;base64,AAAASTNK1',
+    inactiveSeats: ['A5'], layout: [], mainRoute: 'Calang — Banda Aceh',
+    origin: 'Aceh Jaya', dest: 'Banda Aceh', services: ['Antar jemput'], opSchedule: '07:00'
+  },
+  {
+    id: 'v_2', agencyId: 'ag_1', brand: 'Daihatsu', model: 'Xenia', year: 2021,
+    color: 'Silver', plate: 'BL 5678 BB', chassis: 'MHKV1AA2JK2001002', engine: '1NR2001002',
+    vtype: 'MPV', baggage: 'Sedang', capacity: 6, photo: '', facilities: ['AC'],
+    status: 'aktif', ownerName: 'H. Muhammad Nur', ownerNik: '1173010101800001',
+    ownerPhone: '0812000001', stnkPhoto: 'data:image/png;base64,AAAASTNK2',
+    inactiveSeats: [], layout: [], mainRoute: 'Calang — Banda Aceh',
+    origin: 'Aceh Jaya', dest: 'Banda Aceh', services: [], opSchedule: '14:00'
+  },
+  {
+    id: 'v_4', agencyId: 'ag_2', brand: 'Suzuki', model: 'Ertiga', year: 2021,
+    color: 'Merah', plate: 'BL 3344 DD', chassis: 'MHYNC22S1MJ100004', engine: 'K15B100004',
+    vtype: 'MPV', baggage: 'Sedang', capacity: 6, photo: '', facilities: ['AC'],
+    status: 'aktif', ownerName: '', ownerNik: '1171010101850002',
+    ownerPhone: '0812000010', stnkPhoto: 'data:image/png;base64,AAAASTNK4',
+    inactiveSeats: [], layout: [], mainRoute: 'Banda Aceh — Medan',
+    origin: 'Banda Aceh', dest: 'Medan', services: [], opSchedule: '10:00'
+  },
+  {
+    id: 'v_pending', agencyId: 'ag_4', brand: 'Toyota', model: 'Avanza', year: 2020,
+    color: 'Putih', plate: 'BL 9999 ZZ', chassis: 'MHFDG...', engine: '1NR...',
+    vtype: 'MPV', baggage: 'Sedang', capacity: 6, photo: '', facilities: ['AC'],
+    status: 'aktif', ownerName: 'Pemilik Pending', ownerNik: '1173010709910013',
+    ownerPhone: '0812000099', stnkPhoto: 'data:image/png;base64,AAAAPENDING',
+    inactiveSeats: [], layout: [], mainRoute: '', origin: '', dest: '',
+    services: [], opSchedule: ''
+  }
+]);
+
+seedCollection('drivers', [
+  { id: 'd_1', agencyId: 'ag_1', name: 'Bang Jamil', phone: '0812000003', simType: 'A', simExp: 2030, simPhoto: 'data:image/png;base64,AAAASIM1', ktpPhoto: 'data:image/png;base64,AAAAKTPD1', selfie: 'data:image/png;base64,AAAASELF1', photo: '', status: 'aktif', rating: 4.9, trips: 320, userEmail: 'driver1@test.local', nik: '1173011203850001', bank: 'BCA 8210099001 a.n. Bang Jamil' },
+  { id: 'd_2', agencyId: 'ag_1', name: 'Teuku Rizal', phone: '0812000007', simType: 'A', simExp: 2027, simPhoto: '', ktpPhoto: '', selfie: '', photo: '', status: 'aktif', rating: 4.7, trips: 180, userEmail: 'driver2@test.local', nik: '1173021507900002', bank: 'BRI 0022010190002 a.n. Teuku Rizal' },
+  { id: 'd_3', agencyId: 'ag_2', name: 'Bang Hendra', phone: '0812000004', simType: 'A', simExp: 2026, simPhoto: '', ktpPhoto: '', selfie: '', photo: '', status: 'aktif', rating: 4.8, trips: 210, userEmail: 'driver3@test.local', nik: '1171012204880004', bank: 'BCA 8210099004 a.n. Bang Hendra' },
+  { id: 'd_new', agencyId: 'ag_2', name: 'Pengemudi Baru', phone: '0812000088', simType: 'B1', simExp: 2029, simPhoto: '', ktpPhoto: '', selfie: '', photo: '', status: 'aktif', rating: 5.0, trips: 0, userEmail: '', nik: '1171011208940012', bank: '' }
+]);
+
+seedCollection('schedules', [
+  { id: 's_1', agencyId: 'ag_1', routeId: 'rt_1', vehicleId: 'v_1', driverId: 'd_1', driverName: 'Bang Jamil', backupDriverId: '', backupName: '', date: futureDate(1), time: '08:00', price: 150000, status: 'open', tripStatus: 'scheduled', blockedSeats: ['A2'], createdAt: '2026-10-20T00:00:00.000Z' },
+  { id: 's_2', agencyId: 'ag_1', routeId: 'rt_1', vehicleId: 'v_2', driverId: 'd_2', driverName: 'Teuku Rizal', backupDriverId: 'd_1', backupName: 'Bang Jamil', date: futureDate(2), time: '14:00', price: 150000, status: 'open', tripStatus: 'scheduled', blockedSeats: [], createdAt: '2026-10-20T00:00:00.000Z' },
+  { id: 's_3', agencyId: 'ag_2', routeId: 'rt_2', vehicleId: 'v_4', driverId: 'd_3', driverName: 'Bang Hendra', backupDriverId: '', backupName: '', date: futureDate(1), time: '09:00', price: 260000, status: 'open', tripStatus: 'scheduled', blockedSeats: [], createdAt: '2026-10-20T00:00:00.000Z' },
+  { id: 's_pending', agencyId: 'ag_4', routeId: 'rt_2', vehicleId: 'v_pending', driverId: 'd_3', driverName: 'Bang Hendra', backupDriverId: '', backupName: '', date: futureDate(1), time: '11:00', price: 270000, status: 'open', tripStatus: 'scheduled', blockedSeats: [], createdAt: '2026-10-20T00:00:00.000Z' }
+]);
+
+seedCollection('bookings', [
+  { id: 'b_1', code: 'TA-1', scheduleId: 's_1', userEmail: 'cust1@test.local', seats: ['A1'], status: 'paid', total: 150000, createdAt: '2026-10-20T01:00:00.000Z' },
+  { id: 'b_2', code: 'TA-2', scheduleId: 's_1', userEmail: 'cust2@test.local', seats: ['A3'], status: 'pending', total: 150000, createdAt: '2026-10-20T02:00:00.000Z' },
+  { id: 'b_3', code: 'TA-3', scheduleId: 's_2', userEmail: 'cust1@test.local', seats: ['B1'], status: 'done', total: 150000, createdAt: '2026-10-20T03:00:00.000Z' },
+  { id: 'b_4', code: 'TA-4', scheduleId: 's_3', userEmail: 'cust2@test.local', seats: ['A4'], status: 'paid', total: 260000, createdAt: '2026-10-20T04:00:00.000Z' }
+]);
+
+seedCollection('payments', [
+  { id: 'p_1', bookingId: 'b_1', amount: 150000, method: 'transfer', status: 'paid', fee: 12000, time: '2026-10-20T01:05:00.000Z' },
+  { id: 'p_2', bookingId: 'b_2', amount: 150000, method: 'transfer', status: 'pending', fee: 12000, time: '2026-10-20T02:05:00.000Z' },
+  { id: 'p_3', bookingId: 'b_3', amount: 150000, method: 'cash', status: 'paid', fee: 12000, time: '2026-10-20T03:05:00.000Z' },
+  { id: 'p_4', bookingId: 'b_4', amount: 260000, method: 'transfer', status: 'paid', fee: 26000, time: '2026-10-20T04:05:00.000Z' }
+]);
+
+seedCollection('ledger', [
+  { id: 'l_1', agencyId: 'ag_1', bookingId: 'b_1', status: 'settled', amount: 12000 },
+  { id: 'l_2', agencyId: 'ag_2', bookingId: 'b_4', status: 'settled', amount: 26000 }
+]);
+
+seedCollection('notifications', [
+  { id: 'n_1', to: 'cust1@test.local', title: 'Booking dibuat', msg: 'Pembayaran diterima', ch: 'app', time: '2026-10-20T01:06:00.000Z', read: false },
+  { id: 'n_2', to: 'cust2@test.local', title: 'Booking dibuat', msg: 'Segera bayar', ch: 'app', time: '2026-10-20T02:06:00.000Z', read: false },
+  { id: 'n_3', to: 'agen1@test.local', title: 'Pesanan baru', msg: 'Ada booking baru', ch: 'app', time: '2026-10-20T02:07:00.000Z', read: false },
+  { id: 'n_4', to: 'driver1@test.local', title: 'Tugas baru', msg: 'Anda ditugaskan', ch: 'app', time: '2026-10-20T02:08:00.000Z', read: false },
+  { id: 'n_all', to: 'all', title: 'Pengumuman', msg: 'Promo akhir bulan', ch: 'app', time: '2026-10-20T02:09:00.000Z', read: false }
+]);
+
+seedCollection('supportTickets', [
+  { id: 'st_1', code: 'ADU-1', userEmail: 'cust1@test.local', userId: 'u_cust_1', bookingCode: '', status: 'new', messages: [] },
+  { id: 'st_2', code: 'ADU-2', agencyId: 'ag_1', userEmail: 'cust2@test.local', bookingCode: 'TA-1', status: 'process', messages: [] },
+  { id: 'st_3', code: 'ADU-3', userEmail: 'cust2@test.local', bookingCode: 'TA-9', status: 'new', messages: [] },
+  { id: 'st_4', code: 'ADU-4', agencyId: 'ag_2', userEmail: 'cust2@test.local', bookingCode: 'TA-4', status: 'new', messages: [] }
+]);
+
+seedCollection('audit', [
+  { id: 'a_1', time: '2026-10-20T01:00:00.000Z', actor: 'cust1@test.local (pelanggan)', action: 'login', detail: '' },
+  { id: 'a_2', time: '2026-10-20T02:00:00.000Z', actor: 'cust2@test.local (pelanggan)', action: 'login', detail: '' },
+  { id: 'a_3', time: '2026-10-20T03:00:00.000Z', actor: 'agen1@test.local (agen)', action: 'login', detail: '' },
+  { id: 'a_4', time: '2026-10-20T04:00:00.000Z', actor: 'system', action: 'seed', detail: '' }
+]);
+
+seedCollection('reviews', [
+  { id: 'rv_1', agencyId: 'ag_1', user: 'Rina Amelia', rating: 5, text: 'Pengemudi ramah.', date: '2026-10-23', trip: 'Calang → Banda Aceh' },
+  { id: 'rv_2', agencyId: 'ag_2', user: 'Dedi', rating: 4, text: 'Perjalanan lancar.', date: '2026-10-22', trip: 'Banda Aceh → Medan' },
+  { id: 'rv_pending', agencyId: 'ag_4', user: 'Pending', rating: 5, text: 'Belum boleh tampil.', date: '2026-10-22', trip: '-' }
+]);
+
+seedCollection('banners', [
+  { id: 'bnr_1', title: 'Diskon 20%', sub: 'Kode HEMAT20', active: true }
+]);
+
+seedCollection('vouchers', [
+  { code: 'HEMAT20', type: 'percent', value: 20, maxDisc: 30000, quota: 100, used: 12, active: true, desc: 'Diskon 20%' }
+]);
+
+seedCollection('routeRequests', [
+  { id: 'rr_1', agencyId: 'ag_1', routeId: 'rt_1', type: 'ubah-harga', status: 'pending' },
+  { id: 'rr_2', agencyId: 'ag_2', routeId: 'rt_2', type: 'rute-baru', status: 'pending' }
+]);
+
+seedCollection('maintenanceRequests', [
+  { id: 'm_1', agencyId: 'ag_1', driverId: 'd_1', vehicleId: 'v_1', status: 'menunggu', from: futureDate(3), until: futureDate(4) },
+  { id: 'm_2', agencyId: 'ag_2', driverId: 'd_3', vehicleId: 'v_4', status: 'menunggu', from: futureDate(3), until: futureDate(4) }
+]);
+
+seedCollection('settings', [
+  { key: 'platformFee', value: { type: 'percent', value: 8 } }
+]);
+
+seedCollection('fees', [
+  { id: 'fee_1', defaultType: 'percent', defaultValue: 8 }
+]);
+
+/* ------------------------------------------------------------------ */
+/* Helpers                                                             */
+/* ------------------------------------------------------------------ */
+
+let passed = 0;
+let failed = 0;
+function ok(name, cond, extra) {
+  if (cond) {
+    passed++;
+    console.log('  PASS ' + name);
+  } else {
+    failed++;
+    console.log('  FAIL ' + name + (extra != null ? ' :: ' + JSON.stringify(extra) : ''));
+  }
+}
+
+function trackResponse(obj) { responses.push(JSON.stringify(obj)); return obj; }
+
+function dispatch(reqObj) {
+  try {
+    const result = S.apiDispatch_(reqObj);
+    return trackResponse(result);
+  } catch (err) {
+    const out = {
+      ok: false,
+      error: { code: err.code || 'ERROR', message: err.message || String(err) }
+    };
+    return trackResponse(out);
+  }
+}
+
+function bodyOf(reqBody, extra) {
+  return Object.assign({ body: reqBody }, extra);
+}
+
+function metaValue(key) {
+  const row = metaSheet.rows.find((r) => String(r[0]) === key);
+  return row ? String(row[1]) : null;
+}
+
+function revOf(key) {
+  return Number(metaValue('rev.' + key) || 0) || 0;
+}
+
+function login(email, password, extra) {
+  return dispatch(bodyOf({ email, password }, Object.assign({ action: 'login' }, extra || {})));
+}
+
+function idsOf(list) {
+  return (list || []).map((x) => String(x && x.id)).sort();
+}
+
+function record(records, key, id) {
+  return (records[key] || []).find((x) => String(x.id) === id);
+}
+
+function clearRateLimits() { cacheStore.clear(); }
+
+/* ------------------------------------------------------------------ */
+/* Tests                                                               */
+/* ------------------------------------------------------------------ */
+
+console.log('\n== 1) setup, health, mode direct ==');
+S.setupBackend();
+const proxyKey = scriptProperties.get('API_PROXY_KEY');
+ok('setupBackend menggenerasi API_PROXY_KEY', (proxyKey || '').length >= 40);
+ok('setupBackend menggenerasi API_TOKEN_SECRET', (scriptProperties.get('API_TOKEN_SECRET') || '').length >= 40);
+ok('setupBackend menggenerasi PASSWORD_PEPPER', (scriptProperties.get('PASSWORD_PEPPER') || '').length >= 40);
+ok('setupBackend menggenerasi TOKEN_TTL', Number(scriptProperties.get('TOKEN_TTL')) > 0);
+ok('REQUIRE_PROXY_KEY default false', scriptProperties.get('REQUIRE_PROXY_KEY') === 'false');
+
+let res = dispatch({ action: 'health' });
+ok('health tanpa proxyKey tetap ok', res.ok === true && res.data.version === '1.1.0', res);
+ok('health tidak membocorkan secret', !JSON.stringify(res).includes(proxyKey) && !JSON.stringify(res).includes(scriptProperties.get('API_TOKEN_SECRET')));
+
+/* ------------------------------------------------------------------ */
+/* 2) login legacy & migrasi password                                  */
+/* ------------------------------------------------------------------ */
+
+console.log('\n== 2) login direct (tanpa proxyKey), migrasi plaintext -> hash ==');
+const usersRevBeforeLogin = revOf('users');
+res = login('admin@transaceh.id', LEGACY_ADMIN_PW);
+ok('login legacy tanpa proxyKey sukses', res.ok === true && typeof res.data.token === 'string' && res.data.token.length > 20, res);
+ok('response login tanpa field pass/hash', !('"pass"' in (res.data.user || {})) && !('passHash' in (res.data.user || {})), Object.keys(res.data.user || {}));
+ok('rev.users naik setelah migrasi password', revOf('users') === usersRevBeforeLogin + 1, { before: usersRevBeforeLogin, after: revOf('users') });
+const adminRowAfter = spread.getSheetByName('users').rows.find((r) => String(r[0]) === 'u_admin_1');
+ok('plaintext password hilang dari sheet setelah login', !String(adminRowAfter[2]).includes(LEGACY_ADMIN_PW));
+ok('passHash muncul di sheet setelah login', String(adminRowAfter[2]).includes('"passHash"'));
+let adminToken = res.data.token;
+let agenToken = '';
+let driverToken = '';
+let custToken = '';
+
+res = login('agen1@test.local', LEGACY_AGEN_PW);
+ok('login agen direct sukses', res.ok === true && res.data.user.role === 'agen', res);
+agenToken = res.data.token;
+
+res = login('driver1@test.local', LEGACY_DRIVER1_PW);
+ok('login pengemudi direct sukses', res.ok === true && res.data.user.role === 'pengemudi', res);
+driverToken = res.data.token;
+
+res = login('cust1@test.local', LEGACY_CUST1_PW);
+ok('login pelanggan direct sukses', res.ok === true && res.data.user.role === 'pelanggan', res);
+custToken = res.data.token;
+
+/* ------------------------------------------------------------------ */
+
+console.log('\n== 3) login salah, session, token ==');
+res = login('admin@transaceh.id', 'wrong-password-xyz');
+ok('login password salah ditolak', res.ok === false && res.error.code === 'UNAUTHORIZED', res);
+ok('message tidak menyebut field yang bocor', !JSON.stringify(res).includes('passHash'));
+
+res = login('admin@transaceh.id', LEGACY_ADMIN_PW);
+ok('login kedua (hash path) sukses', res.ok === true && res.data.token.length > 20, res);
+
+res = dispatch(bodyOf({}, { action: 'session', token: adminToken }));
+ok('session dengan token valid ok', res.ok === true && res.data.user.id === 'u_admin_1', res);
+
+const tampered = adminToken.slice(0, -4) + 'AAAA';
+res = dispatch(bodyOf({}, { action: 'session', token: tampered }));
+ok('session dengan token rusak ditolak', res.ok === false && res.error.code === 'UNAUTHORIZED', res);
+
+const expiredToken = S.apiIssueToken_({ id: 'u_admin_1' }, { token: scriptProperties.get('API_TOKEN_SECRET'), ttl: -3600 });
+res = dispatch(bodyOf({}, { action: 'session', token: expiredToken.token }));
+ok('session dengan token expired ditolak', res.ok === false && res.error.code === 'UNAUTHORIZED', res);
+
+res = dispatch(bodyOf({}, { action: 'session', proxyKey: 'salah-proxy-key-999', token: adminToken }));
+ok('mode direct: proxyKey salah tetap ditolak', res.ok === false && res.error.code === 'PROXY_FORBIDDEN', res);
+
+scriptProperties.set('REQUIRE_PROXY_KEY', 'true');
+res = dispatch(bodyOf({}, { action: 'session', token: adminToken }));
+ok('proxy diwajibkan saat flag true: tanpa key ditolak', res.ok === false && res.error.code === 'PROXY_FORBIDDEN', res);
+res = dispatch(bodyOf({}, { action: 'session', proxyKey, token: adminToken }));
+ok('proxy diwajibkan saat flag true: key benar diterima', res.ok === true, res);
+scriptProperties.set('REQUIRE_PROXY_KEY', 'false');
+
+/* ------------------------------------------------------------------ */
+
+console.log('\n== 4) bootstrap superadmin / publik serta proyeksi aman ==');
+res = dispatch(bodyOf({}, { action: 'bootstrap', token: adminToken }));
+ok('bootstrap superadmin mendapat semua koleksi', res.ok === true && Object.keys(res.data.records).length === seedKeys.length, Object.keys(res.data.records || {}));
+ok('bootstrap superadmin menyertakan users & audit', Object.keys(res.data.records).includes('users') && Object.keys(res.data.records).includes('audit'));
+ok('users pada bootstrap sudah disanitasi', !JSON.stringify(res.data.records.users).includes('"passHash"'));
+ok('revisions bootstrap numerik dan sinkron', res.data.revisions.users === revOf('users') && res.data.revisions.routes === revOf('routes'), res.data.revisions);
+
+const publicRes = dispatch(bodyOf({}, { action: 'bootstrap' }));
+const publicRecords = publicRes.data ? publicRes.data.records : {};
+const publicJson = JSON.stringify(publicRes);
+ok('bootstrap publik sukses tanpa token', publicRes.ok === true && publicRes.data.role === 'publik', publicRes);
+ok('bootstrap publik hanya koleksi publik', Object.keys(publicRecords).sort().join(',') === 'agencies,banners,reviews,routes,schedules,vehicles', Object.keys(publicRecords));
+ok('bootstrap publik tanpa users/bookings/notifications',
+  !Object.keys(publicRecords).includes('users') &&
+  !Object.keys(publicRecords).includes('bookings') &&
+  !Object.keys(publicRecords).includes('notifications'));
+ok('proyeksi agensi tanpa kyc/bank/rekening',
+  (publicRecords.agencies || []).every((a) => !Object.prototype.hasOwnProperty.call(a, 'kyc') && !Object.prototype.hasOwnProperty.call(a, 'bank') && !Object.prototype.hasOwnProperty.call(a, 'rekeningNo')),
+  publicRecords.agencies);
+ok('proyeksi kendaraan tanpa data pemilik/dokumen',
+  (publicRecords.vehicles || []).every((v) => !Object.prototype.hasOwnProperty.call(v, 'ownerNik') && !Object.prototype.hasOwnProperty.call(v, 'stnkPhoto') && !Object.prototype.hasOwnProperty.call(v, 'chassis')));
+ok('respons publik tidak memuat NIK/NPWP/rekening/nama pemilik',
+  !publicJson.includes(kyc1.nik) &&
+  !publicJson.includes(kyc1.npwp) &&
+  !publicJson.includes(kyc1.rekeningNo) &&
+  !publicJson.includes('fotoKtp') &&
+  !publicJson.includes('MHFXW41G2N2001001'),
+  publicJson.slice(0, 300));
+ok('publik hanya melihat agensi aktif', (publicRecords.agencies || []).every((a) => a.status === 'active') && (publicRecords.agencies || []).length === 2, (publicRecords.agencies || []).map((a) => a.id));
+ok('katalog publik mengecualikan armada/jadwal/ulasan agensi pending',
+  !idsOf(publicRecords.vehicles).includes('v_pending') &&
+  !idsOf(publicRecords.schedules).includes('s_pending') &&
+  !idsOf(publicRecords.reviews).includes('rv_pending'),
+  { vehicles: idsOf(publicRecords.vehicles), schedules: idsOf(publicRecords.schedules), reviews: idsOf(publicRecords.reviews) });
+const pubS1 = record(publicRecords, 'schedules', 's_1');
+ok('jadwal publik memuat takenSeats gabungan booking+blokir+nonaktif',
+  !!pubS1 && pubS1.takenSeats.join(',') === 'A1,A2,A3,A5', pubS1 && pubS1.takenSeats);
+ok('jadwal publik tidak membocorkan driverId/nama pengemudi',
+  (publicRecords.schedules || []).every((s) => !Object.prototype.hasOwnProperty.call(s, 'driverId') && !Object.prototype.hasOwnProperty.call(s, 'driverName')));
+
+/* ------------------------------------------------------------------ */
+/* 5) bootstrap peran: filter baris                                    */
+/* ------------------------------------------------------------------ */
+
+console.log('\n== 5) filter baris per peran ==');
+res = dispatch(bodyOf({}, { action: 'bootstrap', token: agenToken }));
+const agenRecords = res.data ? res.data.records : {};
+ok('bootstrap agen sukses', res.ok === true && res.data.role === 'agen', res);
+ok('agen melihat agensinya penuh (kyc ada)', !!record(agenRecords, 'agencies', 'ag_1') && !!record(agenRecords, 'agencies', 'ag_1').kyc);
+ok('agen tidak melihat kyc agensi lain', !!record(agenRecords, 'agencies', 'ag_2') && !record(agenRecords, 'agencies', 'ag_2').kyc);
+ok('agen hanya melihat jadwal agensinya + jadwal publik',
+  idsOf(agenRecords.schedules).join(',') === 's_1,s_2,s_3' &&
+  !!record(agenRecords, 'schedules', 's_1').driverId &&
+  !Object.prototype.hasOwnProperty.call(record(agenRecords, 'schedules', 's_3'), 'driverId'),
+  agenRecords.schedules);
+ok('agen melihat armada sendiri penuh, armada lain terproyeksi',
+  (agenRecords.vehicles || []).find((v) => v.id === 'v_1').ownerNik === kyc1.nik &&
+  !Object.prototype.hasOwnProperty.call((agenRecords.vehicles || []).find((v) => v.id === 'v_4'), 'ownerNik'));
+ok('agen tidak melihat armada/jadwal agensi pending', !idsOf(agenRecords.vehicles).includes('v_pending') && !idsOf(agenRecords.schedules).includes('s_pending'));
+ok('agen melihat ulasan publik yang sah', idsOf(agenRecords.reviews).join(',') === 'rv_1,rv_2', idsOf(agenRecords.reviews));
+ok('agen hanya melihat booking jadwalnya', idsOf(agenRecords.bookings).join(',') === 'b_1,b_2,b_3', idsOf(agenRecords.bookings));
+ok('agen hanya melihat payment booking-nya', idsOf(agenRecords.payments).join(',') === 'p_1,p_2,p_3', idsOf(agenRecords.payments));
+ok('agen hanya melihat ledger agensinya', idsOf(agenRecords.ledger).join(',') === 'l_1', idsOf(agenRecords.ledger));
+ok('agen hanya melihat route request agensinya', idsOf(agenRecords.routeRequests).join(',') === 'rr_1', idsOf(agenRecords.routeRequests));
+ok('agen hanya melihat maintenance agensinya', idsOf(agenRecords.maintenanceRequests).join(',') === 'm_1', idsOf(agenRecords.maintenanceRequests));
+ok('agen hanya melihat tiket terkait agensinya', idsOf(agenRecords.supportTickets).join(',') === 'st_2', idsOf(agenRecords.supportTickets));
+ok('agen hanya melihat notifikasi miliknya', idsOf(agenRecords.notifications).join(',') === 'n_3,n_all', idsOf(agenRecords.notifications));
+ok('agen hanya melihat user agensinya', idsOf(agenRecords.users).join(',') === 'u_agen_1,u_driver_1', idsOf(agenRecords.users));
+ok('agen hanya melihat audit miliknya', idsOf(agenRecords.audit).join(',') === 'a_3', idsOf(agenRecords.audit));
+
+res = dispatch(bodyOf({}, { action: 'bootstrap', token: driverToken }));
+const driverRecords = res.data ? res.data.records : {};
+ok('bootstrap pengemudi sukses', res.ok === true && res.data.role === 'pengemudi', res);
+ok('pengemudi hanya melihat data driver-nya + rekan untuk manifest', idsOf(driverRecords.drivers).join(',') === 'd_1,d_2', idsOf(driverRecords.drivers));
+ok('data rekan pengemudi tidak memuat NIK/bank/SIM', (() => {
+  const mate = (driverRecords.drivers || []).find((d) => d.id === 'd_2');
+  return !!mate && !Object.prototype.hasOwnProperty.call(mate, 'nik') &&
+    !Object.prototype.hasOwnProperty.call(mate, 'bank') &&
+    !Object.prototype.hasOwnProperty.call(mate, 'simPhoto');
+})());
+ok('pengemudi hanya melihat jadwal yang ditugaskan', idsOf(driverRecords.schedules).join(',') === 's_1,s_2', idsOf(driverRecords.schedules));
+ok('pengemudi melihat booking jadwalnya saja', idsOf(driverRecords.bookings).join(',') === 'b_1,b_2,b_3', idsOf(driverRecords.bookings));
+ok('pengemudi melihat kendaraan jadwalnya saja', idsOf(driverRecords.vehicles).join(',') === 'v_1,v_2', idsOf(driverRecords.vehicles));
+ok('pengemudi melihat maintenance dirinya', idsOf(driverRecords.maintenanceRequests).join(',') === 'm_1', idsOf(driverRecords.maintenanceRequests));
+ok('pengemudi melihat notifikasi miliknya', idsOf(driverRecords.notifications).join(',') === 'n_4,n_all', idsOf(driverRecords.notifications));
+ok('pengemudi melihat user dirinya + agen induk', idsOf(driverRecords.users).join(',') === 'u_agen_1,u_driver_1', idsOf(driverRecords.users));
+ok('pengemudi tidak menerima ulasan agensi pending', !idsOf(driverRecords.reviews).includes('rv_pending'));
+ok('pengemudi tidak menerima kyc agensi', !JSON.stringify(driverRecords.agencies || []).includes('"kyc"'));
+
+res = dispatch(bodyOf({}, { action: 'bootstrap', token: custToken }));
+const custRecords = res.data ? res.data.records : {};
+ok('bootstrap pelanggan sukses', res.ok === true && res.data.role === 'pelanggan', res);
+ok('pelanggan hanya melihat booking miliknya', idsOf(custRecords.bookings).join(',') === 'b_1,b_3', idsOf(custRecords.bookings));
+ok('pelanggan hanya melihat payment miliknya', idsOf(custRecords.payments).join(',') === 'p_1,p_3', idsOf(custRecords.payments));
+ok('pelanggan hanya melihat notifikasi miliknya', idsOf(custRecords.notifications).join(',') === 'n_1,n_all', idsOf(custRecords.notifications));
+ok('pelanggan hanya melihat tiket miliknya', idsOf(custRecords.supportTickets).join(',') === 'st_1', idsOf(custRecords.supportTickets));
+ok('pelanggan hanya melihat user dirinya', idsOf(custRecords.users).join(',') === 'u_cust_1', idsOf(custRecords.users));
+ok('pelanggan hanya melihat audit miliknya', idsOf(custRecords.audit).join(',') === 'a_1', idsOf(custRecords.audit));
+ok('pelanggan menerima voucher untuk checkout', (custRecords.vouchers || []).some((v) => v.code === 'HEMAT20'));
+ok('pelanggan tidak melihat katalog agensi pending', !idsOf(custRecords.vehicles).includes('v_pending') && !idsOf(custRecords.schedules).includes('s_pending') && !idsOf(custRecords.reviews).includes('rv_pending'));
+ok('pelanggan tidak menerima data agensi sensitif', !JSON.stringify(custRecords.agencies || []).includes('"kyc"'));
+ok('pelanggan melihat takenSeats jadwal', !!record(custRecords, 'schedules', 's_1') && record(custRecords, 'schedules', 's_1').takenSeats.join(',') === 'A1,A2,A3,A5');
+
+/* ------------------------------------------------------------------ */
+/* 6) commit (hanya superadmin)                                        */
+/* ------------------------------------------------------------------ */
+
+console.log('\n== 6) commit upsert / delete / konflik revisi / role ==');
+const routeBook = { id: 'r_1', name: 'Banda Aceh - Takengon', origin: 'Banda Aceh', destination: 'Takengon' };
+const routeBase = revOf('routes');
+const upsert = { changes: { routes: { baseRev: routeBase, upserts: [routeBook], deletes: [] } } };
+res = dispatch(bodyOf(upsert, { action: 'commit', token: adminToken }));
+ok('commit superadmin upsert route baru sukses', res.ok === true && res.data.revisions.routes === routeBase + 1, res);
+ok('sheet routes memuat route baru', spread.getSheetByName('routes').rows.some((r) => String(r[0]).trim() === 'r_1'));
+
+res = dispatch(bodyOf(upsert, { action: 'commit', token: adminToken }));
+ok('commit dengan revisi basi ditolak', res.ok === false && res.error.code === 'REV_CONFLICT', res);
+
+res = dispatch(bodyOf(upsert, { action: 'commit', token: agenToken }));
+ok('commit oleh agen ditolak (FORBIDDEN)', res.ok === false && res.error.code === 'FORBIDDEN', res);
+
+res = dispatch(bodyOf({ changes: { buku: { baseRev: 1, upserts: [], deletes: [] } } }, { action: 'commit', token: adminToken }));
+ok('commit koleksi tidak dikenal ditolak', res.ok === false && res.error.code === 'VALIDATION', res);
+
+res = dispatch(bodyOf({ changes: {} }, { action: 'commit', token: adminToken }));
+ok('commit changes kosong ditolak', res.ok === false && res.error.code === 'VALIDATION', res);
+
+const emptyTargetBase = { routes: revOf('routes'), banners: revOf('banners') };
+res = dispatch(bodyOf({
+  changes: {
+    routes: { baseRev: emptyTargetBase.routes, upserts: [{ id: 'rt_noop', from: 'X', to: 'Y' }], deletes: [] },
+    banners: { baseRev: emptyTargetBase.banners, upserts: [], deletes: [] }
+  }
+}, { action: 'commit', token: adminToken }));
+ok('commit menolak koleksi tanpa perubahan sebelum menulis', res.ok === false && res.error.code === 'VALIDATION', res);
+ok('koleksi pertama tidak tertulis saat validasi batch gagal', !spread.getSheetByName('routes').rows.some((r) => String(r[0]).trim() === 'rt_noop'));
+
+const routeRevNow = revOf('routes');
+res = dispatch(bodyOf({ changes: { routes: { baseRev: routeRevNow, upserts: [{ name: 'tanpa-id' }], deletes: [] } } }, { action: 'commit', token: adminToken }));
+ok('commit record tanpa id ditolak', res.ok === false && res.error.code === 'VALIDATION', res);
+
+res = dispatch(bodyOf({ changes: { routes: { baseRev: routeRevNow, upserts: [{ id: 'r_dup', name: 'a' }, { id: 'r_dup', name: 'b' }], deletes: [] } } }, { action: 'commit', token: adminToken }));
+ok('commit id duplikat pada request ditolak', res.ok === false && res.error.code === 'VALIDATION', res);
+
+res = dispatch(bodyOf({ changes: { routes: { baseRev: routeRevNow, upserts: [{ id: 'r_secret', pass: 'guna' }], deletes: [] } } }, { action: 'commit', token: adminToken }));
+ok('commit record berisi field rahasia ditolak', res.ok === false && res.error.code === 'VALIDATION', res);
+
+const delRes = dispatch(bodyOf({ changes: { routes: { baseRev: routeRevNow, upserts: [], deletes: ['r_1'] } } }, { action: 'commit', token: adminToken }));
+ok('commit delete route sukses', delRes.ok === true && delRes.data.revisions.routes === routeRevNow + 1, delRes);
+ok('sheet routes tidak lagi memuat r_1', !spread.getSheetByName('routes').rows.some((r) => String(r[0]).trim() === 'r_1'));
+
+const selfDelRes = dispatch(bodyOf({ changes: { users: { baseRev: revOf('users'), upserts: [], deletes: ['u_admin_1'] } } }, { action: 'commit', token: adminToken }));
+ok('commit menolak superadmin menghapus akun sendiri', selfDelRes.ok === false && selfDelRes.error.code === 'VALIDATION', selfDelRes);
+
+const multiBase = { routes: revOf('routes'), banners: revOf('banners') };
+const multiRes = dispatch(bodyOf({
+  changes: {
+    routes: { baseRev: multiBase.routes, upserts: [{ id: 'rt_3', from: 'Calang', to: 'Meulaboh' }], deletes: [] },
+    banners: { baseRev: multiBase.banners, upserts: [{ id: 'bnr_2', title: 'Promo Baru', active: true }], deletes: [] }
+  }
+}, { action: 'commit', token: adminToken }));
+ok('commit multi-koleksi menaikkan kedua revisi',
+  multiRes.ok === true &&
+  multiRes.data.revisions.routes === multiBase.routes + 1 &&
+  multiRes.data.revisions.banners === multiBase.banners + 1, multiRes);
+
+const usersBase = revOf('users');
+const profileUpdate = { id: 'u_cust_1', name: 'Rina Amelia Updated', email: 'cust1@test.local', phone: '0812000005', role: 'pelanggan', status: 'active', favorites: [] };
+res = dispatch(bodyOf({ changes: { users: { baseRev: usersBase, upserts: [profileUpdate], deletes: [] } } }, { action: 'commit', token: adminToken }));
+ok('commit profil user (tanpa field password) sukses', res.ok === true && res.data.revisions.users === usersBase + 1, res);
+res = login('cust1@test.local', LEGACY_CUST1_PW);
+ok('commit profil user tidak menghapus hash password', res.ok === true, res);
+const cust1RowAfter = spread.getSheetByName('users').rows.find((r) => String(r[0]) === 'u_cust_1');
+ok('hash password user tetap ada setelah commit profil', String(cust1RowAfter?.[2]).includes('"passHash"') && String(cust1RowAfter?.[2]).includes('Rina Amelia Updated'));
+
+/* ------------------------------------------------------------------ */
+/* 7) changePassword                                                   */
+/* ------------------------------------------------------------------ */
+
+console.log('\n== 7) change password ==');
+const oldAdminToken = adminToken;
+res = dispatch(bodyOf({ currentPassword: LEGACY_ADMIN_PW, newPassword: NEW_ADMIN_PW }, { action: 'changePassword', token: adminToken }));
+ok('ganti password sukses', res.ok === true && res.data.user.id === 'u_admin_1', res);
+
+res = dispatch(bodyOf({}, { action: 'session', token: oldAdminToken }));
+ok('token lama dicabut setelah ganti password', res.ok === false && res.error.code === 'UNAUTHORIZED', res);
+
+res = login('admin@transaceh.id', NEW_ADMIN_PW);
+ok('login dengan password baru sukses', res.ok === true, res);
+adminToken = res.data.token;
+res = login('admin@transaceh.id', LEGACY_ADMIN_PW);
+ok('login dengan password lama ditolak', res.ok === false && res.error.code === 'UNAUTHORIZED', res);
+
+res = dispatch(bodyOf({ currentPassword: 'wrong-current', newPassword: 'another-pw-again' }, { action: 'changePassword', token: adminToken }));
+ok('ganti password dengan password lama salah ditolak', res.ok === false && res.error.code === 'UNAUTHORIZED', res);
+
+res = dispatch(bodyOf({ currentPassword: NEW_ADMIN_PW, newPassword: NEW_ADMIN_PW }, { action: 'changePassword', token: adminToken }));
+ok('ganti password dengan nilai sama ditolak', res.ok === false && res.error.code === 'VALIDATION', res);
+
+res = dispatch(bodyOf({ currentPassword: NEW_ADMIN_PW, newPassword: 'pendek' }, { action: 'changePassword', token: adminToken }));
+ok('password baru terlalu pendek ditolak', res.ok === false && res.error.code === 'VALIDATION', res);
+
+/* ------------------------------------------------------------------ */
+/* 8) register                                                         */
+/* ------------------------------------------------------------------ */
+
+console.log('\n== 8) register pelanggan / agen ==');
+res = dispatch(bodyOf({ name: 'Pelanggan Baru', email: 'newcust@test.local', phone: '081255550001', password: REG_PAX_PW, role: 'pelanggan' }, { action: 'register' }));
+ok('register pelanggan sukses + token', res.ok === true && res.data.user.role === 'pelanggan' && typeof res.data.token === 'string' && res.data.pending === false, res);
+const newCustId = res.ok ? res.data.user.id : '';
+ok('register pelanggan menyimpan hash, bukan plaintext', !String(spread.getSheetByName('users').rows.find((r) => String(r[0]) === newCustId)?.[2]).includes(REG_PAX_PW));
+
+res = dispatch(bodyOf({ name: 'Duplikat', email: 'newcust@test.local', phone: '081255550002', password: 'duplikat-pw-123', role: 'pelanggan' }, { action: 'register' }));
+ok('register email duplikat ditolak', res.ok === false && res.error.code === 'VALIDATION', res);
+
+res = dispatch(bodyOf({ name: 'Pendek', email: 'short@test.local', phone: '081255550003', password: 'pendek', role: 'pelanggan' }, { action: 'register' }));
+ok('register password < 8 ditolak', res.ok === false && res.error.code === 'VALIDATION', res);
+
+res = dispatch(bodyOf({ name: 'HP Salah', email: 'badphone@test.local', phone: '123', password: 'badphone-pw-123', role: 'pelanggan' }, { action: 'register' }));
+ok('register no HP tidak valid ditolak', res.ok === false && res.error.code === 'VALIDATION', res);
+
+res = dispatch(bodyOf({ name: 'Agen Baru', email: 'newagen@test.local', phone: '081255550004', password: REG_AGEN_PW, role: 'agen', agencyName: 'Travel Harapan', agencyAddress: 'Jl. Harapan No.2' }, { action: 'register' }));
+ok('register agen sukses dan pending tanpa token', res.ok === true && res.data.pending === true && res.data.user.status === 'pending' && !res.data.token, res);
+const newAgencyId = res.ok ? res.data.user.agencyId : '';
+ok('register agen membuat agensi pending', !!spread.getSheetByName('agencies').rows.find((r) => String(r[0]) === newAgencyId && String(r[2]).includes('"status":"pending"')));
+res = login('newagen@test.local', REG_AGEN_PW);
+ok('login agen pending ditolak', res.ok === false && res.error.code === 'ACCOUNT_BLOCKED', res);
+
+res = dispatch(bodyOf({ name: 'Super', email: 'superbaru@test.local', phone: '081255550005', password: 'superbaru-pw-123', role: 'superadmin' }, { action: 'register' }));
+ok('register role superadmin ditolak', res.ok === false && res.error.code === 'VALIDATION', res);
+
+/* ------------------------------------------------------------------ */
+/* 9) adminCreateUser / adminSetPassword                               */
+/* ------------------------------------------------------------------ */
+
+console.log('\n== 9) aksi admin ==');
+res = dispatch(bodyOf({ name: 'Agen Baru', email: 'agenbaru@test.local', phone: '081255560001', password: AGEN_NEW_PW, role: 'agen', agencyId: 'ag_new', status: 'active' }, { action: 'adminCreateUser', token: adminToken }));
+ok('admin membuat akun agen (status ikut agensi pending)', res.ok === true && res.data.user.role === 'agen' && res.data.user.status === 'pending' && res.data.user.agencyId === 'ag_new', res);
+
+res = login('agenbaru@test.local', AGEN_NEW_PW);
+ok('akun agen pending tidak bisa login', res.ok === false && res.error.code === 'ACCOUNT_BLOCKED', res);
+
+res = dispatch(bodyOf({ name: 'Agen Kedua', email: 'agenkedua@test.local', phone: '081255560002', password: 'agenkedua-pw-123', role: 'agen', agencyId: 'ag_new', status: 'active' }, { action: 'adminCreateUser', token: adminToken }));
+ok('satu agensi hanya boleh satu akun agen', res.ok === false && res.error.code === 'VALIDATION', res);
+
+res = dispatch(bodyOf({ name: 'Agen Barakah 2', email: 'agenbarakah2@test.local', phone: '081255560003', password: 'agenbarakah2-pw-123', role: 'agen', agencyId: 'ag_1', status: 'active' }, { action: 'adminCreateUser', token: adminToken }));
+ok('agensi yang sudah punya agen ditolak', res.ok === false && res.error.code === 'VALIDATION', res);
+
+res = dispatch(bodyOf({ name: 'Pengemudi Baru', email: 'driver.baru@test.local', phone: '081255560004', password: DRIVER_NEW_PW, role: 'pengemudi', driverId: 'd_new', status: 'active' }, { action: 'adminCreateUser', token: adminToken }));
+ok('admin membuat akun pengemudi', res.ok === true && res.data.user.role === 'pengemudi' && res.data.user.agencyId === 'ag_2', res);
+const newDriverId = res.ok ? res.data.user.id : '';
+const dNewRow = spread.getSheetByName('drivers').rows.find((r) => String(r[0]) === 'd_new');
+ok('akun pengemudi menautkan email ke data driver', String(dNewRow?.[2]).includes('driver.baru@test.local'));
+res = login('driver.baru@test.local', DRIVER_NEW_PW);
+ok('pengemudi baru bisa login', res.ok === true && res.data.user.id === newDriverId, res);
+
+res = dispatch(bodyOf({ name: 'Mismatch', email: 'mismatch@test.local', phone: '081255560005', password: 'mismatch-pw-123', role: 'pengemudi', driverId: 'd_1', status: 'active' }, { action: 'adminCreateUser', token: adminToken }));
+ok('email pengemudi harus sama dengan data driver', res.ok === false && res.error.code === 'VALIDATION', res);
+
+res = dispatch(bodyOf({ name: 'Admin Palsu', email: 'adminpalsu@test.local', phone: '081255560006', password: 'adminpalsu-pw-123', role: 'superadmin' }, { action: 'adminCreateUser', token: adminToken }));
+ok('adminCreateUser menolak role superadmin', res.ok === false && res.error.code === 'VALIDATION', res);
+
+res = dispatch(bodyOf({ name: 'Duplikat Admin', email: 'admin@transaceh.id', phone: '081255560007', password: 'duplikatadmin-pw-123', role: 'pelanggan' }, { action: 'adminCreateUser', token: adminToken }));
+ok('adminCreateUser menolak email duplikat', res.ok === false && res.error.code === 'VALIDATION', res);
+
+res = dispatch(bodyOf({ name: 'Ilegal', email: 'ilegal@test.local', phone: '081255560008', password: 'ilegal-pw-123', role: 'agen', agencyId: 'ag_new' }, { action: 'adminCreateUser', token: agenToken }));
+ok('adminCreateUser oleh agen ditolak', res.ok === false && res.error.code === 'FORBIDDEN', res);
+
+res = login('cust2@test.local', LEGACY_CUST2_PW);
+ok('login cust2 sebelum reset sukses', res.ok === true, res);
+const oldCust2Token = res.ok ? res.data.token : '';
+
+res = dispatch(bodyOf({ userId: 'u_cust_2', newPassword: NEW_CUST2_PW }, { action: 'adminSetPassword', token: adminToken }));
+ok('adminSetPassword sukses', res.ok === true && res.data.user.id === 'u_cust_2', res);
+res = dispatch(bodyOf({}, { action: 'session', token: oldCust2Token }));
+ok('token lama dicabut setelah admin reset password', res.ok === false && res.error.code === 'UNAUTHORIZED', res);
+res = login('cust2@test.local', NEW_CUST2_PW);
+ok('akun reset bisa login dengan password baru', res.ok === true, res);
+res = login('cust2@test.local', LEGACY_CUST2_PW);
+ok('password lama akun reset tidak berlaku', res.ok === false && res.error.code === 'UNAUTHORIZED', res);
+
+res = dispatch(bodyOf({ userId: 'u_cust_2', newPassword: 'pendek' }, { action: 'adminSetPassword', token: adminToken }));
+ok('adminSetPassword menolak password pendek', res.ok === false && res.error.code === 'VALIDATION', res);
+res = dispatch(bodyOf({ userId: 'u_tidak_ada', newPassword: 'tidakada-pw-123' }, { action: 'adminSetPassword', token: adminToken }));
+ok('adminSetPassword user tidak ada -> NOT_FOUND', res.ok === false && res.error.code === 'NOT_FOUND', res);
+res = dispatch(bodyOf({ userId: 'u_cust_2', newPassword: 'olehagen-pw-123' }, { action: 'adminSetPassword', token: agenToken }));
+ok('adminSetPassword oleh agen ditolak', res.ok === false && res.error.code === 'FORBIDDEN', res);
+
+/* ------------------------------------------------------------------ */
+/* 10) throttle login & changePassword                                 */
+/* ------------------------------------------------------------------ */
+
+console.log('\n== 10) throttling ==');
+clearRateLimits();
+res = dispatch(bodyOf({ name: 'Throttle User', email: 'throttle@test.local', phone: '081255570001', password: THROTTLE_PW, role: 'pelanggan' }, { action: 'register' }));
+ok('register akun uji throttle', res.ok === true, res);
+for (let i = 0; i < 5; i++) {
+  res = login('throttle@test.local', 'salah-terus-' + i);
+  ok('login gagal #' + (i + 1) + ' tetap UNAUTHORIZED', res.ok === false && res.error.code === 'UNAUTHORIZED', res);
+}
+res = login('throttle@test.local', THROTTLE_PW);
+ok('setelah 5 gagal, login benar diblokir sementara', res.ok === false && res.error.code === 'RATE_LIMITED', res);
+clearRateLimits();
+res = login('throttle@test.local', THROTTLE_PW);
+ok('setelah cache dibersihkan, login benar sukses', res.ok === true, res);
+
+clearRateLimits();
+res = dispatch(bodyOf({ name: 'Chpw User', email: 'chpw@test.local', phone: '081255570002', password: CHPW_PW, role: 'pelanggan' }, { action: 'register' }));
+ok('register akun uji ganti password', res.ok === true && typeof res.data.token === 'string', res);
+const chpwToken = res.ok ? res.data.token : '';
+for (let i = 0; i < 5; i++) {
+  res = dispatch(bodyOf({ currentPassword: 'salah-lama-' + i, newPassword: 'x-password-123' }, { action: 'changePassword', token: chpwToken }));
+  ok('ganti password gagal #' + (i + 1) + ' UNAUTHORIZED', res.ok === false && res.error.code === 'UNAUTHORIZED', res);
+}
+res = dispatch(bodyOf({ currentPassword: CHPW_PW, newPassword: 'x-password-456' }, { action: 'changePassword', token: chpwToken }));
+ok('setelah 5 gagal, ganti password diblokir sementara', res.ok === false && res.error.code === 'RATE_LIMITED', res);
+clearRateLimits();
+res = dispatch(bodyOf({ currentPassword: CHPW_PW, newPassword: CHPW_FINAL_PW }, { action: 'changePassword', token: chpwToken }));
+ok('setelah cache dibersihkan, ganti password sukses', res.ok === true, res);
+
+/* ------------------------------------------------------------------ */
+/* 11) doGet / doPost (HTTP layer)                                     */
+/* ------------------------------------------------------------------ */
+
+console.log('\n== 11) doGet / doPost (HTTP layer) ==');
+const healthOut = S.doGet({});
+const healthObj = JSON.parse(healthOut.text);
+ok('doGet health ok', healthObj.ok === true && healthObj.data.version === '1.1.0', healthObj);
+
+const postOut = S.doPost({ postData: { contents: JSON.stringify({ action: 'login', proxyKey: 'proxy-salah-xyz', email: 'admin@transaceh.id', password: 'andai-sah' }) } });
+const postObj = JSON.parse(postOut.text);
+responses.push(postOut.text);
+ok('doPost dengan proxyKey salah memberi PROXY_FORBIDDEN', postObj.ok === false && postObj.error.code === 'PROXY_FORBIDDEN', postObj);
+
+const postLogin = S.doPost({ postData: { contents: JSON.stringify({ action: 'login', email: 'throttle@test.local', password: THROTTLE_PW }) } });
+const postLoginObj = JSON.parse(postLogin.text);
+responses.push(postLogin.text);
+ok('doPost direct (tanpa proxyKey) login sukses', postLoginObj.ok === true && typeof postLoginObj.data.token === 'string', postLoginObj);
+
+const postBad = S.doPost({ postData: { contents: '{bukan-json' } });
+const postBadObj = JSON.parse(postBad.text);
+responses.push(postBad.text);
+ok('doPost body bukan JSON -> VALIDATION', postBadObj.ok === false && postBadObj.error.code === 'VALIDATION', postBadObj);
+
+/* ------------------------------------------------------------------ */
+/* 12) kebocoran secret / plaintext                                    */
+/* ------------------------------------------------------------------ */
+
+console.log('\n== 12) kebocoran secret / kehadiran plaintext ==');
+const allPasswords = [
+  LEGACY_ADMIN_PW, LEGACY_AGEN_PW, LEGACY_AGEN2_PW, LEGACY_DRIVER1_PW,
+  LEGACY_CUST1_PW, LEGACY_CUST2_PW, NEW_ADMIN_PW, REG_PAX_PW, REG_AGEN_PW,
+  THROTTLE_PW, CHPW_PW, NEW_CUST2_PW, CHPW_FINAL_PW, DRIVER_NEW_PW, AGEN_NEW_PW
+];
+const forbiddenSubstrings = [
+  proxyKey,
+  scriptProperties.get('API_TOKEN_SECRET'),
+  scriptProperties.get('PASSWORD_PEPPER'),
+  ...allPasswords
+];
+let leakFound = false;
+responses.forEach((text, index) => {
+  if (forbiddenSubstrings.some((needle) => needle && text.includes(needle))) {
+    leakFound = true;
+    console.log('  LEAK di response #' + index + ':', text.slice(0, 200));
+  }
+});
+ok('tidak ada secret/plaintext password di response', !leakFound);
+
+const logLeak = logs.some((line) => forbiddenSubstrings.some((needle) => needle && line.includes(needle)));
+ok('tidak ada secret/password di Logger.log', !logLeak, logs);
+ok('tidak ada passHash dkk di response manapun',
+  !responses.some((text) => text.includes('"passHash"') || text.includes('"passSalt"') || text.includes('"passIter"') || text.includes('"passAlgo"')));
+
+const migratedIds = ['u_admin_1', 'u_agen_1', 'u_driver_1', 'u_cust_1', 'u_cust_2'];
+const migratedRows = spread.getSheetByName('users').rows.filter((r) => migratedIds.includes(String(r[0])));
+ok('akun yang sudah login/reset memakai hash', migratedRows.length === migratedIds.length &&
+  migratedRows.every((r) => String(r[2]).includes('"passHash"') &&
+    !allPasswords.some((pw) => String(r[2]).includes(pw))), migratedRows);
+ok('akun baru (register/admin) memakai hash', !String(spread.getSheetByName('users').rows.find((r) => String(r[0]) === newCustId)?.[2]).includes(REG_PAX_PW) &&
+  String(spread.getSheetByName('users').rows.find((r) => String(r[0]) === newCustId)?.[2]).includes('"passHash"'));
+
+const publicAndRoleJson = JSON.stringify(publicRecords) +
+  JSON.stringify(custRecords.agencies || []) +
+  JSON.stringify(driverRecords.agencies || []);
+ok('proyeksi publik tidak memuat NIK/NPWP/foto KTP/rekening',
+  !publicAndRoleJson.includes(kyc1.nik) &&
+  !publicAndRoleJson.includes(kyc2.nik) &&
+  !publicAndRoleJson.includes(kyc1.npwp) &&
+  !publicAndRoleJson.includes('fotoKtp') &&
+  !publicAndRoleJson.includes(kyc1.rekeningNo),
+  'periksa kembali proyeksi');
+
+/* ------------------------------------------------------------------ */
+
+console.log('\n== Ringkasan ==');
+console.log('PASS: ' + passed + ', FAIL: ' + failed);
+process.exit(failed === 0 ? 0 : 1);

@@ -12,6 +12,7 @@ source:
   - transaceh-react/src/lib/db.js
   - transaceh-react/src/lib/seed.js
   - transaceh-react/src/store/AppContext.jsx
+  - google-apps-script/seed.gs
 ---
 
 # Technical Debt dan Jebakan
@@ -25,6 +26,7 @@ source:
 - Guard hanya di client.
 - Data bisa diubah lewat DevTools.
 - Tidak aman untuk produksi.
+- Seed Google Sheets belum menghilangkan debt ini: belum terhubung ke aplikasi, password admin masih ditulis plaintext, dan belum ada API/otorisasi. Lihat [[Database Google Sheets]].
 
 ### 2. Tidak ada transaksi
 

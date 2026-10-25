@@ -6,11 +6,12 @@ tags:
   - type/reference
   - area/referensi
 status: aktif
-updated: 2026-10-24
+updated: 2026-10-25
 source:
   - transaceh-react/package.json
   - .github/workflows/deploy-pages.yml
   - transaceh-react/src/lib/seed.js
+  - google-apps-script/README.md
 ---
 
 # Quick Reference
@@ -51,6 +52,17 @@ location.reload();
 ```
 
 Data seed akan dibuat ulang saat halaman dimuat. Rute, jadwal, dan booking tetap kosong; siapkan lewat alur agen → admin.
+
+## Seed database Google Sheets
+
+Backend Sheets masih tahap seed dan belum terhubung ke aplikasi.
+
+1. Buka spreadsheet kosong → **Extensions → Apps Script**.
+2. Pasang `google-apps-script/seed.gs` dan `google-apps-script/appsscript.json`.
+3. Isi Script Properties: `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PHONE`, `ADMIN_PASSWORD`.
+4. Jalankan `seedProduction()`, lalu `validateDatabase()`.
+
+Jangan deploy Web App atau memasukkan data pelanggan nyata sebelum probe CORS dan autentikasi frontend selesai. Detail di [[Database Google Sheets]].
 
 ## File yang paling sering dibuka
 

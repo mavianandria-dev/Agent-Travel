@@ -6,13 +6,13 @@ tags:
   - type/moc
   - area/navigasi
 status: aktif
-updated: 2026-10-24
+updated: 2026-10-25
 source: []
 ---
 
 # TransAceh — Memori Codebase
 
-Vault ini membantu memahami **TransAceh**, aplikasi travel antar kota berbasis React + Vite dengan data simulasi di `localStorage`.
+Vault ini membantu memahami **TransAceh**, aplikasi travel antar kota berbasis React + Vite dengan data simulasi di `localStorage`. Backend Google Sheets sudah melewati tahap seed (tervalidasi) dan `code.gs` API mode direct sudah ditulis serta lulus 155 asersi mock di lokal; frontend masih memakai `localStorage` dan belum terhubung ke spreadsheet. Probe CORS dari browser belum dilakukan.
 
 > [!info] Mulai dari sini
 > Jika baru pertama kali, baca [[Cara Pakai Vault]] lalu ikuti [[Peta Belajar 7 Hari]].
@@ -31,6 +31,7 @@ Vault ini membantu memahami **TransAceh**, aplikasi travel antar kota berbasis R
 - [[Produk TransAceh]] — apa yang dibangun dan untuk siapa.
 - [[Tech Stack]] — teknologi dan batasannya.
 - [[Peta Repository]] — folder dan file penting.
+- [[Database Google Sheets]] — seed produksi dan rencana migrasi data.
 - [[Peran dan Hak Akses]] — empat peran dan guard akses.
 - [[Quick Reference]] — perintah, akun demo, dan reset data.
 - [[Legacy index.html vs React]] — hubungan versi lama dan versi aktif.
@@ -56,6 +57,8 @@ Vault ini membantu memahami **TransAceh**, aplikasi travel antar kota berbasis R
 - [[2026-10-23 - Sesi 1]] — sesi pembuatan vault dan pemetaan awal.
 - [[2026-10-24 - Sesi 2]] — validasi tautan dan koreksi perilaku KYC, boarding, settlement.
 - [[2026-10-24 - Sesi 3]] — maintenance armada berbasis tanggal, refund/pindah, dan guard UI.
+- [[2026-10-24 - Sesi 4]] — seed produksi minimal Google Sheets dan validasi database.
+- [[2026-10-25 - Sesi 5]] — backend API `code.gs`, autentikasi hash, commit revisi, dan harness uji lokal.
 - [[Pertanyaan Terbuka]] — hal yang masih perlu diverifikasi.
 - [[Jurnal Belajar]] — indeks sesi belajar berikutnya.
 

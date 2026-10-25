@@ -11,12 +11,16 @@ source:
   - transaceh-react/src/lib/db.js
   - transaceh-react/src/lib/seed.js
   - transaceh-react/src/lib/domain.js
+  - google-apps-script/seed.gs
 ---
 
 # Data Model — MOC
 
-Semua data aplikasi disimpan di `localStorage` dengan prefix `at_`.
+Semua data aplikasi **saat ini** disimpan di `localStorage` dengan prefix `at_`.
 Tidak ada database relasional; relasi antar koleksi memakai **ID atau email** di dalam objek.
+
+> [!info] Google Sheets belum aktif
+> Skema tab untuk Google Sheets sudah disiapkan di `google-apps-script/seed.gs`, tetapi aplikasi belum membacanya. Tabel di bawah tetap menggambarkan `localStorage`. Lihat [[Database Google Sheets]].
 
 ## Koleksi
 
@@ -54,6 +58,7 @@ Tidak ada database relasional; relasi antar koleksi memakai **ID atau email** di
 - [[Data - vouchers, reviews, banners]]
 - [[Data - notifications, audit, settings]]
 - [[Data - supportTickets]]
+- [[Database Google Sheets]] — skema seed remote (belum aktif)
 
 ## Aturan penting
 

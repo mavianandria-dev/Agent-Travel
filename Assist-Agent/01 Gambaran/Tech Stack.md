@@ -6,11 +6,12 @@ tags:
   - type/note
   - area/arsitektur
 status: aktif
-updated: 2026-10-23
+updated: 2026-10-25
 source:
   - transaceh-react/package.json
   - transaceh-react/vite.config.js
   - transaceh-react/worker/wrangler.toml
+  - google-apps-script/seed.gs
 ---
 
 # Tech Stack
@@ -35,13 +36,14 @@ source:
 | Oxlint | Lint |
 | Wrangler | Cloudflare Worker (AI proxy) |
 | GitHub Actions | Build & deploy GitHub Pages |
+| Google Apps Script | Seed database Google Sheets (belum terhubung ke app) |
 
 ## Yang **tidak** dipakai
 
 - **React Router** — navigasi memakai state `view` di `AppContext`.
 - **Redux/Zustand** — state global memakai React Context.
 - **TypeScript** — seluruh kode aplikasi `.js`/`.jsx`.
-- **Backend API** — data di `localStorage`; backend hanya Worker AI.
+- **Backend API aplikasi** — data aktif di `localStorage`; backend yang berjalan hanya Worker AI. Google Apps Script baru dipakai untuk seed, belum menjadi API aplikasi.
 - **Framework test** — belum ada unit/integration test; validasi lewat lint dan manual.
 
 ## Arsitektur singkat
@@ -62,11 +64,17 @@ flowchart LR
 - Semua logika bisnis berjalan di client, sehingga mudah dipelajari tetapi tidak aman untuk produksi.
 - AI tetap aman karena API key hanya di Worker.
 
+## Rencana Google Sheets
+
+Backend Google Sheets disiapkan bertahap: seed produksi minimal, lalu `code.gs` mode direct (155 asersi lokal), lalu adapter cache di frontend. Frontend masih client-only sampai Fase B–D; probe CORS belum dilakukan. Lihat [[Database Google Sheets]].
+
 ## Sumber
 
 - `transaceh-react/package.json`
 - `transaceh-react/vite.config.js`
 - `transaceh-react/worker/wrangler.toml`
+- `google-apps-script/seed.gs`
+- `google-apps-script/code.gs`
 - `docs/AI_SETUP.md`
 
 Lihat juga [[Build dan Deploy]] dan [[Technical Debt dan Jebakan]].

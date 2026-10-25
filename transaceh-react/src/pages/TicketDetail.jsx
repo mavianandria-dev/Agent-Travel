@@ -147,7 +147,7 @@ export default function TicketDetail({ bid }) {
             </div>
             <div className="text-[13px] font-semibold space-y-1.5">
               <div><span className="text-slate-400">Tanggal</span><br /><b>{fmtDate(s.date)} • {s.time} WIB</b></div>
-              <div><span className="text-slate-400">Armada / Pengemudi</span><br /><b>{vehName(v)} • {v.plate}</b><br /><b>{dr.name}</b> • {dr.phone}</div>
+              <div><span className="text-slate-400">Armada / Pengemudi</span><br /><b>{vehName(v)} • {v.plate}</b><br /><b>{dr ? dr.name + ' • ' + dr.phone : 'Ditugaskan oleh travel'}</b></div>
             </div></div>
           <div className="mt-4 bg-slate-50 rounded-2xl p-3.5 text-[13px] font-semibold space-y-1">
             <div className="font-extrabold text-[12px] text-slate-400 tracking-wider">PENUMPANG</div>

@@ -6,14 +6,15 @@ tags:
   - type/reference
   - area/referensi
 status: aktif
-updated: 2026-10-24
+updated: 2026-10-25
 source:
   - transaceh-react/src
+  - google-apps-script
 ---
 
 # File Index
 
-Jumlah baris adalah total baris file saat catatan dibuat (2026-10-24).
+Jumlah baris adalah total baris file saat catatan dibuat (2026-10-25).
 
 ## Entry dan store
 
@@ -125,6 +126,16 @@ Jumlah baris adalah total baris file saat catatan dibuat (2026-10-24).
 | `src/components/BlockSeatModal.jsx` | 80 |
 | `src/components/CancelTripModal.jsx` | 55 |
 | `src/index.css` | 95 |
+
+## Backend Google Sheets
+
+| File | Baris | Isi |
+| :--- | ---: | :--- |
+| `google-apps-script/seed.gs` | 476 | Seed produksi minimal + validasi |
+| `google-apps-script/code.gs` | 1.718 | API Web App mode direct + proyeksi/filter/aksi akun |
+| `google-apps-script/local-tests/mock-harness.mjs` | 955 | 155 asersi mock `code.gs` |
+| `google-apps-script/appsscript.json` | 10 | Manifest bound script |
+| `google-apps-script/README.md` | 330 | Pemasangan, probe CORS, kontrak API |
 
 ## Worker dan konfigurasi
 

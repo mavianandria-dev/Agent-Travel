@@ -1,13 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { T } from '@/lib/i18n.js';
 import { todayStr } from '@/lib/utils.js';
-import { initDB } from '@/lib/seed.js';
 import { currentUser, setSession, cleanupHolds, syncScheduleLifecycle, syncMaintenanceResolutions, audit, agencyPending } from '@/lib/domain.js';
 import { clearCheckoutDraft } from '@/lib/checkoutDraft.js';
-
-initDB();
-syncScheduleLifecycle();
-syncMaintenanceResolutions();
+import { IS_SHEETS } from '@/lib/runtime.js';
+import { signOutRemote } from '@/lib/remote.js';
 
 const AppCtx = createContext(null);
 export const useApp = () => useContext(AppCtx);
@@ -85,9 +82,17 @@ export function AppProvider({ children }) {
   const closeModal = useCallback(() => setModal(null), []);
   const setLang = useCallback((l) => { localStorage.setItem('at_lang', l); setLangState(l); }, []);
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
     audit('logout', (currentUser() || {}).email || '');
-    setSession(null);
+    if (IS_SHEETS) {
+      try {
+        await signOutRemote();
+      } catch {
+        toast('Gagal memuat data publik setelah keluar.', 'err');
+      }
+    } else {
+      setSession(null);
+    }
     clearCheckoutDraft();
     setBw(freshBW());
     setFilter({ q: '', date: '', status: '' });
@@ -98,6 +103,7 @@ export function AppProvider({ children }) {
   }, [toast]);
 
   useEffect(() => {
+    if (IS_SHEETS) return undefined;
     cleanupHolds();
     const holdIv = setInterval(cleanupHolds, 10000);
     const scheduleIv = setInterval(() => {

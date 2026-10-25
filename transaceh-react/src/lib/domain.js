@@ -2,6 +2,7 @@ import { DB } from './db.js';
 import { uid, todayStr, SIM_TYPES, fmtRp } from './utils.js';
 import { estimateRoute } from './geo.js';
 import { pickupOptions } from './pickups.js';
+import { getToken } from './sheetsApi.js';
 export { uid, todayStr };
 
 /* Diekstrak dari index.html — pure domain logic, tanpa DOM. */
@@ -59,6 +60,10 @@ export function checkAccountAccess(u){
 }
 
 export function currentUser(){
+  if (DB.isRemote() && !getToken()) {
+    try { localStorage.removeItem('at_session'); } catch { /* abaikan */ }
+    return null;
+  }
   const s = DB.load('session', null);
   if (!s) return null;
   const u = DB.load('users', []).find((x) => x.id === s.uid) || null;
@@ -145,7 +150,7 @@ export function createManagedAccount({ name, email, phone, password, role, agenc
   if (!nm) return { ok: false, msg: 'Nama lengkap wajib diisi' };
   if (!/.+@.+\..+/.test(em)) return { ok: false, msg: 'Format email belum benar' };
   if (!ph) return { ok: false, msg: 'No HP wajib diisi' };
-  if (pw.length < 6) return { ok: false, msg: 'Password minimal 6 karakter' };
+  if (pw.length < 8) return { ok: false, msg: 'Password minimal 8 karakter' };
   if (!ACCOUNT_ROLE_LABELS[role]) return { ok: false, msg: 'Role akun tidak valid' };
   const users = DB.load('users', []);
   if (users.some((u) => String(u.email || '').toLowerCase() === em)) return { ok: false, msg: 'Email sudah terdaftar' };
@@ -198,7 +203,7 @@ export function updateManagedAccount(id, { name, phone, password } = {}){
   const pw = String(password || '');
   if (!nm) return { ok: false, msg: 'Nama lengkap wajib diisi' };
   if (!ph) return { ok: false, msg: 'No HP wajib diisi' };
-  if (pw && pw.length < 6) return { ok: false, msg: 'Password minimal 6 karakter' };
+  if (pw && pw.length < 8) return { ok: false, msg: 'Password minimal 8 karakter' };
   u.name = nm;
   u.phone = ph;
   u.wa = ph;
@@ -222,7 +227,7 @@ export function updateManagedAccount(id, { name, phone, password } = {}){
 export function resetManagedAccountPassword(id, password){
   const denied = requireSuperadmin(); if (denied) return { ok: false, msg: denied };
   const pw = String(password || '');
-  if (pw.length < 6) return { ok: false, msg: 'Password minimal 6 karakter' };
+  if (pw.length < 8) return { ok: false, msg: 'Password minimal 8 karakter' };
   const users = DB.load('users', []);
   const u = users.find((x) => x.id === id);
   if (!u) return { ok: false, msg: 'Akun tidak ditemukan' };
@@ -647,7 +652,14 @@ export function bookedPassengers(b){
 
 export function takenSeats(schedId){
   const sch=schedById(schedId); const out={paid:[],booked:[],hold:[],inactive:[],blocked:[]};
-  bookingsOf(schedId).forEach(b=>{ (b.seats||[]).forEach(s=>{ if(b.status==='paid'||b.status==='done'){ out.booked.push(s); out.paid.push(s); } else if(b.status==='pending') out.hold.push(s); }); });
+  const role = (currentUser() || {}).role;
+  const useProjection = DB.isRemote() && !['agen','pengemudi','superadmin'].includes(role) && Array.isArray(sch?.takenSeats);
+  if(useProjection){
+    const all=Array.from(new Set(sch.takenSeats.map(String)));
+    out.paid=all.slice(); out.booked=all.slice();
+  } else {
+    bookingsOf(schedId).forEach(b=>{ (b.seats||[]).forEach(s=>{ if(b.status==='paid'||b.status==='done'){ out.booked.push(s); out.paid.push(s); } else if(b.status==='pending') out.hold.push(s); }); });
+  }
   (sch?.blockedSeats||[]).forEach(s=>{ if(!out.blocked.includes(s)) out.blocked.push(s); if(!out.paid.includes(s)) out.paid.push(s); });
   const veh=sch?vehicleById(sch.vehicleId):null;
   (veh?.inactiveSeats||[]).forEach(s=>{ if(!out.inactive.includes(s)) out.inactive.push(s); if(!out.paid.includes(s)) out.paid.push(s); });
@@ -1751,9 +1763,10 @@ export function cleanupHolds(){
 
 export function feeFor(agencyId, amount){ const a=agencyById(agencyId); if(!a) return Math.round(amount*0.08); return a.feeType==='flat'? a.feeValue : Math.round(amount*a.feeValue/100); }
 
-export function audit(action, detail){ const l=DB.load('audit',[]); const u=currentUser(); l.unshift({id:uid('LOG'),time:new Date().toISOString(),actor:u?u.email+' ('+u.role+')':'guest',action,detail:detail||''}); DB.save('audit',l.slice(0,300)); }
+export function audit(action, detail){ if(DB.isRemote()) return; const l=DB.load('audit',[]); const u=currentUser(); l.unshift({id:uid('LOG'),time:new Date().toISOString(),actor:u?u.email+' ('+u.role+')':'guest',action,detail:detail||''}); DB.save('audit',l.slice(0,300)); }
 
 export function notify(userEmail, title, msg, ch, meta){
+  if(DB.isRemote()) return null;
   if(!userEmail) return null;
   const n=DB.load('notifications',[]);
   const item={id:uid('NTF'),to:userEmail,title,msg,ch:ch||'app',time:new Date().toISOString(),read:false,...(meta&&typeof meta==='object'?meta:{})};

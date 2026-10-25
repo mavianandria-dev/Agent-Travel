@@ -4,6 +4,7 @@ import { setSession, audit, routeBookable, groupRoutes } from '@/lib/domain.js';
 import { todayStr } from '@/lib/utils.js';
 import { Icon } from '@/components/ui.jsx';
 import { clearCheckoutDraft } from '@/lib/checkoutDraft.js';
+import { IS_SHEETS } from '@/lib/runtime.js';
 
 export default function Home() {
   const { go, toast, refresh, setBw, bw, tick } = useApp();
@@ -20,6 +21,7 @@ export default function Home() {
   };
 
   const demoLogin = (email, pass) => {
+    if (IS_SHEETS) return;
     const u = DB.load('users', []).find((x) => x.email === email && x.pass === pass);
     if (!u) return;
     setSession(u);
@@ -62,15 +64,17 @@ export default function Home() {
         </div>
       </div>
       <div className="space-y-4">
-        <div className="anim anim-1 bg-[#0b2447] text-white rounded-3xl p-5 shadow-card">
-          <h3 className="font-extrabold text-[15px] flex items-center gap-2"><Icon name="user-round" className="w-5 h-5 text-sky-300" />Akun Demo — 1 Klik Masuk</h3>
-          <p className="text-[12px] text-slate-300 font-medium mt-1">Jelajahi semua 4 level user tanpa daftar.</p>
-          <div className="grid grid-cols-2 gap-2 mt-3">
-            {demos.map((d) => (
-              <button key={d[0]} onClick={() => demoLogin(d[0], d[1])} className="bg-white/10 hover:bg-sky-500 rounded-2xl p-3 text-left transition group"><Icon name={d[3]} className="w-5 h-5 text-sky-300 group-hover:text-white" /><div className="font-extrabold text-[13px] mt-1">{d[2]}</div><div className="text-[10px] text-slate-300 font-mono">{d[0]}</div></button>
-            ))}
+        {!IS_SHEETS ? (
+          <div className="anim anim-1 bg-[#0b2447] text-white rounded-3xl p-5 shadow-card">
+            <h3 className="font-extrabold text-[15px] flex items-center gap-2"><Icon name="user-round" className="w-5 h-5 text-sky-300" />Akun Demo — 1 Klik Masuk</h3>
+            <p className="text-[12px] text-slate-300 font-medium mt-1">Jelajahi semua 4 level user tanpa daftar.</p>
+            <div className="grid grid-cols-2 gap-2 mt-3">
+              {demos.map((d) => (
+                <button key={d[0]} onClick={() => demoLogin(d[0], d[1])} className="bg-white/10 hover:bg-sky-500 rounded-2xl p-3 text-left transition group"><Icon name={d[3]} className="w-5 h-5 text-sky-300 group-hover:text-white" /><div className="font-extrabold text-[13px] mt-1">{d[2]}</div><div className="text-[10px] text-slate-300 font-mono">{d[0]}</div></button>
+              ))}
+            </div>
           </div>
-        </div>
+        ) : null}
         <div className="anim anim-2 bg-white rounded-3xl shadow-card p-5">
           <h3 className="font-extrabold text-[15px] flex items-center gap-2"><Icon name="building-2" className="w-5 h-5 text-sky-600" />Travel Partner</h3>
           {ags.map((a) => (

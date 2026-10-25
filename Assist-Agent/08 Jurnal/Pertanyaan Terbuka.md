@@ -21,6 +21,10 @@ Gunakan daftar ini untuk investigasi berikutnya. Centang jika sudah terjawab dan
 - [ ] Apakah ada koleksi yang tumbuh tanpa batas selain yang sudah dibatasi?
 - [ ] Bagaimana perilaku `DB.save` jika `localStorage` penuh?
 - [ ] Apakah semua koleksi selalu berupa array?
+- [ ] Bagaimana `code.gs` akan mengganti field `pass` plaintext dengan hash tanpa memutus login?
+- [ ] Bagaimana cache adapter menangani write queue, retry, dan konflik revisi koleksi?
+- [ ] Apakah kuota Google Sheets cukup untuk volume booking dan audit yang ditargetkan?
+- [ ] Data browser-local mana saja yang tetap tidak boleh dikirim ke server?
 
 ## Booking dan refund
 

@@ -13,6 +13,7 @@ source:
   - transaceh-react/src/lib/domain.js
   - transaceh-react/src/lib/checkoutDraft.js
   - transaceh-react/src/lib/support.js
+  - google-apps-script/seed.gs
 ---
 
 # localStorage Keys
@@ -21,6 +22,9 @@ source:
 
 `DB.save(key, value)` menulis ke `localStorage` dengan nama `at_` + `key`.
 `DB.load(key, fallback)` membaca key yang sama.
+
+> [!info] Ini sumber data yang masih aktif
+> Google Sheets tahap seed memakai nama koleksi yang sama, tetapi belum terhubung ke aplikasi. Lihat [[Database Google Sheets]].
 
 ## Koleksi data
 
@@ -93,4 +97,4 @@ Menghapus semua `at_*` akan:
 - `transaceh-react/src/lib/checkoutDraft.js:11-30`
 - `transaceh-react/src/lib/support.js:6-7`
 
-Lihat [[Lapisan Data dan Seed]].
+Lihat [[Lapisan Data dan Seed]] dan [[Database Google Sheets]].

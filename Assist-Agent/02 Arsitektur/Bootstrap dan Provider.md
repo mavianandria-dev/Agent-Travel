@@ -49,6 +49,9 @@ sequenceDiagram
 > [!info] Module scope, bukan `useEffect`
 > `initDB()`, `syncScheduleLifecycle()`, dan `syncMaintenanceResolutions()` dijalankan saat modul diimpor, sebelum render pertama. Ini membuat data siap sebelum komponen membaca `localStorage`.
 
+> [!warning] Rencana Google Sheets
+> Setelah adapter Sheets aktif, bootstrap tidak bisa lagi sinkron di module scope. Muat cache database terlebih dahulu sebelum render, lalu jalankan sinkronisasi domain. Lihat [[Database Google Sheets]].
+
 ## Efek samping di provider
 
 | Efek | Interval | Fungsi |

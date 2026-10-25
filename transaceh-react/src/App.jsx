@@ -20,6 +20,7 @@ import Admin from '@/admin/Admin.jsx';
 import { DB } from '@/lib/db.js';
 import { schedById, notify, agencyPending } from '@/lib/domain.js';
 import { todayStr } from '@/lib/utils.js';
+import { IS_SHEETS } from '@/lib/runtime.js';
 
 const AGEN_VIEW_TAB = { 'agen-book': 'book', 'agen-sched': 'sched', 'agen-fleet': 'fleet', 'agen-fin': 'fin' };
 
@@ -47,6 +48,7 @@ function Router() {
 
   // H-1 reminder simulation (sekali per mount)
   useEffect(() => {
+    if (IS_SHEETS) return;
     const bk = DB.load('bookings', []);
     let ch = false;
     bk.forEach((b) => {
