@@ -680,7 +680,6 @@ var API_MAIN_TABLES = {
       'n:subtotal', 'n:discount', 'n:total', 'status', 'payMethod', 'voucher',
       'source', 'createdBy', 'createdAt', 'paidAt', 'holdExpiry',
       'tripStatus', 'b:boarded', 'n:rating',
-      'n:fareTicket', 'n:fareService', 'n:fareFee', 'n:fareTotal',
       'n:refundPct', 'n:refundAmount', 'refundScope', 'refundStatus',
       'refundPaidAt', 'refundProcessedAt', 'refundProcessedBy',
       'cancelReason', 'cancelledBy', 'cancelledAt',
@@ -695,7 +694,9 @@ var API_MAIN_TABLES = {
         'name', 'phone', 'seat', 'pickup', 'pickupCoords'
       ] },
       { table: 'booking_seats', path: 'seats', kind: 'list', scalar: true,
-        cols: ['val'] }
+        cols: ['val'] },
+      { table: 'booking_fare', path: 'fare', kind: 'one',
+        cols: ['n:ticket', 'n:service', 'n:fee', 'n:total'] }
     ]
   },
   payments: {
@@ -2815,9 +2816,9 @@ function apiSyncRefundExpectation_(ctx, booking, schedule, next) {
       scope: 'total'
     };
   }
-  var fareTicket = booking.fareTicket;
-  var ticket = isFinite(Number(fareTicket)) && Number(fareTicket) > 0
-    ? Number(fareTicket)
+  var fare = booking.fare;
+  var ticket = fare && isFinite(Number(fare.ticket)) && Number(fare.ticket) > 0
+    ? Number(fare.ticket)
     : apiSyncSplitFare_(ctx, schedule, (booking.seats || []).length,
         booking.discount || 0, booking.source || '').ticket;
   var departure = apiSyncScheduleDepartureMs_(schedule);
@@ -3588,7 +3589,7 @@ function apiSyncValidateBookings_(ctx, target) {
   var currentMap = ctx.currentMap.bookings || {};
   var allowedExisting = {
     status: 1, tripStatus: 1, paidAt: 1, holdExpiry: 1,
-    fareTicket: 1, fareService: 1, fareFee: 1, fareTotal: 1, rating: 1,
+    fare: 1, rating: 1,
     boarded: 1, scheduleId: 1, seats: 1, passengers: 1, pickupCoords: 1,
     refundPct: 1, refundAmount: 1, refundScope: 1, refundStatus: 1, refundPaidAt: 1,
     cancelReason: 1, cancelledBy: 1, cancelledAt: 1,

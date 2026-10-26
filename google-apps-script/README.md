@@ -96,7 +96,7 @@ Jalankan **TransAceh → Validasi database** atau `validateDatabase()`. Hasil ya
 
 - `ok: true`
 - `users: 1`, `settings: 1`, `fees: 1`, `audit: 1`
-- 19 tab koleksi utama + ~40 tab anak + `_meta` (jumlah tepat mengikuti `apiDescribeStore_()`)
+- 19 tab koleksi utama + 35 tab anak + `_meta` (jumlah tepat mengikuti `apiDescribeStore_()`)
 - tidak ada masalah header, ID duplikat, `ord` duplikat, baris anak tanpa `parent_id`, atau sel melebihi 45000 karakter
 
 ### 7. Deploy Web App
@@ -147,7 +147,7 @@ Harness mem-mock `SpreadsheetApp`, `PropertiesService`, `LockService`, `Utilitie
 
 ## Struktur tab
 
-Format penyimpanan **v2**: tidak ada JSON di dalam sel; satu kolom per field skalar, dan setiap array/object dipecah ke tab anak dengan `parent_id`. Tabel utama (19 koleksi): `users`, `agencies`, `routes`, `routeRequests`, `vehicles`, `drivers`, `schedules`, `maintenanceRequests`, `bookings`, `payments`, `ledger`, `vouchers`, `reviews`, `notifications`, `audit`, `banners`, `supportTickets`, `settings`, `fees` — ditambah ~40 tab anak (mis. `user_favorites`, `agency_kyc_docs`, `vehicle_layout`, `schedule_delay_history`, `booking_passengers`, `support_messages`, `notifications_meta`, dst.) dan `_meta`. Daftar tab dan header lengkap ada di `API_MAIN_TABLES` (`code.gs`) dan bisa dicetak via `apiDescribeStore_()`; `seed.gs` membuat semua tab dari daftar itu.
+Format penyimpanan **v2**: tidak ada JSON di dalam sel; satu kolom per field skalar, dan setiap array/object dipecah ke tab anak dengan `parent_id`. Tabel utama (19 koleksi): `users`, `agencies`, `routes`, `routeRequests`, `vehicles`, `drivers`, `schedules`, `maintenanceRequests`, `bookings`, `payments`, `ledger`, `vouchers`, `reviews`, `notifications`, `audit`, `banners`, `supportTickets`, `settings`, `fees` — ditambah 35 tab anak (mis. `user_favorites`, `agency_kyc_docs`, `vehicle_layout`, `schedule_delay_history`, `booking_passengers`, `booking_fare`, `support_messages`, `notifications_meta`, dst.) dan `_meta`. Daftar tab dan header lengkap ada di `API_MAIN_TABLES` (`code.gs`) dan bisa dicetak via `apiDescribeStore_()`; `seed.gs` membuat semua tab dari daftar itu.
 
 ### Tab `_meta`
 

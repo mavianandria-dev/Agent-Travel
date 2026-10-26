@@ -1,9 +1,0 @@
-# Obsidian workspace & cache — tidak perlu di-commit
-.obsidian/workspace.json
-.obsidian/workspace-mobile.json
-.obsidian/cache
-.trash/
-
-# OS
-.DS_Store
-Thumbs.db

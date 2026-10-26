@@ -1292,7 +1292,7 @@ ok('harga jadwal dikembalikan untuk uji pembayaran', res.ok === true, res);
 
 const bSyncPaid = Object.assign({}, readRec('bookings', 'b_sync_1'), {
   status: 'paid', paidAt: '2026-10-24T05:15:00.000Z',
-  fareTicket: 128889, fareService: 10000, fareFee: 11111, fareTotal: 150000
+  fare: { ticket: 128889, service: 10000, fee: 11111, total: 150000 }
 });
 res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [bSyncPaid], deletes: [] } }, custToken);
 ok('pelanggan menandai booking sendiri lunas', res.ok === true, res);
@@ -1465,8 +1465,7 @@ const driverFare = { ticket: 138889, service: 0, fee: 11111, total: 150000 };
 res = sync({
   bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, driverBooking, {
     status: 'paid', paidAt: '2026-10-24T05:42:00.000Z', holdExpiry: null,
-    fareTicket: driverFare.ticket, fareService: driverFare.service,
-    fareFee: driverFare.fee, fareTotal: driverFare.total
+    fare: driverFare
   })], deletes: [] },
   payments: { baseRev: revOf('payments'), upserts: [Object.assign({}, driverPayment, {
     status: 'paid'
