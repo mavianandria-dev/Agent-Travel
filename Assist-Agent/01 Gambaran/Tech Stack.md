@@ -36,7 +36,7 @@ source:
 | Oxlint | Lint |
 | Wrangler | Cloudflare Worker (AI proxy) |
 | GitHub Actions | Build & deploy GitHub Pages |
-| Google Apps Script | Backend Google Sheets mode direct (kode 1.2.0; deployment masih 1.1.0) |
+| Google Apps Script | Backend Google Sheets mode direct (kode 1.3.0, storage kolom; deployment masih skema JSON lama) |
 
 ## Yang **tidak** dipakai
 
@@ -66,7 +66,7 @@ flowchart LR
 
 ## Rencana Google Sheets
 
-Backend Google Sheets sudah mencapai `code.gs` 1.2.0 dengan `sync` ter-scope dan 265 asersi lokal. Adapter frontend (cache, diff, rollback, bootstrap) juga sudah ada, tetapi deployment Web App masih 1.1.0 dan probe CORS browser belum dilakukan; mode default tetap `local`. Lihat [[Database Google Sheets]].
+Backend Google Sheets sudah mencapai `code.gs` 1.3.0 dengan `sync` ter-scope, skema penyimpanan kolom (schema 2), dan 286 asersi lokal. Adapter frontend (cache, diff, rollback, bootstrap) juga sudah ada, tetapi spreadsheet produksi masih format JSON lama (harus reset + seed ulang) dan probe CORS browser belum dilakukan; mode default tetap `local`. Lihat [[Database Google Sheets]].
 
 ## Sumber
 

@@ -19,9 +19,15 @@
  *     aksi akun tervalidasi (register, changePassword, adminCreateUser, ...).
  *  7. Response selalu {ok:true, data} atau {ok:false, error:{code,message}}.
  *
- * Struktur data sama dengan seed.gs:
+ * Struktur data sama dengan seed.gs (storage v2, normalisasi 1NF penuh):
  *  - Tab `_meta`: kolom key|value.
- *  - Tab koleksi: kolom id|ord|json|updated_at, satu baris = satu record JSON.
+ *  - Tab koleksi utama: kolom id|ord|updated_at + satu kolom skalar per field
+ *    record; nilai disimpan sebagai teks dan dikonversi kembali berdasarkan
+ *    tipe kolom saat dibaca.
+ *  - Field bertingkat (array/object) dipecah ke tab anak dengan kolom
+ *    parent_id + slot/key, satu baris per elemen. Definisi kolom ada di
+ *    API_MAIN_TABLES; apiReadCollection_/apiWriteCollection_ memakainya
+ *    secara generik untuk semua koleksi.
  *
  * Aksi yang didukung (via doPost):
  *  - health            => { service, version, now, schemaVersion } (tanpa auth)
@@ -39,13 +45,13 @@
  * tidak akan ditimpa bila sudah ada. Secret tidak pernah dicetak ke log.
  */
 
-var API_VERSION = '1.2.0';
+var API_VERSION = '1.3.0';
 var API_SERVICE_NAME = 'transaceh-db';
 
-var API_SCHEMA_VERSION = '1';
+var API_SCHEMA_VERSION = '2';
 var API_META_HEADERS = ['key', 'value'];
-var API_COLLECTION_HEADERS = ['id', 'ord', 'json', 'updated_at'];
-var API_MAX_JSON_CHARS = 45000;
+var API_ROW_HEADERS = ['id', 'ord', 'updated_at'];
+var API_MAX_CELL_CHARS = 45000;
 var API_LOCK_WAIT_MS = 20000;
 var API_TOKEN_TTL_DEFAULT = 12 * 60 * 60; // detik
 var API_MIN_PASSWORD_LENGTH = 8;
@@ -65,6 +71,11 @@ var API_COLLECTION_KEYS = [
   'vouchers', 'reviews', 'notifications', 'audit', 'banners', 'supportTickets',
   'settings', 'fees'
 ];
+
+/** Daftar kunci koleksi (akses runtime; dipakai seed.gs). */
+function apiCollectionKeys_() {
+  return API_COLLECTION_KEYS;
+}
 
 /**
  * Field yang boleh terlihat oleh publik. `null` berarti seluruh record boleh
@@ -476,45 +487,724 @@ function apiSheet_(ss, key) {
   return sheet;
 }
 
-function apiReadCollection_(ss, key) {
-  var sheet = apiSheet_(ss, key);
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return [];
-  var rows = sheet.getRange(2, 1, lastRow - 1, API_COLLECTION_HEADERS.length).getValues();
-  var out = [];
-  for (var i = 0; i < rows.length; i++) {
-    var json = String(rows[i][2] == null ? '' : rows[i][2]);
-    if (!String(json).trim()) continue;
-    var rec = apiParseJson_(json);
-    if (!rec || typeof rec !== 'object' || Array.isArray(rec)) {
-      throw apiError_('DATA_CORRUPT', 'JSON tidak valid pada ' + key + ' baris ' + (i + 2) + '.');
-    }
-    out.push(rec);
+/* ------------------------------------------------------------------ */
+/* Skema penyimpanan v2 (normalisasi 1NF penuh)                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Definisi kolom untuk tiap koleksi (satu-satunya sumber kebenaran bentuk
+ * tab di spreadsheet; seed.gs memakainya juga lewat apiDescribeStore_()).
+ *
+ * Semua nilai disimpan sebagai teks; prefix menentukan konversi saat dibaca:
+ *  - "field"   → teks apa adanya,
+ *  - "n:field" → angka (Number),
+ *  - "b:field" → boolean ('true'/'false').
+ * Alias "sumber>namaKolom" dipakai bila nama field bentrok (mis. "id" pesan
+ * tiket → kolom msg_id).
+ *
+ * Field bertingkat dipecah ke tab anak lewat `children`:
+ *  - kind 'list' → array. Kolom anak: parent_id | slot | nilai. Elemen
+ *    object memakai kolom per field (`cols`); elemen skalar ditandai
+ *    `scalar: true` dan memakai satu kolom "val".
+ *  - kind 'map' → object key→nilai. Kolom anak: parent_id | key | nilai.
+ *    Elemen skalar juga ditandai `scalar: true`.
+ *  - kind 'one' → object 1:1, satu baris per record induk
+ *    (kolom anak: parent_id | nilai). Path boleh bertingkat ("kyc.alamat").
+ *  - path '*' (khusus notifications) → semua field record yang bukan kolom
+ *    skema disimpan sebagai baris key→val di tab meta notifikasi.
+ *
+ * Unknown top-level field yang tidak tercakup skema DITOLAK saat tulis agar
+ * tidak ada data yang hilang diam-diam.
+ */
+var API_MAIN_TABLES = {
+  users: {
+    cols: [
+      'name', 'email', 'phone', 'wa', 'role', 'agencyId', 'status', 'photo',
+      'address', 'profileStep', 'createdAt', 'updatedAt',
+      'passHash', 'passSalt', 'n:passIter', 'passAlgo', 'n:tokenVersion',
+      'suspendedByParent', 'parentSuspendedDriverStatus'
+    ],
+    children: [
+      { table: 'users_favorites', path: 'favorites', kind: 'list',
+        cols: ['favName>name', 'favPhone>phone'] }
+    ]
+  },
+  agencies: {
+    cols: [
+      'name', 'logo', 'address', 'phone', 'wa', 'email', 'description',
+      'bank', 'status', 'n:serviceFee', 'feeType', 'n:feeValue', 'n:rating',
+      'n:trips'
+    ],
+    children: [
+      { table: 'agencies_refund_policy', path: 'refundPolicy', kind: 'list',
+        cols: ['n:minH', 'n:pct'] },
+      { table: 'agency_kyc', path: 'kyc', kind: 'one', cols: [
+        'jenis', 'nama', 'nik', 'tmpLahir', 'tglLahir', 'gender', 'agama',
+        'hp', 'email', 'bank', 'rekeningNo', 'rekeningNama', 'b:npwpSamaKtp',
+        'npwp', 'badanNama', 'badanBentuk', 'aktaNo', 'npwpUsaha', 'nib',
+        'direktur', 'status', 'n:step', 'b:terms', 'submittedAt', 'updatedAt'
+      ] },
+      { table: 'agency_kyc_alamat', path: 'kyc.alamat', kind: 'one', cols: [
+        'jalan', 'rtRw', 'kelurahan', 'kecamatan', 'kota', 'provinsi',
+        'kodePos'
+      ] },
+      { table: 'agency_kyc_alamat_usaha', path: 'kyc.alamatUsaha', kind: 'one',
+        cols: ['jalan', 'rtRw', 'kelurahan', 'kecamatan', 'kota', 'provinsi',
+          'kodePos'] },
+      { table: 'agency_kyc_darurat', path: 'kyc.darurat', kind: 'one', cols: [
+        'nama', 'hubungan', 'hp'
+      ] },
+      { table: 'agency_kyc_docs', path: 'kyc.docs', kind: 'map', cols: [
+        'name', 'type', 'n:size', 'dataUrl', 'at'
+      ] }
+    ]
+  },
+  routes: {
+    cols: [
+      'from', 'to', 'distance', 'duration', 'n:basePrice', 'b:homePickup',
+      'b:active', 'agencyId', 'driverId'
+    ],
+    children: [
+      { table: 'route_prices', path: 'prices', kind: 'map', scalar: true,
+        cols: ['n:val'] },
+      { table: 'route_suspensions', path: 'suspensions', kind: 'map', cols: [
+        'reason', 'at'
+      ] },
+      { table: 'route_pickups', path: 'pickups', kind: 'list', scalar: true,
+        cols: ['val'] },
+      { table: 'route_agency_ids', path: 'agencyIds', kind: 'list',
+        scalar: true, cols: ['val'] },
+      { table: 'route_vehicle_ids', path: 'vehicleIds', kind: 'list',
+        scalar: true, cols: ['val'] },
+      { table: 'route_driver_ids', path: 'driverIds', kind: 'list',
+        scalar: true, cols: ['val'] }
+    ]
+  },
+  routeRequests: {
+    cols: [
+      'agencyId', 'type', 'routeId', 'from', 'to', 'pickup', 'note',
+      'n:price', 'b:homePickup', 'distance', 'duration', 'status',
+      'adminNote', 'createdAt', 'decidedAt'
+    ],
+    children: [
+      { table: 'routereq_pickups', path: 'pickups', kind: 'list',
+        scalar: true, cols: ['val'] },
+      { table: 'routereq_vehicle_ids', path: 'vehicleIds', kind: 'list',
+        scalar: true, cols: ['val'] }
+    ]
+  },
+  vehicles: {
+    cols: [
+      'agencyId', 'brand', 'model', 'n:year', 'color', 'plate', 'chassis',
+      'engine', 'vtype', 'vtypeOther', 'baggage', 'tax', 'stnkExp', 'kir',
+      'condition', 'n:capacity', 'photo', 'status', 'ownerName', 'ownerBiz',
+      'ownerNik', 'ownerAddr', 'ownerPhone', 'ownerEmail', 'ownership',
+      'coopDriverId', 'hasEmail', 'docOther', 'stnkPhoto', 'ktpOwnerPhoto',
+      'mainRoute', 'origin', 'dest', 'freq', 'freqOther', 'opSchedule',
+      'n:coopTariff', 'coopSys', 'coopOther', 'n:fleetCount', 'hasDriver',
+      'driverId', 'backDriverId', 'b:driverConflict', 'drvName', 'drvPhone',
+      'drvSim', 'drvSimExp', 'drvExp', 'hasBackup', 'backName', 'backPhone',
+      'backSim', 'backSimExp', 'n:seatSeq', 'maintenanceFrom',
+      'maintenanceUntil', 'maintenanceRequestId'
+    ],
+    children: [
+      { table: 'vehicle_facilities', path: 'facilities', kind: 'list',
+        scalar: true, cols: ['val'] },
+      { table: 'vehicle_docs', path: 'docs', kind: 'list', scalar: true,
+        cols: ['val'] },
+      { table: 'vehicle_services', path: 'services', kind: 'list',
+        scalar: true, cols: ['val'] },
+      { table: 'vehicle_inactive_seats', path: 'inactiveSeats', kind: 'list',
+        scalar: true, cols: ['val'] },
+      { table: 'vehicle_layout', path: 'layout', kind: 'list',
+        cols: ['sid', 'type'] }
+    ]
+  },
+  drivers: {
+    cols: [
+      'agencyId', 'name', 'phone', 'wa', 'simType', 'simExp', 'simPhoto',
+      'ktpPhoto', 'selfie', 'photo', 'status', 'n:rating', 'n:trips',
+      'userEmail', 'birthPlace', 'birthDate', 'gender', 'address', 'nik',
+      'marital', 'education', 'emName', 'emPhone', 'emRelation', 'simNumber',
+      'bank', 'createdAt', 'updatedAt', 'pendingAt', 'profileVerifiedAt',
+      'profileVerifiedBy'
+    ],
+    children: [
+      { table: 'driver_pending_profile', path: 'pendingProfile', kind: 'map',
+        scalar: true, cols: ['val'] }
+    ]
+  },
+  schedules: {
+    cols: [
+      'agencyId', 'routeId', 'date', 'time', 'vehicleId', 'driverId',
+      'driverName', 'backupDriverId', 'backupName', 'n:price', 'status',
+      'tripStatus', 'createdAt',
+      'delayUntil', 'n:delayMinutes', 'n:delayAddedMinutes', 'delayReason',
+      'delayNote', 'delayedAt', 'delayedBy', 'tripDelayUpdatedAt',
+      'departedAt', 'departedBy', 'earlyStartReason', 'arrivedAt',
+      'b:lateCompletion',
+      'cancelReason', 'cancelledBy', 'cancelledAt', 'reviewedAt',
+      'reviewResult', 'n:refundPct',
+      'maintenanceRequestId', 'maintenanceFrom', 'maintenanceUntil',
+      'maintenanceStatus', 'maintenanceReason', 'maintenanceUpdatedAt'
+    ],
+    children: [
+      { table: 'schedule_blocked_seats', path: 'blockedSeats', kind: 'list',
+        scalar: true, cols: ['val'] },
+      { table: 'schedule_delay_history', path: 'delayHistory', kind: 'list',
+        cols: ['type', 'at', 'n:minutes', 'until', 'reason', 'note', 'by'] },
+      { table: 'schedule_trip_delay_info', path: 'tripDelayInfo', kind: 'list',
+        cols: ['type', 'at', 'reason', 'note', 'by'] },
+      { table: 'schedule_seat_block_log', path: 'seatBlockLog', kind: 'list',
+        cols: ['seat', 'action', 'reason', 'by', 'at'] }
+    ]
+  },
+  maintenanceRequests: {
+    cols: [
+      'agencyId', 'vehicleId', 'vehicleName', 'vehiclePlate', 'driverId',
+      'driverName', 'from', 'until', 'reason', 'status', 'requestedAt',
+      'requestedBy', 'decidedAt', 'decidedBy', 'decisionNote'
+    ],
+    children: [
+      { table: 'maintenance_schedule_ids', path: 'affectedScheduleIds',
+        kind: 'list', scalar: true, cols: ['val'] },
+      { table: 'maintenance_summary', path: 'summary', kind: 'one', cols: [
+        'n:schedules', 'n:paidBookings', 'n:pendingBookings', 'n:refunded',
+        'n:choices', 'n:replacementOffers', 'n:refundTotal'
+      ] }
+    ]
+  },
+  bookings: {
+    cols: [
+      'code', 'scheduleId', 'userEmail', 'userPhone', 'pickupCoords',
+      'n:subtotal', 'n:discount', 'n:total', 'status', 'payMethod', 'voucher',
+      'source', 'createdBy', 'createdAt', 'paidAt', 'holdExpiry',
+      'tripStatus', 'b:boarded', 'n:rating',
+      'n:fareTicket', 'n:fareService', 'n:fareFee', 'n:fareTotal',
+      'n:refundPct', 'n:refundAmount', 'refundScope', 'refundStatus',
+      'refundPaidAt', 'refundProcessedAt', 'refundProcessedBy',
+      'cancelReason', 'cancelledBy', 'cancelledAt',
+      'maintenanceRequestId', 'maintenanceOriginalScheduleId',
+      'maintenanceFrom', 'maintenanceUntil', 'maintenanceState',
+      'n:maintenanceRefundAmount', 'maintenanceChoiceDeadline',
+      'maintenanceResolvedAt', 'replacementScheduleId', 'replacementAt',
+      'replacementBy'
+    ],
+    children: [
+      { table: 'booking_passengers', path: 'passengers', kind: 'list', cols: [
+        'name', 'phone', 'seat', 'pickup', 'pickupCoords'
+      ] },
+      { table: 'booking_seats', path: 'seats', kind: 'list', scalar: true,
+        cols: ['val'] }
+    ]
+  },
+  payments: {
+    cols: [
+      'bookingId', 'n:amount', 'method', 'n:fee', 'time', 'status',
+      'n:refundAmount', 'n:refundPct', 'refundScope', 'refundStatus',
+      'refundRequestedAt', 'refundedAt', 'refundPaidAt', 'refundProcessedAt'
+    ]
+  },
+  ledger: {
+    cols: [
+      'bookingId', 'scheduleId', 'agencyId', 'driverId', 'userEmail',
+      'n:ticket', 'n:service', 'n:fee', 'n:total', 'status', 'createdAt',
+      'releasedAt', 'paidOutAt', 'replacedFromScheduleId'
+    ],
+    children: [
+      { table: 'ledger_seats', path: 'seats', kind: 'list', scalar: true,
+        cols: ['val'] }
+    ]
+  },
+  vouchers: {
+    cols: [
+      'code', 'agencyId', 'type', 'n:value', 'n:maxDisc', 'n:quota', 'n:used',
+      'b:active', 'desc'
+    ]
+  },
+  reviews: {
+    cols: ['agencyId', 'user', 'n:rating', 'text', 'date', 'trip']
+  },
+  notifications: {
+    cols: ['to', 'title', 'msg', 'ch', 'time', 'b:read'],
+    children: [
+      { table: 'notifications_meta', path: '*', kind: 'map', scalar: true,
+        cols: ['val'] }
+    ]
+  },
+  audit: {
+    cols: ['time', 'actor', 'action', 'detail']
+  },
+  banners: {
+    cols: ['title', 'sub', 'b:active']
+  },
+  supportTickets: {
+    cols: [
+      'code', 'channel', 'userId', 'userEmail', 'userName', 'userPhone',
+      'agencyId', 'b:isGuest', 'category', 'subject', 'bookingCode',
+      'description', 'status', 'createdAt', 'updatedAt'
+    ],
+    children: [
+      { table: 'ticket_messages', path: 'messages', kind: 'list', cols: [
+        'id>msg_id', 'from', 'text', 'author', 'at'
+      ] },
+      { table: 'ticket_status_history', path: 'statusHistory', kind: 'list',
+        cols: ['status', 'at', 'by', 'note'] }
+    ]
+  },
+  settings: {
+    cols: ['key', 'updatedAt'],
+    children: [
+      { table: 'settings_value', path: 'value', kind: 'map', scalar: true,
+        cols: ['val'] }
+    ]
+  },
+  fees: {
+    cols: ['defaultType', 'n:defaultValue', 'updatedAt']
   }
-  return out;
+};
+
+var API_TABLES_CACHE_ = null;
+
+/** "name" / "n:name" / "b:name" / "src>kolom" → {src,col,type}. */
+function apiColumnSpec_(txt) {
+  var raw = String(txt);
+  var src = raw;
+  var col = raw;
+  var type = 's';
+  if (raw.indexOf('n:') === 0) { type = 'n'; src = raw.slice(2); col = src; }
+  else if (raw.indexOf('b:') === 0) { type = 'b'; src = raw.slice(2); col = src; }
+  var sep = src.indexOf('>');
+  if (sep >= 0) {
+    col = src.slice(sep + 1);
+    src = src.slice(0, sep);
+  }
+  if (!src || !col) throw new Error('Definisi kolom tidak valid: ' + raw);
+  return { src: src, col: col, type: type };
 }
 
-function apiWriteCollection_(ss, key, records) {
-  var sheet = apiSheet_(ss, key);
+/** Bangun (sekali) definisi tab utama + tab anak dari API_MAIN_TABLES. */
+function apiTables_() {
+  if (API_TABLES_CACHE_) return API_TABLES_CACHE_;
+  var mains = {};
+  var childByName = {};
+  API_COLLECTION_KEYS.forEach(function (key) {
+    var def = API_MAIN_TABLES[key];
+    if (!def) throw new Error('API_MAIN_TABLES tidak mendefinisikan ' + key);
+    var cols = (def.cols || []).map(apiColumnSpec_);
+    var headers = ['id', 'ord'].concat(cols.map(function (c) { return c.col; }))
+      .concat(['updated_at']);
+    var allowed = {};
+    cols.forEach(function (c) { allowed[c.src] = true; });
+    var children = [];
+    (def.children || []).forEach(function (childDef) {
+      allowed[childDef.path] = true;
+      var cols2 = (childDef.cols || []).map(apiColumnSpec_);
+      if (childByName[childDef.table]) {
+        throw new Error('Tab anak duplikat: ' + childDef.table);
+      }
+      var childHeaders = childDef.kind === 'one'
+        ? ['parent_id'].concat(cols2.map(function (c) { return c.col; }))
+        : ['parent_id', childDef.kind === 'map' ? 'key' : 'slot']
+            .concat(cols2.map(function (c) { return c.col; }));
+      var built = {
+        table: childDef.table,
+        parent: key,
+        path: childDef.path,
+        kind: childDef.kind,
+        scalar: !!childDef.scalar,
+        headers: childHeaders,
+        cols: cols2
+      };
+      children.push(built);
+      childByName[childDef.table] = built;
+    });
+    mains[key] = { headers: headers, cols: cols, allowed: allowed, children: children };
+  });
+  API_TABLES_CACHE_ = { mains: mains, children: childByName };
+  return API_TABLES_CACHE_;
+}
+
+/** Nama semua tab yang dihasilkan skema (utama + anak), tanpa _meta. */
+function apiAllTableNames_() {
+  var store = apiTables_();
+  var names = [];
+  API_COLLECTION_KEYS.forEach(function (key) {
+    names.push(key);
+    store.mains[key].children.forEach(function (child) {
+      names.push(child.table);
+    });
+  });
+  return names;
+}
+
+/**
+ * Deskripsi lengkap tab untuk alat-instalasi (seed.gs): daftar tab, header,
+ * dan koleksinya. Dipakai seed.gs membuat header + validasi struktur.
+ */
+function apiDescribeStore_() {
+  var store = apiTables_();
+  var tables = [];
+  API_COLLECTION_KEYS.forEach(function (key) {
+    var main = store.mains[key];
+    tables.push({ name: key, collection: key, kind: 'main', headers: main.headers });
+    main.children.forEach(function (child) {
+      tables.push({
+        name: child.table,
+        collection: key,
+        kind: child.kind,
+        headers: child.headers
+      });
+    });
+  });
+  return { schemaVersion: API_SCHEMA_VERSION, tables: tables };
+}
+
+/** Ambil nilai objek di dalam record lewat path "a.b" (tab anak 1NF). */
+function apiPathValue_(rec, path) {
+  if (path === '*') return rec;
+  var cur = rec;
+  var parts = String(path).split('.');
+  for (var i = 0; i < parts.length; i++) {
+    if (!cur || typeof cur !== 'object') return undefined;
+    cur = cur[parts[i]];
+  }
+  return cur;
+}
+
+/** Pasang nilai objek di path "a.b", membuat objek menengah bila perlu. */
+function apiPutPath_(rec, path, value) {
+  if (path === '*') throw new Error('Path * tidak bisa dipasang langsung.');
+  var parts = String(path).split('.');
+  var last = parts.pop();
+  var cur = rec;
+  for (var i = 0; i < parts.length; i++) {
+    if (!cur[parts[i]] || typeof cur[parts[i]] !== 'object') cur[parts[i]] = {};
+    cur = cur[parts[i]];
+  }
+  cur[last] = value;
+}
+
+/** Validasi bentuk record terhadap skema (field tak dikenal ditolak keras). */
+/** Field transien: boleh ada pada upsert jalur sync, dihapus sebelum tulis.
+ *  Dipakai users (pass/password yang di-hash oleh apiSyncPrepareUsers_). */
+var API_TRANSIENT_FIELDS_ = { users: { pass: 1, password: 1 } };
+
+function apiValidateRecordSchema_(key, rec) {
+  var main = apiTables_().mains[key];
+  if (!main) return;
+  var transient = API_TRANSIENT_FIELDS_[key] || null;
+  var unknown = [];
+  var keys = Object.keys(rec || {});
+  for (var i = 0; i < keys.length; i++) {
+    var k = String(keys[i]);
+    if (k === 'id' || k === '_id' || main.allowed[k]) continue;
+    if (transient && transient[k]) continue;
+    if (key === 'notifications') {
+      /* notifications menerima field tambahan apa pun (meta), asal skalar. */
+      var v = rec[k];
+      if (v == null || typeof v === 'string' || typeof v === 'number' ||
+          typeof v === 'boolean') continue;
+      throw apiError_('VALIDATION', 'Meta notifikasi harus skalar: ' + k);
+    }
+    unknown.push(k);
+    if (unknown.length >= 3) break;
+  }
+  if (unknown.length) {
+    throw apiError_('VALIDATION', 'Field tidak dikenal pada ' + key +
+      ': ' + unknown.join(', ') +
+      '. Perbarui API_MAIN_TABLES bila field ini memang terpakai.');
+  }
+}
+
+function apiCellLengthGuard_(text, ref) {
+  if (text.length > API_MAX_CELL_CHARS) {
+    throw apiError_('VALIDATION', 'Isi sel "' + ref + '" melebihi ' +
+      API_MAX_CELL_CHARS + ' karakter (' + text.length + ').');
+  }
+  return text;
+}
+
+/** Serialisasi satu nilai menjadi isi sel (selalu teks). */
+function apiCellFor_(type, value, ref) {
+  var text;
+  if (value == null) text = '';
+  else if (type === 'b') {
+    text = (value === true || value === 'true' || value === 1 || value === '1')
+      ? 'true' : 'false';
+  } else if (type === 'n') {
+    if (value === '') text = '';
+    else {
+      var num = Number(value);
+      text = isNaN(num) ? '' : String(num);
+    }
+  } else {
+    if (typeof value === 'object') {
+      throw apiError_('VALIDATION', 'Nilai "' + ref + '" berupa object/array - ' +
+        'pecah ke tab anak skema, jangan satu sel.');
+    }
+    text = String(value);
+  }
+  return apiCellLengthGuard_(text, ref);
+}
+
+/** Konversi isi sel (teks) menjadi nilai JS sesuai tipe kolom. */
+function apiValueFor_(type, cell) {
+  var text = cell == null ? '' : String(cell);
+  if (type === 'n') {
+    if (!text.trim()) return null;
+    var num = Number(text);
+    if (isNaN(num)) {
+      throw apiError_('DATA_CORRUPT', 'Nilai angka tidak valid di spreadsheet: "' + text + '".');
+    }
+    return num;
+  }
+  if (type === 'b') {
+    var t = text.trim().toLowerCase();
+    if (!t) return null;
+    if (t === 'true' || t === '1') return true;
+    if (t === 'false' || t === '0') return false;
+    throw apiError_('DATA_CORRUPT', 'Nilai boolean tidak valid di spreadsheet: "' + text + '".');
+  }
+  return text;
+}
+
+/** Baca baris isi tab (tanpa header). */
+function apiReadRows_(sheet, width) {
   var lastRow = sheet.getLastRow();
-  if (lastRow > 1) sheet.getRange(2, 1, lastRow - 1, API_COLLECTION_HEADERS.length).clearContent();
-  if (!records || !records.length) return 0;
+  if (lastRow < 2) return [];
+  return sheet.getRange(2, 1, lastRow - 1, width).getValues();
+}
+
+/**
+ * Tulis sejumlah record koleksi ke tab utama + tab anaknya (tulis penuh),
+ * lalu kembalikan jumlah record. Bentuk kolom ditentukan API_MAIN_TABLES.
+ */
+function apiWriteCollection_(ss, key, records) {
+  var store = apiTables_();
+  var main = store.mains[key];
+  if (!main) throw apiError_('SHEET_SCHEMA', 'Koleksi tidak dikenal: ' + key);
+  var list = Array.isArray(records) ? records : [];
   var now = apiNowIso_();
   var rows = [];
-  for (var i = 0; i < records.length; i++) {
-    var rec = records[i];
+  var childRows = {};
+  main.children.forEach(function (child) { childRows[child.table] = []; });
+
+  for (var i = 0; i < list.length; i++) {
+    var rec = list[i];
+    if (!rec || typeof rec !== 'object' || Array.isArray(rec)) {
+      throw apiError_('VALIDATION', 'Record pada ' + key + ' indeks ' + i + ' harus objek.');
+    }
     var id = apiRecordId_(rec);
     if (!id) {
       throw apiError_('VALIDATION', 'Record pada ' + key + ' indeks ' + i + ' tidak punya id.');
     }
-    var json = JSON.stringify(rec);
-    if (json.length > API_MAX_JSON_CHARS) {
-      throw apiError_('VALIDATION', 'Record ' + id + ' pada ' + key + ' melebihi ' + API_MAX_JSON_CHARS + ' karakter.');
+    apiValidateRecordSchema_(key, rec);
+    var row = [id, String(i + 1)];
+    for (var c = 0; c < main.cols.length; c++) {
+      var col = main.cols[c];
+      row.push(apiCellFor_(col.type, rec[col.src], key + '.' + id + '.' + col.col));
     }
-    rows.push([id, i + 1, json, now]);
+    row.push(now);
+    rows.push(row);
+
+    main.children.forEach(function (child) {
+      apiBuildChildRows_(child, id, rec, key, childRows[child.table]);
+    });
   }
-  sheet.getRange(2, 1, rows.length, API_COLLECTION_HEADERS.length).setValues(rows);
+
+  var sheet = apiSheet_(ss, key);
+  var lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    sheet.getRange(2, 1, lastRow - 1, main.headers.length).clearContent();
+  }
+  if (rows.length) {
+    var range = sheet.getRange(2, 1, rows.length, main.headers.length);
+    range.setNumberFormat('@');
+    range.setValues(rows);
+  }
+  main.children.forEach(function (child) {
+    apiWriteTableRows_(ss.getSheetByName(child.table), child, childRows[child.table]);
+  });
   return rows.length;
+}
+
+/** Susun baris tab anak dari satu record (array/map/object 1:1). */
+function apiBuildChildRows_(child, parentId, rec, key, sink) {
+  if (child.path === '*') {
+    /* notifications: field di luar skema dikumpulkan sebagai map meta. */
+    var mainAllowed = apiTables_().mains[child.parent].allowed;
+    Object.keys(rec).forEach(function (mk) {
+      if (mk === 'id' || mk === '_id' || mainAllowed[mk]) return;
+      var v = rec[mk];
+      if (v == null || v === '') return;
+      sink.push([parentId, mk,
+        apiCellFor_('s', String(v), child.table + '/' + parentId + '.' + mk)]);
+    });
+    return;
+  }
+
+  var raw = apiPathValue_(rec, child.path);
+  if (raw == null) return;
+
+  if (child.kind === 'list') {
+    if (!Array.isArray(raw)) {
+      throw apiError_('VALIDATION', 'Field "' + child.path + '" pada ' + key +
+        '/' + parentId + ' harus array.');
+    }
+    for (var i = 0; i < raw.length; i++) {
+      var el = raw[i];
+      var row = [parentId, String(i + 1)];
+      if (child.scalar) {
+        row.push(apiCellFor_(child.cols[0].type, el,
+          child.table + '/' + parentId + '#' + (i + 1)));
+      } else {
+        if (!el || typeof el !== 'object' || Array.isArray(el)) {
+          throw apiError_('VALIDATION', 'Elemen "' + child.path + '" pada ' +
+            key + '/' + parentId + ' harus objek.');
+        }
+        child.cols.forEach(function (col) {
+          row.push(apiCellFor_(col.type, el[col.src],
+            child.table + '/' + parentId + '#' + (i + 1) + '.' + col.col));
+        });
+      }
+      sink.push(row);
+    }
+    return;
+  }
+
+  if (child.kind === 'map') {
+    if (typeof raw !== 'object' || Array.isArray(raw)) {
+      throw apiError_('VALIDATION', 'Field "' + child.path + '" pada ' + key +
+        '/' + parentId + ' harus objek.');
+    }
+    Object.keys(raw).forEach(function (mk) {
+      var v = raw[mk];
+      if (v == null) return;
+      var row = [parentId, mk];
+      if (child.scalar) {
+        row.push(apiCellFor_(child.cols[0].type, v,
+          child.table + '/' + parentId + '.' + mk));
+      } else {
+        if (!v || typeof v !== 'object' || Array.isArray(v)) {
+          throw apiError_('VALIDATION', 'Nilai "' + child.path + '.' + mk +
+            '" pada ' + key + '/' + parentId + ' harus objek.');
+        }
+        child.cols.forEach(function (col) {
+          row.push(apiCellFor_(col.type, v[col.src],
+            child.table + '/' + parentId + '.' + mk + '.' + col.col));
+        });
+      }
+      sink.push(row);
+    });
+    return;
+  }
+
+  /* kind 'one': satu baris per record; kosong/null tidak menulis apa pun. */
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw apiError_('VALIDATION', 'Field "' + child.path + '" pada ' + key +
+      '/' + parentId + ' harus objek.');
+  }
+  var rowOne = [parentId];
+  child.cols.forEach(function (col) {
+    rowOne.push(apiCellFor_(col.type, raw[col.src],
+      child.table + '/' + parentId + '.' + col.col));
+  });
+  sink.push(rowOne);
+}
+
+/** Tulis baris ke satu tab (utama atau anak) dengan format teks. */
+function apiWriteTableRows_(sheet, tableDef, rows) {
+  if (!sheet) {
+    throw apiError_('SHEET_NOT_FOUND', 'Tab ' + tableDef.table + ' tidak ditemukan.');
+  }
+  var lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    sheet.getRange(2, 1, lastRow - 1, tableDef.headers.length).clearContent();
+  }
+  if (!rows.length) return;
+  var range = sheet.getRange(2, 1, rows.length, tableDef.headers.length);
+  range.setNumberFormat('@');
+  range.setValues(rows);
+}
+
+/**
+ * Baca satu koleksi dari tab utama + tab anaknya. Array selalu
+ * dimaterialisasi ([] saat kosong); map dan child 1:1 hanya muncul bila ada
+ * barisnya. Urutan record mengikuti urutan baris tab utama.
+ */
+function apiReadCollection_(ss, key) {
+  var store = apiTables_();
+  var main = store.mains[key];
+  if (!main) throw apiError_('SHEET_SCHEMA', 'Koleksi tidak dikenal: ' + key);
+  var sheet = apiSheet_(ss, key);
+  var rows = apiReadRows_(sheet, main.headers.length);
+  var out = [];
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i];
+    var hasData = String(row[0] == null ? '' : row[0]).trim() !== '';
+    if (!hasData) {
+      for (var h = 2; h < main.headers.length; h++) {
+        if (String(row[h] == null ? '' : row[h]).trim() !== '') { hasData = true; break; }
+      }
+    }
+    if (!hasData) continue;
+    var rec = { id: String(row[0] == null ? '' : row[0]).trim() };
+    for (var c = 0; c < main.cols.length; c++) {
+      var col = main.cols[c];
+      rec[col.src] = apiValueFor_(col.type, row[c + 2]);
+    }
+    out.push(rec);
+  }
+  if (!out.length) return out;
+
+  main.children.forEach(function (child) {
+    var childRows = apiReadRows_(ss.getSheetByName(child.table), child.headers.length);
+    var grouped = {};
+    for (var r = 0; r < childRows.length; r++) {
+      var crow = childRows[r];
+      var pid = String(crow[0] == null ? '' : crow[0]).trim();
+      if (!pid) continue;
+      var val;
+      var off = child.kind === 'one' ? 1 : 2;
+      if (child.scalar) {
+        val = apiValueFor_(child.cols[0].type, crow[off]);
+      } else {
+        val = {};
+        for (var cc = 0; cc < child.cols.length; cc++) {
+          var spec = child.cols[cc];
+          val[spec.src] = apiValueFor_(spec.type, crow[off + cc]);
+        }
+      }
+      if (val == null) continue;
+      if (child.kind === 'one') {
+        if (grouped[pid] == null) grouped[pid] = val;
+      } else if (child.kind === 'map') {
+        var key2 = String(crow[1] == null ? '' : crow[1]);
+        if (!key2) continue;
+        if (!grouped[pid]) grouped[pid] = {};
+        grouped[pid][key2] = val;
+      } else {
+        if (!Array.isArray(grouped[pid])) grouped[pid] = [];
+        grouped[pid].push(val);
+      }
+    }
+    out.forEach(function (rec) {
+      var sid = String(rec.id == null ? '' : rec.id);
+      if (child.path === '*') {
+        Object.keys(grouped[sid] || {}).forEach(function (mk) {
+          rec[mk] = grouped[sid][mk];
+        });
+        return;
+      }
+      if (child.kind === 'list' && !Array.isArray(grouped[sid])) {
+        apiPutPath_(rec, child.path, []);
+      } else if (grouped[sid] != null) {
+        apiPutPath_(rec, child.path, grouped[sid]);
+      }
+    });
+  });
+  return out;
 }
 
 function apiReadMeta_(ss) {
@@ -623,10 +1313,7 @@ function apiValidateUpsertList_(key, target) {
         throw apiError_('VALIDATION', 'Field rahasia "' + field + '" tidak boleh lewat commit.');
       }
     }
-    var json = JSON.stringify(rec);
-    if (json.length > API_MAX_JSON_CHARS) {
-      throw apiError_('VALIDATION', 'Record ' + id + ' pada ' + key + ' melebihi batas ' + API_MAX_JSON_CHARS + ' karakter.');
-    }
+    apiValidateRecordSchema_(key, rec);
   }
 }
 
@@ -1891,10 +2578,7 @@ function apiSyncValidateTargetShape_(key, target) {
       if (key === 'users' && (field === 'pass' || field === 'password')) continue;
       throw apiError_('VALIDATION', 'Field rahasia "' + field + '" tidak boleh ditulis dari klien.');
     }
-    var json = JSON.stringify(rec);
-    if (json.length > API_MAX_JSON_CHARS) {
-      throw apiError_('VALIDATION', 'Record ' + id + ' pada ' + key + ' melebihi batas ' + API_MAX_JSON_CHARS + ' karakter.');
-    }
+    apiValidateRecordSchema_(key, rec);
   }
   var delSeen = {};
   for (var d = 0; d < deletes.length; d++) {
@@ -1906,13 +2590,38 @@ function apiSyncValidateTargetShape_(key, target) {
   }
 }
 
+/** Nilai kosong (absen/null/'') dianggap sederajat: penyimpanan kolom tidak
+ *  membedakan field yang tidak diisi dengan field kosong. */
+function apiSyncValueEmpty_(value) {
+  return value === undefined || value === null || value === '';
+}
+
+/** Bandingkan dua nilai record dengan semantik penyimpanan kolom v2. */
+function apiSyncValueChanged_(a, b) {
+  if (apiSyncValueEmpty_(a) && apiSyncValueEmpty_(b)) return false;
+  if (a === b) return false;
+  if (typeof a !== 'object' && typeof b !== 'object') {
+    if (typeof a === 'boolean' || typeof b === 'boolean') {
+      return String(a) !== String(b);
+    }
+    if (typeof a === 'number' || typeof b === 'number') {
+      var na = typeof a === 'number' ? a : Number(a);
+      var nb = typeof b === 'number' ? b : Number(b);
+      if (isFinite(na) && isFinite(nb)) return Math.abs(na - nb) > 0.000001;
+    }
+    return String(a) !== String(b);
+  }
+  return JSON.stringify(a === undefined ? null : a) !== JSON.stringify(b === undefined ? null : b);
+}
+
 function apiSyncChangedFields_(rec, old) {
   var keys = {};
   Object.keys(rec || {}).forEach(function (k) { keys[k] = true; });
   Object.keys(old || {}).forEach(function (k) { keys[k] = true; });
   var out = [];
   Object.keys(keys).forEach(function (k) {
-    if (JSON.stringify(rec ? rec[k] : undefined) !== JSON.stringify(old ? old[k] : undefined)) out.push(k);
+    if (k === 'id' || k === '_id') return;
+    if (apiSyncValueChanged_(rec ? rec[k] : undefined, old ? old[k] : undefined)) out.push(k);
   });
   return out;
 }
@@ -2106,9 +2815,9 @@ function apiSyncRefundExpectation_(ctx, booking, schedule, next) {
       scope: 'total'
     };
   }
-  var fare = booking.fare;
-  var ticket = fare && isFinite(Number(fare.ticket))
-    ? Number(fare.ticket)
+  var fareTicket = booking.fareTicket;
+  var ticket = isFinite(Number(fareTicket)) && Number(fareTicket) > 0
+    ? Number(fareTicket)
     : apiSyncSplitFare_(ctx, schedule, (booking.seats || []).length,
         booking.discount || 0, booking.source || '').ticket;
   var departure = apiSyncScheduleDepartureMs_(schedule);
@@ -2678,9 +3387,12 @@ function apiSyncValidateSchedules_(ctx, target) {
   var currentMap = ctx.currentMap.schedules || {};
   var driverAllowed = {
     status: 1, tripStatus: 1, departedAt: 1, departedBy: 1, earlyStartReason: 1,
-    arrivedAt: 1, lateCompletion: 1, delayUntil: 1, delayReason: 1, delayNote: 1,
-    delayReportedAt: 1, delayReportedBy: 1, tripDelayInfo: 1, cancelReason: 1,
-    cancelledAt: 1, cancelledBy: 1, reviewedAt: 1, reviewResult: 1, refundPct: 1
+    arrivedAt: 1, lateCompletion: 1,
+    delayUntil: 1, delayReason: 1, delayNote: 1, delayMinutes: 1,
+    delayAddedMinutes: 1, delayedAt: 1, delayedBy: 1, tripDelayUpdatedAt: 1,
+    delayHistory: 1, tripDelayInfo: 1, seatBlockLog: 1, blockedSeats: 1,
+    cancelReason: 1, cancelledAt: 1, cancelledBy: 1, reviewedAt: 1,
+    reviewResult: 1, refundPct: 1
   };
   (target.upserts || []).forEach(function (rec) {
     var id = apiRecordId_(rec);
@@ -2875,7 +3587,8 @@ function apiSyncBookingAccess_(ctx, booking, schedule, old) {
 function apiSyncValidateBookings_(ctx, target) {
   var currentMap = ctx.currentMap.bookings || {};
   var allowedExisting = {
-    status: 1, tripStatus: 1, paidAt: 1, holdExpiry: 1, fare: 1, rating: 1,
+    status: 1, tripStatus: 1, paidAt: 1, holdExpiry: 1,
+    fareTicket: 1, fareService: 1, fareFee: 1, fareTotal: 1, rating: 1,
     boarded: 1, scheduleId: 1, seats: 1, passengers: 1, pickupCoords: 1,
     refundPct: 1, refundAmount: 1, refundScope: 1, refundStatus: 1, refundPaidAt: 1,
     cancelReason: 1, cancelledBy: 1, cancelledAt: 1,

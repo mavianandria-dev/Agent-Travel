@@ -13,7 +13,7 @@ source:
 
 # Arsitektur — MOC
 
-Aplikasi adalah SPA React dengan data default di `localStorage` dan satu Worker untuk AI. Backend Google Sheets 1.2.0 serta adapter frontend sudah ada, tetapi Web App ter-deploy masih 1.1.0 dan mode Sheets belum diaktifkan sampai deploy/CORS/uji per peran/lifecycle server-side lulus.
+Aplikasi adalah SPA React dengan data default di `localStorage` dan satu Worker untuk AI. Backend Google Sheets 1.3.0 (storage kolom v2) serta adapter frontend sudah ada, tetapi spreadsheet produksi masih format JSON lama dan mode Sheets belum diaktifkan sampai reset+seed ulang/deploy/CORS/uji per peran/lifecycle server-side lulus.
 
 ```mermaid
 flowchart TB

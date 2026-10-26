@@ -71,21 +71,21 @@ Workflow `.github/workflows/deploy-pages.yml`:
 
 ### Status mode Sheets
 
-- `code.gs` di repo sudah versi **1.2.0** dengan aksi `sync` ter-scope dan **265 asersi mock lokal**.
+- `code.gs` di repo sudah versi **1.3.0** dengan skema penyimpanan **kolom (schema 2)**, aksi `sync` ter-scope, dan **286 asersi mock lokal**.
 - Adapter frontend (`sheetsApi.js`, `remote.js`, `db.js`, `boot.js`, `AppContext`) sudah ada.
-- Web App yang ter-deploy saat catatan ini dibuat masih **1.1.0** dan menolak `sync` (`UNSUPPORTED_ACTION`).
-- `.env` default harus tetap `VITE_DATA_MODE=local` sampai deploy, probe CORS, dan uji end-to-end selesai. Jangan mencampur lokal dan Sheets. `VITE_SHEETS_URL` dikosongkan sampai deployment 1.2.0 terverifikasi.
+- Spreadsheet yang terpasang saat catatan ini dibuat memakai format **1 baris = 1 sel JSON (schema lama)**; reset + seed ulang wajib karena tidak ada migrasi data.
+- `.env` default harus tetap `VITE_DATA_MODE=local` sampai deploy, probe CORS, dan uji end-to-end selesai. Jangan mencampur lokal dan Sheets. `VITE_SHEETS_URL` dikosongkan sampai deployment 1.3.0 terverifikasi.
 - Lifecycle (`cleanupHolds`, jadwal lampau, resolusi maintenance) belum berjalan di mode Sheets; perlu trigger Apps Script/server-side sebelum data nyata.
 
 ### Deploy database mode direct
 
-1. Tempel `seed.gs`, `code.gs` versi 1.2.0, dan `appsscript.json` ke proyek Apps Script yang terikat ke spreadsheet.
-2. Isi Script Properties admin, jalankan `seedProduction()`, lalu `validateDatabase()`.
-3. Jalankan `setupBackend()` sekali. Pastikan `REQUIRE_PROXY_KEY=false` untuk mode direct.
+1. Tempel `seed.gs`, `code.gs` versi 1.3.0, dan `appsscript.json` ke proyek Apps Script yang terikat ke **spreadsheet baru/kosong** (reset).
+2. Isi Script Properties admin, jalankan `setupBackend()` **dulu**, lalu `seedProduction()` dan `validateDatabase()`.
+3. Pastikan `REQUIRE_PROXY_KEY=false` untuk mode direct.
 4. **Deploy → New deployment → Web app**:
    - **Execute as**: `Me`
    - **Who has access**: `Anyone`
-5. Salin URL `/exec`, bukan `/dev`. Jika memperbarui kode, buat versi deployment baru atau edit deployment agar versi 1.2.0 aktif.
+5. Salin URL `/exec`, bukan `/dev`. Jika memperbarui kode, buat versi deployment baru atau edit deployment agar versi 1.3.0 aktif.
 6. Probe CORS dari console browser di origin produksi (`https://<user>.github.io/Agent-Travel/`) dan origin dev Vite:
 
 ```js
@@ -100,7 +100,7 @@ fetch(URL, {
   .catch(console.error);
 ```
 
-Hasil yang diharapkan: `{"ok":true,"data":{"service":"transaceh-db","version":"1.2.0",...}}`.
+Hasil yang diharapkan: `{"ok":true,"data":{"service":"transaceh-db","version":"1.3.0","schemaVersion":"2",...}}`.
 
 7. Uji `login`, `bootstrap`, dan `sync` dari browser sebelum mengubah `VITE_DATA_MODE`. Pastikan juga lifecycle server-side sudah tersedia atau batasannya sudah disetujui.
 
@@ -114,7 +114,7 @@ Hasil yang diharapkan: `{"ok":true,"data":{"service":"transaceh-db","version":"1
 - `session`, `lang`, `checkout_draft`, dan `guest_support_tickets` tetap di `localStorage`; data aplikasi lain masuk cache Sheets.
 - Spreadsheet tetap privat; Web App publik dengan URL sebagai gerbang.
 - Jangan menaruh `API_TOKEN_SECRET`, `PASSWORD_PEPPER`, atau `API_PROXY_KEY` di frontend.
-- Uji lokal `code.gs`: `node google-apps-script/local-tests/mock-harness.mjs` (265 asersi).
+- Uji lokal `code.gs`: `node google-apps-script/local-tests/mock-harness.mjs` (286 asersi).
 
 Lihat [[Database Google Sheets]] untuk kontrak API, proyeksi publik, filter per peran, dan risiko produksi.
 

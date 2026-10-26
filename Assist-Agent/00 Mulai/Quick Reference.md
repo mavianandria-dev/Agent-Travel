@@ -55,14 +55,14 @@ Data seed akan dibuat ulang saat halaman dimuat. Rute, jadwal, dan booking tetap
 
 ## Database Google Sheets
 
-Backend `code.gs` 1.2.0 dan adapter frontend sudah ada, tetapi Web App ter-deploy masih 1.1.0 dan menolak `sync`. Mode aplikasi tetap `local` sampai deploy, probe CORS, uji end-to-end, dan lifecycle server-side selesai.
+Backend `code.gs` 1.3.0 memakai **penyimpanan kolom (schema 2)** dan adapter frontend sudah ada, tetapi Web App ter-deploy masih format JSON lama dan spreadsheet **harus di-reset + di-seed ulang**. Mode aplikasi tetap `local` sampai deploy, probe CORS, uji end-to-end, dan lifecycle server-side selesai.
 
 1. Buka spreadsheet kosong → **Extensions → Apps Script**.
 2. Pasang `google-apps-script/seed.gs`, `code.gs`, dan `appsscript.json`.
 3. Isi Script Properties: `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PHONE`, `ADMIN_PASSWORD`.
-4. Jalankan `seedProduction()`, lalu `validateDatabase()`.
-5. Jalankan `setupBackend()`, deploy Web App, lalu probe CORS.
-6. Uji lokal: `node google-apps-script/local-tests/mock-harness.mjs` (265 asersi).
+4. Jalankan `setupBackend()` **dulu**, lalu `seedProduction()` dan `validateDatabase()`.
+5. Deploy Web App (versi baru), lalu probe CORS.
+6. Uji lokal: `node google-apps-script/local-tests/mock-harness.mjs` (286 asersi).
 
 Jangan mengaktifkan `VITE_DATA_MODE=sheets` atau memasukkan data pelanggan/KYC nyata sebelum probe CORS dan uji semua peran selesai. Detail di [[Database Google Sheets]].
 

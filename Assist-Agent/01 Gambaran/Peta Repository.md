@@ -63,11 +63,11 @@ google-apps-script/
 ├─ code.gs                  # API Web App mode direct
 ├─ appsscript.json          # manifest bound script
 ├─ local-tests/
-│  └─ mock-harness.mjs      # 265 asersi mock Apps Script
+│  └─ mock-harness.mjs      # 286 asersi mock Apps Script
 └─ README.md                # pemasangan, probe CORS, kontrak API
 ```
 
-Script terikat ke spreadsheet. `code.gs` versi 1.2.0 memakai mode direct (tanpa proxy DB), sudah punya `sync` ter-scope, dan lulus 265 asersi lokal. Adapter frontend juga sudah ada, tetapi deployment Web App masih 1.1.0; mode default tetap `local` sampai gerbang deploy/CORS lulus. Lihat [[Database Google Sheets]].
+Script terikat ke spreadsheet. `code.gs` versi 1.3.0 memakai mode direct (tanpa proxy DB), skema penyimpanan **kolom v2** (19 tab utama + ~40 tab anak), sudah punya `sync` ter-scope, dan lulus 286 asersi lokal. Adapter frontend juga sudah ada, tetapi spreadsheet produksi masih format JSON lama dan harus di-reset + di-seed ulang; mode default tetap `local` sampai gerbang deploy/CORS lulus. Lihat [[Database Google Sheets]].
 
 ## File kunci dan ukuran
 
@@ -84,9 +84,9 @@ Script terikat ke spreadsheet. `code.gs` versi 1.2.0 memakai mode direct (tanpa 
 | `src/pages/TicketDetail.jsx` | 246 | Detail tiket + refund/pindah |
 | `src/admin/Accounts.jsx` | 509 | Manajemen akun |
 | `src/pages/help/ChatSection.jsx` | 429 | Chat AI |
-| `google-apps-script/seed.gs` | 476 | Seed database Sheets + validasi |
-| `google-apps-script/code.gs` | 3.850 | API Web App 1.2.0: bootstrap, `sync`, validasi domain |
-| `google-apps-script/local-tests/mock-harness.mjs` | 1.636 | 265 asersi mock `code.gs` |
+| `google-apps-script/seed.gs` | 565 | Skema kolom v2 lewat `apiDescribeStore_` + seed produksi + validasi |
+| `google-apps-script/code.gs` | 4.563 | API Web App 1.3.0: skema kolom, bootstrap, `sync`, validasi domain |
+| `google-apps-script/local-tests/mock-harness.mjs` | 1.791 | 286 asersi mock `code.gs` |
 | `google-apps-script/README.md` | 383 | Pemasangan, probe CORS, kontrak API |
 | `index.html` (root) | 2.053 | Versi legacy single-file |
 

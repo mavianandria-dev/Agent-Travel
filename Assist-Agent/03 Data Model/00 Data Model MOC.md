@@ -6,12 +6,13 @@ tags:
   - type/moc
   - area/data
 status: aktif
-updated: 2026-10-24
+updated: 2026-10-26
 source:
   - transaceh-react/src/lib/db.js
   - transaceh-react/src/lib/seed.js
   - transaceh-react/src/lib/domain.js
   - google-apps-script/seed.gs
+  - google-apps-script/code.gs
 ---
 
 # Data Model — MOC
@@ -20,7 +21,7 @@ Semua data aplikasi **saat ini** disimpan di `localStorage` dengan prefix `at_`.
 Tidak ada database relasional; relasi antar koleksi memakai **ID atau email** di dalam objek.
 
 > [!info] Google Sheets belum aktif
-> Skema tab untuk Google Sheets sudah disiapkan di `google-apps-script/seed.gs`, tetapi aplikasi belum membacanya. Tabel di bawah tetap menggambarkan `localStorage`. Lihat [[Database Google Sheets]].
+> Skema penyimpanan **kolom (storage v2)** sudah selesai di `google-apps-script/code.gs:519-845` (`API_MAIN_TABLES`) dan seed di `seed.gs`, dan lulus 286 asersi harness lokal; tetapi aplikasi produksi belum memakainya sampai deploy + probe CORS + reset spreadsheet. Tabel di bawah tetap menggambarkan `localStorage`. Lihat [[Database Google Sheets]].
 
 ## Koleksi
 
@@ -58,7 +59,7 @@ Tidak ada database relasional; relasi antar koleksi memakai **ID atau email** di
 - [[Data - vouchers, reviews, banners]]
 - [[Data - notifications, audit, settings]]
 - [[Data - supportTickets]]
-- [[Database Google Sheets]] — skema seed remote (belum aktif)
+- [[Database Google Sheets]] — skema penyimpanan kolom v2 (belum aktif)
 
 ## Aturan penting
 

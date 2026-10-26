@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(path.join(__dirname, '..', 'code.gs'), 'utf8');
+const seedSource = readFileSync(path.join(__dirname, '..', 'seed.gs'), 'utf8');
 
 /* ------------------------------------------------------------------ */
 /* Mock Spreadsheet                                                    */
@@ -50,6 +51,7 @@ class MockRange {
     }
     return this;
   }
+  setNumberFormat() { return this; }
   clearContent() {
     for (let i = 0; i < this.numRows; i++) {
       const line = this.sheet.rows[this.row - 1 + i];
@@ -73,6 +75,13 @@ class MockSheet {
   getRange(row, col, numRows = 1, numCols = 1) {
     return new MockRange(this, row, col, numRows, numCols);
   }
+  clearContents() { this.rows = []; return this; }
+  setNumberFormat() { return this; }
+  setFontWeight() { return this; }
+  setBackground() { return this; }
+  setFontColor() { return this; }
+  setFrozenRows() { return this; }
+  setColumnWidth() { return this; }
 }
 
 class MockSpreadsheet {
@@ -83,6 +92,11 @@ class MockSpreadsheet {
     this.sheetMap.set(name, sheet);
     return sheet;
   }
+  insertSheet(name) { return this.addSheet(name); }
+  deleteSheet(sheet) {
+    if (sheet && this.sheetMap.get(sheet.name) === sheet) this.sheetMap.delete(sheet.name);
+  }
+  getSheets() { return Array.from(this.sheetMap.values()); }
 }
 
 /* ------------------------------------------------------------------ */
@@ -172,9 +186,9 @@ const sandbox = {
 };
 
 vm.createContext(sandbox);
-const script = new vm.Script(source);
 try {
-  script.runInContext(sandbox);
+  new vm.Script(source).runInContext(sandbox);
+  new vm.Script(seedSource).runInContext(sandbox);
 } catch (err) {
   console.error('PARSE/LOAD ERROR:', err.stack || err.message);
   process.exit(1);
@@ -182,6 +196,10 @@ try {
 
 const S = sandbox;
 const seedKeys = S.API_COLLECTION_KEYS;
+
+/* Secret dibuat sebelum fixture supaya hash password fixture memakai pepper
+   runtime yang sama dengan semua alur login selama pengujian. */
+S.setupBackend();
 
 /* ------------------------------------------------------------------ */
 /* Fixture data                                                        */
@@ -207,54 +225,160 @@ function futureDate(days) {
   return new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
 }
 
-seedKeys.forEach((key) => {
-  const sheet = spread.addSheet(key);
-  sheet.rows.push(['id', 'ord', 'json', 'updated_at']);
+/* Semua tab (utama + anak) dibuat dari skema backend supaya bentuk kolom
+   identik dengan spreadsheet produksi yang di-seed lewat setup. */
+const storeSchema = S.apiDescribeStore_();
+storeSchema.tables.forEach((table) => {
+  const sheet = spread.getSheetByName(table.name) || spread.addSheet(table.name);
+  sheet.rows = [];
+  sheet.rows.push([...table.headers]);
 });
-const metaSheet = spread.addSheet('_meta');
+const metaSheet = spread.getSheetByName('_meta') || spread.addSheet('_meta');
+metaSheet.rows = [];
 metaSheet.rows.push(['key', 'value']);
-metaSheet.rows.push(['schemaVersion', '1']);
-metaSheet.rows.push(['seedVersion', 'production-1']);
+metaSheet.rows.push(['schemaVersion', '2']);
+metaSheet.rows.push(['seedVersion', 'production-2']);
+metaSheet.rows.push(['storage', 'columns-v2']);
 metaSheet.rows.push(['databaseMode', 'produksi-minimal']);
 metaSheet.rows.push(['seededAt', '2026-10-24T00:00:00.000Z']);
+metaSheet.rows.push(['tableCount', String(storeSchema.tables.length)]);
+metaSheet.rows.push(['collectionCount', String(seedKeys.length)]);
 seedKeys.forEach((key) => metaSheet.rows.push(['rev.' + key, '1']));
 
+/* Fixture ditulis lewat jalur tulis engine (apiWriteCollection_) supaya
+   normalisasi kolom v2 ikut teruji sejak seeding. */
 function seedCollection(key, records) {
-  const sheet = spread.getSheetByName(key);
-  records.forEach((rec, i) => {
-    sheet.rows.push([rec.id ?? rec.key ?? '', i + 1, JSON.stringify(rec), '2026-10-24T00:00:00.000Z']);
-  });
+  S.apiWriteCollection_(spread, key, records);
 }
 
+/** Baca satu record via jalur baca engine (tab kolom, bukan JSON). */
+function readRec(key, id) {
+  const found = S.apiReadCollection_(spread, key).find((r) => String(r.id) === String(id));
+  return found || null;
+}
+
+/* Fixture password diprakasakan lewat apiHashForUser_ (kolom plaintext tidak
+   ada di skema v2; arsip plaintext lama tidak pernah ikut ter-seed). */
+function withHash(record, password) {
+  const copy = Object.assign({}, record);
+  delete copy.pass;
+  delete copy.password;
+  S.apiHashForUser_(copy, password, S.apiConfig_());
+  return copy;
+}
+
+/* --- comparator round-trip nirkalan untuk storage kolom ---------------- */
+
+function scalarNorm(value) {
+  if (value === null || value === undefined) return '';
+  if (value === true) return 'true';
+  if (value === false) return 'false';
+  return value;
+}
+
+function scalarEqual(a, b) {
+  const na = scalarNorm(a);
+  const nb = scalarNorm(b);
+  if (typeof na === 'number' || typeof nb === 'number') {
+    const numA = Number(na);
+    const numB = Number(nb);
+    if (Number.isFinite(numA) && Number.isFinite(numB)) return numA === numB;
+  }
+  return String(na) === String(nb);
+}
+
+function schemaRecordsEqual(aRecs, bRecs) {
+  if (!Array.isArray(aRecs) || !Array.isArray(bRecs) || aRecs.length !== bRecs.length) {
+    console.log('  roundtrip: panjang koleksi beda (' + (aRecs || []).length + ' vs ' + (bRecs || []).length + ')');
+    return false;
+  }
+  let equal = true;
+  for (let i = 0; i < aRecs.length; i++) {
+    if (!schemaValueEqual(aRecs[i], bRecs[i], 'rec[' + ((aRecs[i] || {}).id || i) + ']')) equal = false;
+  }
+  return equal;
+}
+
+function schemaValueEqual(a, b, path) {
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b)) {
+      console.log('  roundtrip', path, 'bentuk array beda');
+      return false;
+    }
+    if (a.length !== b.length) {
+      console.log('  roundtrip', path, 'panjang array beda (' + a.length + ' vs ' + b.length + ')');
+      return false;
+    }
+    let equal = true;
+    for (let i = 0; i < a.length; i++) {
+      if (!schemaValueEqual(a[i], b[i], path + '[' + i + ']')) equal = false;
+    }
+    return equal;
+  }
+  if (a && b && typeof a === 'object' && typeof b === 'object') {
+    let equal = true;
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+    for (const k of keys) {
+      if (!schemaValueEqual(a[k], b[k], path + '.' + k)) equal = false;
+    }
+    return equal;
+  }
+  const eq = scalarEqual(a, b);
+  if (!eq) console.log('  roundtrip', path, 'nilai beda:', JSON.stringify(a), 'vs', JSON.stringify(b));
+  return eq;
+}
+
+function seedDoc(label) {
+  return {
+    name: label,
+    type: 'image/png',
+    size: 48000 + label.length,
+    dataUrl: 'data:image/png;base64,AAAA' + label.replace(/\s+/g, ''),
+    at: '2026-10-01T00:00:00.000Z'
+  };
+}
 const kyc1 = {
+  jenis: 'Perorangan / Freelance',
   nama: 'H. Muhammad Nur',
   nik: '1173010101800001',
   npwp: '12.345.678.9-101.000',
   bank: 'BCA',
   rekeningNo: '8210-9921-11',
   rekeningNama: 'Barakah Travel',
-  fotoKtp: 'data:image/png;base64,AAAAKTP1',
-  fotoSelfie: 'data:image/png;base64,AAAASELFIE1'
+  status: 'lengkap', step: 3, terms: true,
+  submittedAt: '2026-10-01T00:00:00.000Z',
+  updatedAt: '2026-10-01T00:00:00.000Z',
+  docs: {
+    ktp: seedDoc('KTP Barakah'),
+    npwpPribadi: seedDoc('NPWP Barakah'),
+    bukuTabungan: seedDoc('Rekening Barakah')
+  }
 };
 const kyc2 = {
+  jenis: 'Perorangan / Freelance',
   nama: 'Cut Putra',
   nik: '1171010101850002',
   npwp: '98.765.432.1-101.000',
   bank: 'Mandiri',
   rekeningNo: '8900-1122-33',
   rekeningNama: 'Putra Jaya',
-  fotoKtp: 'data:image/png;base64,AAAAKTP2',
-  fotoSelfie: 'data:image/png;base64,AAAASELFIE2'
+  status: 'pending', step: 2, terms: true,
+  submittedAt: '2026-10-02T00:00:00.000Z',
+  updatedAt: '2026-10-02T00:00:00.000Z',
+  docs: {
+    ktp: seedDoc('KTP PutraJaya'),
+    pasfoto: seedDoc('Pasfoto PutraJaya')
+  }
 };
 
 seedCollection('users', [
-  { id: 'u_admin_1', name: 'Admin Utama', email: 'admin@transaceh.id', phone: '0812000000', role: 'superadmin', status: 'active', pass: LEGACY_ADMIN_PW },
-  { id: 'u_agen_1', name: 'Agen Barakah', email: 'agen1@test.local', phone: '0812000001', role: 'agen', agencyId: 'ag_1', status: 'active', pass: LEGACY_AGEN_PW },
-  { id: 'u_agen_2', name: 'Agen Putra Jaya', email: 'agen2@test.local', phone: '0812000002', role: 'agen', agencyId: 'ag_2', status: 'active', pass: LEGACY_AGEN2_PW },
-  { id: 'u_driver_1', name: 'Bang Jamil', email: 'driver1@test.local', phone: '0812000003', role: 'pengemudi', agencyId: 'ag_1', status: 'active', pass: LEGACY_DRIVER1_PW, profileStep: 'done' },
-  { id: 'u_driver_3', name: 'Bang Hendra', email: 'driver3@test.local', phone: '0812000004', role: 'pengemudi', agencyId: 'ag_2', status: 'active', pass: LEGACY_DRIVER1_PW, profileStep: 'done' },
-  { id: 'u_cust_1', name: 'Rina Amelia', email: 'cust1@test.local', phone: '0812000005', role: 'pelanggan', status: 'active', favorites: [], pass: LEGACY_CUST1_PW },
-  { id: 'u_cust_2', name: 'Dedi Pelanggan', email: 'cust2@test.local', phone: '0812000006', role: 'pelanggan', status: 'active', favorites: [], pass: LEGACY_CUST2_PW }
+  withHash({ id: 'u_admin_1', name: 'Admin Utama', email: 'admin@transaceh.id', phone: '0812000000', role: 'superadmin', status: 'active' }, LEGACY_ADMIN_PW),
+  withHash({ id: 'u_agen_1', name: 'Agen Barakah', email: 'agen1@test.local', phone: '0812000001', role: 'agen', agencyId: 'ag_1', status: 'active' }, LEGACY_AGEN_PW),
+  withHash({ id: 'u_agen_2', name: 'Agen Putra Jaya', email: 'agen2@test.local', phone: '0812000002', role: 'agen', agencyId: 'ag_2', status: 'active' }, LEGACY_AGEN2_PW),
+  withHash({ id: 'u_driver_1', name: 'Bang Jamil', email: 'driver1@test.local', phone: '0812000003', role: 'pengemudi', agencyId: 'ag_1', status: 'active', profileStep: 'done' }, LEGACY_DRIVER1_PW),
+  withHash({ id: 'u_driver_3', name: 'Bang Hendra', email: 'driver3@test.local', phone: '0812000004', role: 'pengemudi', agencyId: 'ag_2', status: 'active', profileStep: 'done' }, LEGACY_DRIVER1_PW),
+  withHash({ id: 'u_cust_1', name: 'Rina Amelia', email: 'cust1@test.local', phone: '0812000005', role: 'pelanggan', status: 'active', favorites: [] }, LEGACY_CUST1_PW),
+  withHash({ id: 'u_cust_2', name: 'Dedi Pelanggan', email: 'cust2@test.local', phone: '0812000006', role: 'pelanggan', status: 'active', favorites: [] }, LEGACY_CUST2_PW)
 ]);
 
 seedCollection('agencies', [
@@ -287,8 +411,8 @@ seedCollection('agencies', [
 ]);
 
 seedCollection('routes', [
-  { id: 'rt_1', from: 'Calang', to: 'Banda Aceh', distanceKm: 170, durationMin: 240, prices: { ag_1: 150000, ag_2: 160000 }, agencyIds: ['ag_1', 'ag_2'] },
-  { id: 'rt_2', from: 'Banda Aceh', to: 'Medan', distanceKm: 430, durationMin: 600, prices: { ag_2: 260000 }, agencyIds: ['ag_2'] }
+  { id: 'rt_1', from: 'Calang', to: 'Banda Aceh', distance: '170 km', duration: '4 j', prices: { ag_1: 150000, ag_2: 160000 }, agencyIds: ['ag_1', 'ag_2'] },
+  { id: 'rt_2', from: 'Banda Aceh', to: 'Medan', distance: '430 km', duration: '10 j', prices: { ag_2: 260000 }, agencyIds: ['ag_2'] }
 ]);
 
 seedCollection('vehicles', [
@@ -359,21 +483,33 @@ seedCollection('payments', [
 ]);
 
 seedCollection('ledger', [
-  { id: 'l_1', agencyId: 'ag_1', bookingId: 'b_1', status: 'settled', amount: 12000 },
-  { id: 'l_2', agencyId: 'ag_2', bookingId: 'b_4', status: 'settled', amount: 26000 }
+  {
+    id: 'l_1', agencyId: 'ag_1', bookingId: 'b_1', scheduleId: 's_1', driverId: 'd_1',
+    userEmail: 'cust1@test.local', seats: ['A1'],
+    ticket: 12000, service: 3000, fee: 1000, total: 16000,
+    status: 'layak', createdAt: '2026-10-20T01:05:00.000Z',
+    releasedAt: null, paidOutAt: null
+  },
+  {
+    id: 'l_2', agencyId: 'ag_2', bookingId: 'b_4', scheduleId: 's_3', driverId: 'd_3',
+    userEmail: 'cust2@test.local', seats: ['A4'],
+    ticket: 220000, service: 10000, fee: 26000, total: 260000,
+    status: 'layak', createdAt: '2026-10-20T04:05:00.000Z',
+    releasedAt: null, paidOutAt: null
+  }
 ]);
 
 seedCollection('notifications', [
   { id: 'n_1', to: 'cust1@test.local', title: 'Booking dibuat', msg: 'Pembayaran diterima', ch: 'app', time: '2026-10-20T01:06:00.000Z', read: false },
   { id: 'n_2', to: 'cust2@test.local', title: 'Booking dibuat', msg: 'Segera bayar', ch: 'app', time: '2026-10-20T02:06:00.000Z', read: false },
-  { id: 'n_3', to: 'agen1@test.local', title: 'Pesanan baru', msg: 'Ada booking baru', ch: 'app', time: '2026-10-20T02:07:00.000Z', read: false },
+  { id: 'n_3', to: 'agen1@test.local', title: 'Pesanan baru', msg: 'Ada booking baru', ch: 'app', time: '2026-10-20T02:07:00.000Z', bookingId: 'b_1', kind: 'booking', read: false },
   { id: 'n_4', to: 'driver1@test.local', title: 'Tugas baru', msg: 'Anda ditugaskan', ch: 'app', time: '2026-10-20T02:08:00.000Z', read: false },
   { id: 'n_all', to: 'all', title: 'Pengumuman', msg: 'Promo akhir bulan', ch: 'app', time: '2026-10-20T02:09:00.000Z', read: false }
 ]);
 
 seedCollection('supportTickets', [
   { id: 'st_1', code: 'ADU-1', userEmail: 'cust1@test.local', userId: 'u_cust_1', bookingCode: '', status: 'new', messages: [] },
-  { id: 'st_2', code: 'ADU-2', agencyId: 'ag_1', userEmail: 'cust2@test.local', bookingCode: 'TA-1', status: 'process', messages: [] },
+  { id: 'st_2', code: 'ADU-2', agencyId: 'ag_1', userEmail: 'cust2@test.local', bookingCode: 'TA-1', status: 'process', messages: [{ id: 'MSG-2-1', from: 'user', text: 'Booking gagal tampil di tiket', author: 'Dedi', at: '2026-10-20T02:10:00.000Z' }], statusHistory: [{ status: 'process', at: '2026-10-20T02:12:00.000Z', by: 'agen1@test.local', note: 'Diproses agen' }] },
   { id: 'st_3', code: 'ADU-3', userEmail: 'cust2@test.local', bookingCode: 'TA-9', status: 'new', messages: [] },
   { id: 'st_4', code: 'ADU-4', agencyId: 'ag_2', userEmail: 'cust2@test.local', bookingCode: 'TA-4', status: 'new', messages: [] }
 ]);
@@ -493,7 +629,7 @@ ok('setupBackend menggenerasi TOKEN_TTL', Number(scriptProperties.get('TOKEN_TTL
 ok('REQUIRE_PROXY_KEY default false', scriptProperties.get('REQUIRE_PROXY_KEY') === 'false');
 
 let res = dispatch({ action: 'health' });
-ok('health tanpa proxyKey tetap ok', res.ok === true && res.data.version === '1.2.0', res);
+ok('health tanpa proxyKey tetap ok', res.ok === true && res.data.version === '1.3.0', res);
 ok('health tidak membocorkan secret', !JSON.stringify(res).includes(proxyKey) && !JSON.stringify(res).includes(scriptProperties.get('API_TOKEN_SECRET')));
 
 /* ------------------------------------------------------------------ */
@@ -505,10 +641,10 @@ const usersRevBeforeLogin = revOf('users');
 res = login('admin@transaceh.id', LEGACY_ADMIN_PW);
 ok('login legacy tanpa proxyKey sukses', res.ok === true && typeof res.data.token === 'string' && res.data.token.length > 20, res);
 ok('response login tanpa field pass/hash', !('"pass"' in (res.data.user || {})) && !('passHash' in (res.data.user || {})), Object.keys(res.data.user || {}));
-ok('rev.users naik setelah migrasi password', revOf('users') === usersRevBeforeLogin + 1, { before: usersRevBeforeLogin, after: revOf('users') });
-const adminRowAfter = spread.getSheetByName('users').rows.find((r) => String(r[0]) === 'u_admin_1');
-ok('plaintext password hilang dari sheet setelah login', !String(adminRowAfter[2]).includes(LEGACY_ADMIN_PW));
-ok('passHash muncul di sheet setelah login', String(adminRowAfter[2]).includes('"passHash"'));
+ok('login dengan hash modern tidak menulis ulang users', revOf('users') === usersRevBeforeLogin, { before: usersRevBeforeLogin, after: revOf('users') });
+const adminRecAfter = readRec('users', 'u_admin_1');
+ok('plaintext password tidak tersimpan sebagai field record', !!adminRecAfter && !Object.prototype.hasOwnProperty.call(adminRecAfter, 'pass'));
+ok('passHash terisi setelah login', !!adminRecAfter && typeof adminRecAfter.passHash === 'string' && adminRecAfter.passHash.length > 20);
 let adminToken = res.data.token;
 let agenToken = '';
 let driverToken = '';
@@ -680,7 +816,7 @@ ok('armada yang diterima pengemudi tidak memuat data pemilik/dokumen',
 /* ------------------------------------------------------------------ */
 
 console.log('\n== 6) commit upsert / delete / konflik revisi / role ==');
-const routeBook = { id: 'r_1', name: 'Banda Aceh - Takengon', origin: 'Banda Aceh', destination: 'Takengon' };
+const routeBook = { id: 'r_1', from: 'Banda Aceh', to: 'Takengon' };
 const routeBase = revOf('routes');
 const upsert = { changes: { routes: { baseRev: routeBase, upserts: [routeBook], deletes: [] } } };
 res = dispatch(bodyOf(upsert, { action: 'commit', token: adminToken }));
@@ -713,7 +849,7 @@ const routeRevNow = revOf('routes');
 res = dispatch(bodyOf({ changes: { routes: { baseRev: routeRevNow, upserts: [{ name: 'tanpa-id' }], deletes: [] } } }, { action: 'commit', token: adminToken }));
 ok('commit record tanpa id ditolak', res.ok === false && res.error.code === 'VALIDATION', res);
 
-res = dispatch(bodyOf({ changes: { routes: { baseRev: routeRevNow, upserts: [{ id: 'r_dup', name: 'a' }, { id: 'r_dup', name: 'b' }], deletes: [] } } }, { action: 'commit', token: adminToken }));
+res = dispatch(bodyOf({ changes: { routes: { baseRev: routeRevNow, upserts: [{ id: 'r_dup', from: 'a', to: 'b' }, { id: 'r_dup', from: 'a', to: 'b' }], deletes: [] } } }, { action: 'commit', token: adminToken }));
 ok('commit id duplikat pada request ditolak', res.ok === false && res.error.code === 'VALIDATION', res);
 
 res = dispatch(bodyOf({ changes: { routes: { baseRev: routeRevNow, upserts: [{ id: 'r_secret', pass: 'guna' }], deletes: [] } } }, { action: 'commit', token: adminToken }));
@@ -744,8 +880,8 @@ res = dispatch(bodyOf({ changes: { users: { baseRev: usersBase, upserts: [profil
 ok('commit profil user (tanpa field password) sukses', res.ok === true && res.data.revisions.users === usersBase + 1, res);
 res = login('cust1@test.local', LEGACY_CUST1_PW);
 ok('commit profil user tidak menghapus hash password', res.ok === true, res);
-const cust1RowAfter = spread.getSheetByName('users').rows.find((r) => String(r[0]) === 'u_cust_1');
-ok('hash password user tetap ada setelah commit profil', String(cust1RowAfter?.[2]).includes('"passHash"') && String(cust1RowAfter?.[2]).includes('Rina Amelia Updated'));
+const cust1RecAfter = readRec('users', 'u_cust_1');
+ok('hash password user tetap ada setelah commit profil', !!cust1RecAfter && typeof cust1RecAfter.passHash === 'string' && cust1RecAfter.name === 'Rina Amelia Updated');
 
 /* ------------------------------------------------------------------ */
 /* 7) changePassword                                                   */
@@ -784,7 +920,10 @@ console.log('\n== 8) register pelanggan / agen ==');
 res = dispatch(bodyOf({ name: 'Pelanggan Baru', email: 'newcust@test.local', phone: '081255550001', password: REG_PAX_PW, role: 'pelanggan' }, { action: 'register' }));
 ok('register pelanggan sukses + token', res.ok === true && res.data.user.role === 'pelanggan' && typeof res.data.token === 'string' && res.data.pending === false, res);
 const newCustId = res.ok ? res.data.user.id : '';
-ok('register pelanggan menyimpan hash, bukan plaintext', !String(spread.getSheetByName('users').rows.find((r) => String(r[0]) === newCustId)?.[2]).includes(REG_PAX_PW));
+ok('register pelanggan menyimpan hash, bukan plaintext', (() => {
+  const recMan = readRec('users', newCustId);
+  return !!recMan && typeof recMan.passHash === 'string' && !JSON.stringify(recMan).includes(REG_PAX_PW);
+})());
 
 res = dispatch(bodyOf({ name: 'Duplikat', email: 'newcust@test.local', phone: '081255550002', password: 'duplikat-pw-123', role: 'pelanggan' }, { action: 'register' }));
 ok('register email duplikat ditolak', res.ok === false && res.error.code === 'VALIDATION', res);
@@ -798,7 +937,10 @@ ok('register no HP tidak valid ditolak', res.ok === false && res.error.code === 
 res = dispatch(bodyOf({ name: 'Agen Baru', email: 'newagen@test.local', phone: '081255550004', password: REG_AGEN_PW, role: 'agen', agencyName: 'Travel Harapan', agencyAddress: 'Jl. Harapan No.2' }, { action: 'register' }));
 ok('register agen sukses dan pending tanpa token', res.ok === true && res.data.pending === true && res.data.user.status === 'pending' && !res.data.token, res);
 const newAgencyId = res.ok ? res.data.user.agencyId : '';
-ok('register agen membuat agensi pending', !!spread.getSheetByName('agencies').rows.find((r) => String(r[0]) === newAgencyId && String(r[2]).includes('"status":"pending"')));
+ok('register agen membuat agensi pending', (() => {
+  const recMan = readRec('agencies', newAgencyId);
+  return !!recMan && recMan.status === 'pending';
+})());
 res = login('newagen@test.local', REG_AGEN_PW);
 ok('login agen pending sukses untuk melengkapi KYC', res.ok === true && res.data.user.status === 'pending' && typeof res.data.token === 'string', res);
 const pendingAgenToken = res.ok ? res.data.token : '';
@@ -810,8 +952,7 @@ ok('bootstrap agen pending hanya memuat agensi sendiri dan akun sendiri',
   String(res.data.records.agencies[0].id) === String(newAgencyId) &&
   (res.data.records.users || []).length === 1 &&
   !res.data.records.schedules && !res.data.records.vehicles, res);
-const pendingAgencyRow = spread.getSheetByName('agencies').rows.find((r) => String(r[0]) === newAgencyId);
-const pendingAgencyRec = pendingAgencyRow ? JSON.parse(pendingAgencyRow[2]) : null;
+const pendingAgencyRec = readRec('agencies', newAgencyId);
 const pendingAgencyBase = revOf('agencies');
 res = sync({ agencies: { baseRev: pendingAgencyBase, upserts: [Object.assign({}, pendingAgencyRec, { kyc: { nama: 'Agen Baru KYC' } })], deletes: [] } }, pendingAgenToken);
 ok('agen pending boleh menyimpan KYC agensinya', res.ok === true && res.data.revisions.agencies === pendingAgencyBase + 1, res);
@@ -843,8 +984,8 @@ ok('agensi yang sudah punya agen ditolak', res.ok === false && res.error.code ==
 res = dispatch(bodyOf({ name: 'Pengemudi Baru', email: 'driver.baru@test.local', phone: '081255560004', password: DRIVER_NEW_PW, role: 'pengemudi', driverId: 'd_new', status: 'active' }, { action: 'adminCreateUser', token: adminToken }));
 ok('admin membuat akun pengemudi', res.ok === true && res.data.user.role === 'pengemudi' && res.data.user.agencyId === 'ag_2', res);
 const newDriverId = res.ok ? res.data.user.id : '';
-const dNewRow = spread.getSheetByName('drivers').rows.find((r) => String(r[0]) === 'd_new');
-ok('akun pengemudi menautkan email ke data driver', String(dNewRow?.[2]).includes('driver.baru@test.local'));
+const dNewRec = readRec('drivers', 'd_new');
+ok('akun pengemudi menautkan email ke data driver', !!dNewRec && dNewRec.userEmail === 'driver.baru@test.local');
 res = login('driver.baru@test.local', DRIVER_NEW_PW);
 ok('pengemudi baru bisa login', res.ok === true && res.data.user.id === newDriverId, res);
 
@@ -895,8 +1036,8 @@ const custProfile = {
 };
 res = sync({ users: { baseRev: custBase, upserts: [custProfile], deletes: [] } }, custToken);
 ok('sync pelanggan update profil sendiri sukses', res.ok === true && res.data.revisions.users === custBase + 1, res);
-const custRowSync = spread.getSheetByName('users').rows.find((r) => String(r[0]) === 'u_cust_1');
-ok('sync profil pelanggan tidak menghapus hash password', String(custRowSync?.[2]).includes('"passHash"') && String(custRowSync?.[2]).includes('Rina Sync'));
+const custRecSync = readRec('users', 'u_cust_1');
+ok('sync profil pelanggan tidak menghapus hash password', !!custRecSync && !!custRecSync.passHash && custRecSync.name === 'Rina Sync');
 
 res = sync({ users: { baseRev: revOf('users'), upserts: [{
   id: 'u_cust_2', name: 'Hack', email: 'cust2@test.local',
@@ -917,8 +1058,7 @@ const syncBooking = {
 };
 res = sync({ bookings: { baseRev: bookingBase, upserts: [syncBooking], deletes: [] } }, custToken);
 ok('sync pelanggan membuat booking di kursi kosong sukses', res.ok === true && res.data.revisions.bookings === bookingBase + 1, res);
-const holdRow = spread.getSheetByName('bookings').rows.find((r) => String(r[0]) === 'b_sync_1');
-const holdRec = holdRow ? JSON.parse(holdRow[2]) : null;
+const holdRec = readRec('bookings', 'b_sync_1');
 const holdMs = holdRec ? Date.parse(holdRec.holdExpiry) : NaN;
 ok('server menimpa holdExpiry booking baru menjadi 15 menit',
   Number.isFinite(holdMs) && holdMs > Date.now() && holdMs <= Date.now() + 20 * 60 * 1000, holdRec);
@@ -943,8 +1083,7 @@ ok('sync pelanggan tidak boleh membuat booking atas nama orang lain', res.ok ===
 res = sync({ bookings: { baseRev: bookingBase, upserts: [syncBooking], deletes: [] } }, custToken);
 ok('sync dengan revisi basi ditolak', res.ok === false && res.error.code === 'REV_CONFLICT', res);
 
-const bOwnRow = spread.getSheetByName('bookings').rows.find((r) => String(r[0]) === 'b_sync_1');
-const bOwn = bOwnRow ? JSON.parse(bOwnRow[2]) : null;
+const bOwn = readRec('bookings', 'b_sync_1');
 res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, syncBooking, {
   id: 'b_sync_fake_total', code: 'TA-FT', seats: ['A6'],
   passengers: [{ name: 'Fake', seat: 'A6' }], total: 1
@@ -979,8 +1118,7 @@ ok('sync menolak pindah jadwal tanpa maintenance', res.ok === false && res.error
 res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [], deletes: ['b_sync_1'] } }, custToken);
 ok('sync menolak hapus booking oleh pelanggan', res.ok === false && res.error.code === 'FORBIDDEN', res);
 
-const voucherRow = spread.getSheetByName('vouchers').rows.find((r) => String(r[2]).includes('HEMAT20'));
-const voucherRec = voucherRow ? JSON.parse(voucherRow[2]) : null;
+const voucherRec = readRec('vouchers', 'HEMAT20');
 const voucherBase = revOf('vouchers');
 res = sync({ vouchers: { baseRev: voucherBase, upserts: [Object.assign({}, voucherRec, { used: Number(voucherRec.used || 0) + 1 })], deletes: [] } }, custToken);
 ok('sync pelanggan boleh menaikkan pemakaian voucher satu langkah', res.ok === true && res.data.revisions.vouchers === voucherBase + 1, res);
@@ -1002,8 +1140,7 @@ res = sync({
   })], deletes: [] }
 }, custToken);
 ok('sync pelanggan boleh membuat booking voucher + menaikkan pemakaian', res.ok === true, res);
-const bVoucherRow = spread.getSheetByName('bookings').rows.find((r) => String(r[0]) === 'b_voucher_restore');
-const bVoucherRec = bVoucherRow ? JSON.parse(bVoucherRow[2]) : null;
+const bVoucherRec = readRec('bookings', 'b_voucher_restore');
 res = sync({
   bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, bVoucherRec, {
     status: 'cancelled', cancelledAt: '2026-10-24T06:00:00.000Z',
@@ -1016,13 +1153,11 @@ res = sync({
 ok('sync pelanggan boleh mengembalikan voucher saat membatalkan booking',
   res.ok === true, res);
 
-const ag1Row = spread.getSheetByName('agencies').rows.find((r) => String(r[0]) === 'ag_1');
-const ag1Rec = ag1Row ? JSON.parse(ag1Row[2]) : null;
+const ag1Rec = readRec('agencies', 'ag_1');
 const agBase = revOf('agencies');
 res = sync({ agencies: { baseRev: agBase, upserts: [Object.assign({}, ag1Rec, { phone: '0654-99999' })], deletes: [] } }, agenToken);
 ok('sync agen update agensi sendiri sukses', res.ok === true && res.data.revisions.agencies === agBase + 1, res);
-const ag2Row = spread.getSheetByName('agencies').rows.find((r) => String(r[0]) === 'ag_2');
-const ag2Rec = ag2Row ? JSON.parse(ag2Row[2]) : null;
+const ag2Rec = readRec('agencies', 'ag_2');
 res = sync({ agencies: { baseRev: revOf('agencies'), upserts: [Object.assign({}, ag2Rec, { phone: '0651-00001' })], deletes: [] } }, agenToken);
 ok('sync agen tidak boleh mengubah agensi lain', res.ok === false && res.error.code === 'FORBIDDEN', res);
 
@@ -1033,22 +1168,19 @@ res = sync({ vehicles: { baseRev: vehicleBase, upserts: [{
 }], deletes: [] } }, agenToken);
 ok('sync agen membuat armada sendiri sukses', res.ok === true && res.data.revisions.vehicles === vehicleBase + 1, res);
 
-const s1Row = spread.getSheetByName('schedules').rows.find((r) => String(r[0]) === 's_1');
-const s1Rec = s1Row ? JSON.parse(s1Row[2]) : null;
+const s1Rec = readRec('schedules', 's_1');
 const schedBase = revOf('schedules');
 res = sync({ schedules: { baseRev: schedBase, upserts: [Object.assign({}, s1Rec, { price: 155000 })], deletes: [] } }, agenToken);
 ok('sync agen update jadwal sendiri sukses', res.ok === true && res.data.revisions.schedules === schedBase + 1, res);
 
-const s1NowRow = spread.getSheetByName('schedules').rows.find((r) => String(r[0]) === 's_1');
-const s1Now = s1NowRow ? JSON.parse(s1NowRow[2]) : null;
+const s1Now = readRec('schedules', 's_1');
 const driverSchedBase = revOf('schedules');
 res = sync({ schedules: { baseRev: driverSchedBase, upserts: [Object.assign({}, s1Now, {
   tripStatus: 'ontrip', status: 'closed', departedAt: '2026-10-24T05:10:00.000Z'
 })], deletes: [] } }, driverToken);
 ok('sync pengemudi update status jadwal yang ditugaskan sukses', res.ok === true && res.data.revisions.schedules === driverSchedBase + 1, res);
 
-const s3Row = spread.getSheetByName('schedules').rows.find((r) => String(r[0]) === 's_3');
-const s3Rec = s3Row ? JSON.parse(s3Row[2]) : null;
+const s3Rec = readRec('schedules', 's_3');
 res = sync({ schedules: { baseRev: revOf('schedules'), upserts: [Object.assign({}, s3Rec, { tripStatus: 'ontrip' })], deletes: [] } }, driverToken);
 ok('sync pengemudi tidak boleh mengubah jadwal agensi lain', res.ok === false && res.error.code === 'FORBIDDEN', res);
 
@@ -1059,8 +1191,7 @@ const adminRouteBase = revOf('routes');
 res = sync({ routes: { baseRev: adminRouteBase, upserts: [{ id: 'r_sync_admin', from: 'A', to: 'B' }], deletes: [] } }, adminToken);
 ok('sync superadmin boleh menulis rute', res.ok === true && res.data.revisions.routes === adminRouteBase + 1, res);
 
-const rt1Row = spread.getSheetByName('routes').rows.find((r) => String(r[0]) === 'rt_1');
-const rt1Rec = rt1Row ? JSON.parse(rt1Row[2]) : null;
+const rt1Rec = readRec('routes', 'rt_1');
 const agenRouteBase = revOf('routes');
 res = sync({ routes: { baseRev: agenRouteBase, upserts: [Object.assign({}, rt1Rec, {
   driverIds: ['d_1'], driverId: 'd_1'
@@ -1082,14 +1213,12 @@ res = sync({ drivers: { baseRev: tempDriverBase, upserts: [{
   id: 'd_temp', agencyId: 'ag_1', name: 'Pengemudi Sementara', status: 'aktif'
 }], deletes: [] } }, adminToken);
 ok('superadmin membuat pengemudi sementara untuk uji rute', res.ok === true && res.data.revisions.drivers === tempDriverBase + 1, res);
-const rt1LatestRow = spread.getSheetByName('routes').rows.find((r) => String(r[0]) === 'rt_1');
-const rt1Latest = rt1LatestRow ? JSON.parse(rt1LatestRow[2]) : null;
+const rt1Latest = readRec('routes', 'rt_1');
 res = sync({ routes: { baseRev: revOf('routes'), upserts: [Object.assign({}, rt1Latest, {
   driverIds: ['d_1', 'd_temp'], driverId: 'd_1'
 })], deletes: [] } }, agenToken);
 ok('agen menambahkan pengemudi sementara ke rute', res.ok === true, res);
-const rt1WithTempRow = spread.getSheetByName('routes').rows.find((r) => String(r[0]) === 'rt_1');
-const rt1WithTemp = rt1WithTempRow ? JSON.parse(rt1WithTempRow[2]) : null;
+const rt1WithTemp = readRec('routes', 'rt_1');
 const routeCleanupBase = revOf('routes');
 const driverCleanupBase = revOf('drivers');
 res = sync({
@@ -1155,17 +1284,15 @@ ok('sync agen tidak boleh menghapus armada yang masih dipakai jadwal', res.ok ==
 res = sync({ schedules: { baseRev: revOf('schedules'), upserts: [], deletes: ['s_1'] } }, agenToken);
 ok('sync agen tidak boleh menghapus jadwal yang masih punya booking', res.ok === false && res.error.code === 'VALIDATION', res);
 
-const s1RestoreRow = spread.getSheetByName('schedules').rows.find((r) => String(r[0]) === 's_1');
-const s1Restore = s1RestoreRow ? JSON.parse(s1RestoreRow[2]) : null;
+const s1Restore = readRec('schedules', 's_1');
 res = sync({ schedules: { baseRev: revOf('schedules'), upserts: [Object.assign({}, s1Restore, {
   price: 150000
 })], deletes: [] } }, agenToken);
 ok('harga jadwal dikembalikan untuk uji pembayaran', res.ok === true, res);
 
-const bSyncRow = spread.getSheetByName('bookings').rows.find((r) => String(r[0]) === 'b_sync_1');
-const bSyncPaid = Object.assign({}, JSON.parse(bSyncRow[2]), {
+const bSyncPaid = Object.assign({}, readRec('bookings', 'b_sync_1'), {
   status: 'paid', paidAt: '2026-10-24T05:15:00.000Z',
-  fare: { ticket: 128889, service: 10000, fee: 11111, total: 150000 }
+  fareTicket: 128889, fareService: 10000, fareFee: 11111, fareTotal: 150000
 });
 res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [bSyncPaid], deletes: [] } }, custToken);
 ok('pelanggan menandai booking sendiri lunas', res.ok === true, res);
@@ -1207,8 +1334,7 @@ ok('sync pelanggan menyelesaikan pembayaran+ledger booking sendiri',
   res.ok === true &&
   res.data.revisions.payments === payBase + 2 &&
   res.data.revisions.ledger === ledgerBase + 1, res);
-const pSyncRow = spread.getSheetByName('payments').rows.find((r) => String(r[0]) === 'p_sync_1');
-const pSyncPaid = pSyncRow ? JSON.parse(pSyncRow[2]) : null;
+const pSyncPaid = readRec('payments', 'p_sync_1');
 res = sync({ payments: { baseRev: revOf('payments'), upserts: [Object.assign({}, syncPayment, {
   id: 'p_sync_2', bookingId: 'b_4'
 })], deletes: [] } }, custToken);
@@ -1267,12 +1393,12 @@ res = sync({ ledger: { baseRev: revOf('ledger'), upserts: [Object.assign({}, syn
 })], deletes: [] } }, custToken);
 ok('sync menolak ledger baru langsung dicairkan',
   res.ok === false && res.error.code === 'VALIDATION', res);
-res = sync({ ledger: { baseRev: revOf('ledger'), upserts: [Object.assign({}, syncLedger, {
+res = sync({ ledger: { baseRev: revOf('ledger'), upserts: [Object.assign({}, readRec('ledger', 'l_sync_1'), {
   status: 'dicairkan'
 })], deletes: [] } }, custToken);
 ok('sync menolak transisi ledger tidak sah',
   res.ok === false && res.error.code === 'FORBIDDEN', res);
-res = sync({ ledger: { baseRev: revOf('ledger'), upserts: [Object.assign({}, syncLedger, {
+res = sync({ ledger: { baseRev: revOf('ledger'), upserts: [Object.assign({}, readRec('ledger', 'l_sync_1'), {
   paidOutAt: '2026-10-24T05:30:00.000Z'
 })], deletes: [] } }, custToken);
 ok('sync menolak pelanggan mengisi pencairan ledger',
@@ -1290,12 +1416,12 @@ res = sync({ ledger: { baseRev: revOf('ledger'), upserts: [Object.assign({}, syn
 })], deletes: [] } }, custToken);
 ok('sync menolak ledger baru dengan paidOutAt',
   res.ok === false && res.error.code === 'FORBIDDEN', res);
-res = sync({ ledger: { baseRev: revOf('ledger'), upserts: [Object.assign({}, syncLedger, {
+res = sync({ ledger: { baseRev: revOf('ledger'), upserts: [Object.assign({}, readRec('ledger', 'l_sync_1'), {
   status: 'layak'
 })], deletes: [] } }, custToken);
 ok('sync pelanggan boleh melepas ledger ke layak',
   res.ok === true, res);
-res = sync({ ledger: { baseRev: revOf('ledger'), upserts: [Object.assign({}, syncLedger, {
+res = sync({ ledger: { baseRev: revOf('ledger'), upserts: [Object.assign({}, readRec('ledger', 'l_sync_1'), {
   status: 'dicairkan', paidOutAt: '2026-10-24T06:00:00.000Z'
 })], deletes: [] } }, custToken);
 ok('sync menolak pelanggan mencairkan ledger layak',
@@ -1338,7 +1464,9 @@ ok('sync menolak pembayaran lunas saat booking masih pending',
 const driverFare = { ticket: 138889, service: 0, fee: 11111, total: 150000 };
 res = sync({
   bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, driverBooking, {
-    status: 'paid', paidAt: '2026-10-24T05:42:00.000Z', holdExpiry: null, fare: driverFare
+    status: 'paid', paidAt: '2026-10-24T05:42:00.000Z', holdExpiry: null,
+    fareTicket: driverFare.ticket, fareService: driverFare.service,
+    fareFee: driverFare.fee, fareTotal: driverFare.total
   })], deletes: [] },
   payments: { baseRev: revOf('payments'), upserts: [Object.assign({}, driverPayment, {
     status: 'paid'
@@ -1363,10 +1491,8 @@ res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [fakeMaintenanceCa
 ok('sync menolak refund maintenance tanpa jadwal maintenance',
   res.ok === false && res.error.code === 'FORBIDDEN', res);
 
-const s1RefRow = spread.getSheetByName('schedules').rows.find((r) => String(r[0]) === 's_1');
-const s1Ref = s1RefRow ? JSON.parse(s1RefRow[2]) : null;
-const s2RefRow = spread.getSheetByName('schedules').rows.find((r) => String(r[0]) === 's_2');
-const s2Ref = s2RefRow ? JSON.parse(s2RefRow[2]) : null;
+const s1Ref = readRec('schedules', 's_1');
+const s2Ref = readRec('schedules', 's_2');
 res = sync({ schedules: { baseRev: revOf('schedules'), upserts: [
   Object.assign({}, s1Ref, {
     maintenanceStatus: 'active', maintenanceFrom: s1Ref.date, maintenanceUntil: s1Ref.date,
@@ -1380,8 +1506,7 @@ res = sync({ schedules: { baseRev: revOf('schedules'), upserts: [
 ok('agen menandai jadwal maintenance untuk uji refund',
   res.ok === true, res);
 
-const bDriverRow = spread.getSheetByName('bookings').rows.find((r) => String(r[0]) === 'b_driver_sync');
-const bDriverPaid = bDriverRow ? JSON.parse(bDriverRow[2]) : null;
+const bDriverPaid = readRec('bookings', 'b_driver_sync');
 res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, bDriverPaid, {
   status: 'cancelled', tripStatus: 'cancelled', maintenanceState: 'refunded',
   maintenanceResolvedAt: '2026-10-24T05:51:00.000Z',
@@ -1398,10 +1523,8 @@ res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({},
 ok('sync mengizinkan refund maintenance 100% saat jadwal maintenance',
   res.ok === true, res);
 
-const n1Row = spread.getSheetByName('notifications').rows.find((r) => String(r[0]) === 'n_1');
-const n1Rec = n1Row ? JSON.parse(n1Row[2]) : null;
-const n2Row = spread.getSheetByName('notifications').rows.find((r) => String(r[0]) === 'n_2');
-const n2Rec = n2Row ? JSON.parse(n2Row[2]) : null;
+const n1Rec = readRec('notifications', 'n_1');
+const n2Rec = readRec('notifications', 'n_2');
 const notifBase = revOf('notifications');
 res = sync({ notifications: { baseRev: notifBase, upserts: [Object.assign({}, n1Rec, { read: true })], deletes: [] } }, custToken);
 ok('sync pelanggan menandai notifikasi sendiri', res.ok === true && res.data.revisions.notifications === notifBase + 1, res);
@@ -1438,17 +1561,14 @@ res = sync({ supportTickets: { baseRev: revOf('supportTickets'), upserts: [Objec
 })], deletes: [] } }, custToken);
 ok('sync pelanggan tidak boleh membuat tiket atas nama orang lain', res.ok === false && res.error.code === 'FORBIDDEN', res);
 
-const st2Row = spread.getSheetByName('supportTickets').rows.find((r) => String(r[0]) === 'st_2');
-const st2Rec = st2Row ? JSON.parse(st2Row[2]) : null;
+const st2Rec = readRec('supportTickets', 'st_2');
 res = sync({ supportTickets: { baseRev: revOf('supportTickets'), upserts: [Object.assign({}, st2Rec, { status: 'resolved' })], deletes: [] } }, agenToken);
 ok('sync agen menangani tiket agensinya', res.ok === true, res);
-const st4Row = spread.getSheetByName('supportTickets').rows.find((r) => String(r[0]) === 'st_4');
-const st4Rec = st4Row ? JSON.parse(st4Row[2]) : null;
+const st4Rec = readRec('supportTickets', 'st_4');
 res = sync({ supportTickets: { baseRev: revOf('supportTickets'), upserts: [Object.assign({}, st4Rec, { status: 'resolved' })], deletes: [] } }, agenToken);
 ok('sync agen tidak boleh menangani tiket agensi lain', res.ok === false && res.error.code === 'FORBIDDEN', res);
 
-const st1Row = spread.getSheetByName('supportTickets').rows.find((r) => String(r[0]) === 'st_1');
-const st1Rec = st1Row ? JSON.parse(st1Row[2]) : null;
+const st1Rec = readRec('supportTickets', 'st_1');
 res = sync({ supportTickets: { baseRev: revOf('supportTickets'), upserts: [Object.assign({}, st1Rec, {
   messages: [{ id: 'MSG_HACK', from: 'cs', text: 'Pesan CS palsu', author: 'CS', at: '2026-10-24T05:35:00.000Z' }]
 })], deletes: [] } }, custToken);
@@ -1477,7 +1597,7 @@ const mBase = revOf('maintenanceRequests');
 const syncMaint = {
   id: 'm_sync_1', agencyId: 'ag_1', driverId: 'd_1', vehicleId: 'v_1',
   status: 'menunggu', from: futureDate(5), until: futureDate(6),
-  createdAt: '2026-10-24T05:40:00.000Z'
+  requestedAt: '2026-10-24T05:40:00.000Z'
 };
 res = sync({ maintenanceRequests: { baseRev: mBase, upserts: [syncMaint], deletes: [] } }, driverToken);
 ok('sync pengemudi membuat maintenance sendiri', res.ok === true && res.data.revisions.maintenanceRequests === mBase + 1, res);
@@ -1485,23 +1605,21 @@ res = sync({ maintenanceRequests: { baseRev: revOf('maintenanceRequests'), upser
   id: 'm_sync_2', driverId: 'd_3'
 })], deletes: [] } }, driverToken);
 ok('sync pengemudi tidak boleh membuat maintenance pengemudi lain', res.ok === false && res.error.code === 'FORBIDDEN', res);
-const m1Row = spread.getSheetByName('maintenanceRequests').rows.find((r) => String(r[0]) === 'm_1');
-const m1Rec = m1Row ? JSON.parse(m1Row[2]) : null;
+const m1Rec = readRec('maintenanceRequests', 'm_1');
 res = sync({ maintenanceRequests: { baseRev: revOf('maintenanceRequests'), upserts: [Object.assign({}, m1Rec, {
   status: 'disetujui', decidedAt: '2026-10-24T06:00:00.000Z',
   decidedBy: 'driver1@test.local', decisionNote: 'Setujui sendiri'
 })], deletes: [] } }, driverToken);
 ok('sync pengemudi tidak boleh menyetujui maintenance sendiri',
   res.ok === false && res.error.code === 'FORBIDDEN', res);
-res = sync({ maintenanceRequests: { baseRev: revOf('maintenanceRequests'), upserts: [Object.assign({}, syncMaint, {
+res = sync({ maintenanceRequests: { baseRev: revOf('maintenanceRequests'), upserts: [Object.assign({}, readRec('maintenanceRequests', 'm_sync_1'), {
   status: 'dibatalkan', decidedAt: '2026-10-24T06:00:00.000Z',
   decidedBy: 'driver1@test.local', decisionNote: 'Batal'
 })], deletes: [] } }, driverToken);
 ok('sync pengemudi boleh membatalkan maintenance sendiri yang menunggu',
   res.ok === true, res);
 
-const driverSelfRow = spread.getSheetByName('drivers').rows.find((r) => String(r[0]) === 'd_1');
-const driverSelfRec = driverSelfRow ? JSON.parse(driverSelfRow[2]) : null;
+const driverSelfRec = readRec('drivers', 'd_1');
 res = sync({ drivers: { baseRev: revOf('drivers'), upserts: [Object.assign({}, driverSelfRec, {
   userEmail: 'driver3@test.local'
 })], deletes: [] } }, driverToken);
@@ -1563,7 +1681,7 @@ ok('setelah cache dibersihkan, ganti password sukses', res.ok === true, res);
 console.log('\n== 11) doGet / doPost (HTTP layer) ==');
 const healthOut = S.doGet({});
 const healthObj = JSON.parse(healthOut.text);
-ok('doGet health ok', healthObj.ok === true && healthObj.data.version === '1.2.0', healthObj);
+ok('doGet health ok', healthObj.ok === true && healthObj.data.version === '1.3.0', healthObj);
 
 const postOut = S.doPost({ postData: { contents: JSON.stringify({ action: 'login', proxyKey: 'proxy-salah-xyz', email: 'admin@transaceh.id', password: 'andai-sah' }) } });
 const postObj = JSON.parse(postOut.text);
@@ -1611,12 +1729,14 @@ ok('tidak ada passHash dkk di response manapun',
   !responses.some((text) => text.includes('"passHash"') || text.includes('"passSalt"') || text.includes('"passIter"') || text.includes('"passAlgo"')));
 
 const migratedIds = ['u_admin_1', 'u_agen_1', 'u_driver_1', 'u_cust_1', 'u_cust_2'];
-const migratedRows = spread.getSheetByName('users').rows.filter((r) => migratedIds.includes(String(r[0])));
-ok('akun yang sudah login/reset memakai hash', migratedRows.length === migratedIds.length &&
-  migratedRows.every((r) => String(r[2]).includes('"passHash"') &&
-    !allPasswords.some((pw) => String(r[2]).includes(pw))), migratedRows);
-ok('akun baru (register/admin) memakai hash', !String(spread.getSheetByName('users').rows.find((r) => String(r[0]) === newCustId)?.[2]).includes(REG_PAX_PW) &&
-  String(spread.getSheetByName('users').rows.find((r) => String(r[0]) === newCustId)?.[2]).includes('"passHash"'));
+const migratedRecs = migratedIds.map((id) => readRec('users', id));
+ok('akun yang sudah login/reset memakai hash', migratedRecs.length === migratedIds.length &&
+  migratedRecs.every((r) => !!r && typeof r.passHash === 'string' && r.passHash.length > 20 &&
+    !allPasswords.some((pw) => JSON.stringify(r || {}).includes(pw))), migratedRecs.map((r) => r && r.id));
+ok('akun baru (register/admin) memakai hash', (() => {
+  const recMan = readRec('users', newCustId);
+  return !!recMan && typeof recMan.passHash === 'string' && !JSON.stringify(recMan).includes(REG_PAX_PW);
+})());
 
 const publicAndRoleJson = JSON.stringify(publicRecords) +
   JSON.stringify(custRecords.agencies || []) +
@@ -1628,6 +1748,41 @@ ok('proyeksi publik tidak memuat NIK/NPWP/foto KTP/rekening',
   !publicAndRoleJson.includes('fotoKtp') &&
   !publicAndRoleJson.includes(kyc1.rekeningNo),
   'periksa kembali proyeksi');
+
+/* ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------ */
+/* 13) round-trip storage v2                                           */
+/* ------------------------------------------------------------------ */
+
+console.log('\n== 13) round-trip skema kolom (tulis ulang via engine) ==');
+seedKeys.forEach((key) => {
+  const before = S.apiReadCollection_(spread, key);
+  try {
+    S.apiWriteCollection_(spread, key, before);
+  } catch (err) {
+    ok('tulis ulang koleksi ' + key, false, (err && err.message) || err);
+    return;
+  }
+  const after = S.apiReadCollection_(spread, key);
+  ok('round-trip ' + key + ' identik', schemaRecordsEqual(before, after), key);
+});
+
+let bigCellErr = '';
+try {
+  S.apiWriteCollection_(spread, 'banners', [{ id: 'bnr_big', title: 'x'.repeat(46000), sub: '', active: true }]);
+} catch (err) {
+  bigCellErr = String((err && err.message) || err);
+}
+ok('sel di atas 45000 karakter ditolak', bigCellErr.indexOf('melebihi') >= 0, bigCellErr);
+
+let unknownFieldErr = '';
+try {
+  S.apiWriteCollection_(spread, 'banners', [{ id: 'bnr_unknown', title: 'uji', fieldKhusus: 1 }]);
+} catch (err) {
+  unknownFieldErr = String((err && err.message) || err);
+}
+ok('field di luar skema ditolak tanpa data loss', unknownFieldErr.indexOf('tidak dikenal') >= 0, unknownFieldErr);
 
 /* ------------------------------------------------------------------ */
 

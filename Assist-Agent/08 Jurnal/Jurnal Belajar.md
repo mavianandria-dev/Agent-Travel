@@ -25,6 +25,7 @@ Catatan sesi belajar, keputusan, dan pertanyaan. Satu sesi = satu catatan.
 | 2026-10-25 | [[2026-10-25 - Sesi 5]] | Backend API `code.gs` + harness uji lokal 50 asersi |
 | 2026-10-25 | [[2026-10-25 - Sesi 6]] | Mode direct, proyeksi publik, filter per peran, aksi akun, throttle (155 asersi) |
 | 2026-10-25 | [[2026-10-25 - Sesi 7]] | Fase B/C: adapter Sheets, `sync` ter-scope, validasi booking/payment/ledger (265 asersi) |
+| 2026-10-26 | [[2026-10-26 - Sesi 8]] | Migrasi storage Google Sheets ke skema kolom 1NF (schema 2, 286 asersi) |
 
 ## Cara menulis
 

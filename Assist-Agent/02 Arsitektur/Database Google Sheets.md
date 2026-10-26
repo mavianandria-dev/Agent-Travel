@@ -24,39 +24,43 @@ source:
 
 ## Status
 
-Tahap **seed produksi** tervalidasi oleh pengguna di spreadsheet nyata. Backend `code.gs` mode direct sudah mencapai versi **1.2.0** dan lulus **265 asersi mock test lokal** (`google-apps-script/local-tests/mock-harness.mjs`). Browser memanggil Web App `/exec` langsung; tidak ada Cloudflare Worker/proxy database.
+Tahap **seed produksi** tervalidasi oleh pengguna di spreadsheet nyata. Backend `code.gs` mode direct mencapai versi **1.3.0** dengan **penyimpanan kolom (schema 2)**, lulus **286 asersi mock test lokal** (`google-apps-script/local-tests/mock-harness.mjs`) termasuk round-trip tulis/baca semua koleksi. Browser memanggil Web App `/exec` langsung; tidak ada Cloudflare Worker/proxy database.
 
 Adapter frontend mode Sheets juga sudah ada: `sheetsApi.js`, `remote.js`, `db.js`, `boot.js`, `AppContext`, dan jalur tulis per peran. Namun:
 
-- Web App yang ter-deploy masih **1.1.0** dan menolak `sync` dengan `UNSUPPORTED_ACTION`.
-- Deploy `code.gs` 1.2.0, probe CORS dari browser, dan uji end-to-end belum dilakukan.
+- Web App yang ter-deploy masih memakai format **1 baris = 1 sel JSON (schema 1)**; tidak kompatibel dengan engine 1.3.0.
+- Spreadsheet produksi harus **di-reset lalu di-seed ulang** dengan skema kolom v2; tidak ada migrasi data JSON lama.
+- Deploy `code.gs` 1.3.0, probe CORS dari browser, dan uji end-to-end belum dilakukan.
 - Mode default aplikasi masih perlu dijaga `local` sampai gerbang deploy lulus; jangan mencampur lokal dan Sheets.
 - Lifecycle domain (`cleanupHolds`, `syncScheduleLifecycle`, `syncMaintenanceResolutions`) dimatikan di mode Sheets karena memutasi data lintas pemilik; belum ada trigger server-side.
-- Data KYC/agensi nyata dan media base64 belum layak disimpan.
+- Data KYC/agensi nyata dan media base64 belum layak disimpan (batas per sel 45.000 karakter).
 
-## Keputusan bentuk data
+## Keputusan bentuk data (storage v2 — 1NF penuh)
 
-- Satu spreadsheet berisi satu tab per koleksi, ditambah `_meta`.
-- Satu record disimpan sebagai satu baris.
-- Kolom koleksi: `id`, `ord`, `json`, `updated_at`.
-- Kolom `_meta`: `key`, `value`.
-- Nested data seperti KYC, layout kursi, penumpang, dan pesan support tetap di dalam JSON.
-- `settings` memakai `key` sebagai ID baris (`platformFee`).
-- `fees` disimpan sebagai satu record legacy.
-- Revisi per koleksi disimpan sebagai `rev.<koleksi>` di `_meta`; `sync`/`commit` memakai `baseRev` sebagai pesimistis-lock.
+- Satu spreadsheet berisi tab per **koleksi utama** (19) + **tab anak** untuk array/objek (~40) + `_meta`; daftar lengkap dari `apiDescribeStore_()` di `code.gs` (`API_MAIN_TABLES`).
+- Satu record = satu baris di tab utama: `id | ord | <kolom skema> | updated_at`.
+- Semua nilai disimpan sebagai teks (format sel `'@'`). Konversi saat baca per prefix kolom: tanpa prefix → string; `n:` → number; `b:` → boolean (`'true'/'false'`). Sel kosong dibaca string `''` (teks) atau `null` (angka/boolean).
+- Alias kolom `src>col` dipakai bila nama field bentrok (mis. `id>msg_id` pada pesan tiket).
+- Array daftar: tab anak `parent_id | slot | <kolom>` (elemen skalar memakai satu kolom `val`, flag `scalar: true`); map: `parent_id | key | ...`; objek tunggal (`kind: 'one'`): satu baris anak.
+- Path anak boleh bertingkat (`kyc.alamat` → `agency_kyc_alamat`); koleksi `notifications` punya path khusus `'*'` untuk menampung field ekstra skalar ke `notifications_meta` (key–val), sedangkan koleksi lain menolak field tak dikenal dengan `VALIDATION` (anti silent data-loss).
+- Array selalu dimaterialisasi `[]` saat baca (kontrak baca); map/objek anak hanya muncul bila ada baris.
+- Batas isi sel `API_MAX_CELL_CHARS = 45000` (`API_MAX_JSON_CHARS` lama dihapus; tidak ada lagi kolom `json`).
+- `_meta`: `key`, `value` — sekarang juga berisi `schemaVersion` (`2`), `storage` (`columns-v2`), `systemVersion`, `tableCount`.
+- Revisi per koleksi tetap disimpan sebagai `rev.<koleksi>` di `_meta`; `sync`/`commit` memakai `baseRev` sebagai pesimistis-lock.
 - Semua penulisan memegang `LockService.getScriptLock()`.
+- Field `pass` plaintext **tidak pernah jadi kolom**; fixture/uji men-hash via `apiHashForUser_`.
 
 ## Seed produksi
 
-`seedProduction()` di `google-apps-script/seed.gs` membuat database minimal untuk operasi nyata, bukan demo.
+Urutan wajib: `setupBackend()` dulu (pepper untuk hashing), baru `seedProduction()` — tanpa pepper seed berhenti dengan `SETUP_REQUIRED`. `seedProduction()` di `google-apps-script/seed.gs` membuat database minimal untuk operasi nyata, bukan demo, dan membuat **semua tab dari `apiDescribeStore_()`** (utama + anak + `_meta`).
 
 | Tab | Isi |
 | :--- | :--- |
-| `users` | Satu akun `superadmin` dari Script Properties |
+| `users` | Satu akun `superadmin` dari Script Properties — password di-hash saat seeding |
 | `settings` | `platformFee` default `{ type: 'percent', value: 8 }` |
-| `fees` | Fee legacy `{ defaultType: 'percent', defaultValue: 8 }` |
+| `fees` | Fee default `{ defaultType: 'percent', defaultValue: 8 }` (id `fees`) |
 | `audit` | Satu entri `seed_production` |
-| 15 tab lainnya | Header saja, tanpa record contoh |
+| Tab lainnya | Header saja, tanpa record contoh |
 
 Script Properties seed: `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PHONE`, `ADMIN_PASSWORD`. Seed tidak membuat agen, pengemudi, pelanggan, armada, rute, jadwal, booking, pembayaran, voucher, review, banner, atau tiket contoh.
 
@@ -66,7 +70,7 @@ Script Properties seed: `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PHONE`, `ADMIN_PASSW
 - `LockService` mencegah dua seed bersamaan.
 - Seed berhenti jika `_meta` sudah berisi data atau salah satu tab koleksi sudah berisi record.
 - Header benar tetapi kosong boleh ditulis ulang.
-- `validateDatabase()` memeriksa header, JSON, ID, `ord`, `updated_at`, revisi, superadmin aktif, dan `settings.platformFee`.
+- `validateDatabase()` memeriksa header per tabel terhadap skema (`apiDescribeStore_`), `id`/`ord`/`updated_at`, sel lebih dari 45000 karakter, ID/`ord`/`parent_id` duplikat, baris anak tanpa `parent_id`, membaca-ulang tiap koleksi lewat engine baca, superadmin aktif ber-hash, `settings.platformFee`, dan revisi.
 - Tab `Sheet1` kosong dihapus.
 - Tidak ada reset otomatis.
 
@@ -95,9 +99,9 @@ Script Properties seed: `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PHONE`, `ADMIN_PASSW
 
 - Hash: HMAC-SHA512 berulang, 2000 iterasi, salt acak + `PASSWORD_PEPPER`, algoritma `hmac-sha512-iter-v1`.
 - Field: `passHash`, `passSalt`, `passIter`, `passAlgo`.
-- User legacy dengan `pass` plaintext dimigrasi otomatis pada login pertama; `pass` dihapus dan `rev.users` dinaikkan.
-- Password baru (register/ganti/reset/admin create) minimal **8** karakter. Password legacy yang lebih pendek tetap bisa login sampai diganti.
-- Field rahasia (`pass*`, `password*`, `tokenVersion`) tidak pernah dikirim ke response dan ditolak jika masuk `sync`/`commit`.
+- Field `pass`/`password` bersifat **transien**: boleh dikirim lewat `sync` `users` untuk membuat akun, langsung di-hash oleh `apiSyncPrepareUsers_` dan tidak pernah ditulis ke sheet.
+- Password baru (register/ganti/reset/admin create) minimal **8** karakter.
+- Field rahasia (`passHash`/`passSalt`/`passIter`/`passAlgo`/`tokenVersion`) tidak pernah dikirim ke response; `commit` menolak field rahasia dan validator kolom menolak field di luar skema.
 
 ### Throttling
 
@@ -173,7 +177,8 @@ Aturan:
 - Server memuat referensi `users`, `agencies`, `routes`, `vehicles`, `drivers`, `schedules`, `bookings` sebelum validasi agar relasi lintas koleksi dalam satu batch dapat diperiksa.
 - Semua validasi berjalan sebelum penulisan; jika satu koleksi gagal, tidak ada koleksi dalam batch itu yang ditulis.
 - `apiSyncCrossValidate_` memeriksa kursi ganda, `blockedSeats`, dan kursi nonaktif pada jadwal yang tersentuh.
-- `apiSyncPrepareUsers_` menyalin secret lama sebelum diff, sehingga record klien yang tersanitasi tidak dianggap menghapus `passHash`/`tokenVersion`; password baru di-hash dan menaikkan versi token.
+- `apiSyncPrepareUsers_` menyalin secret lama sebelum diff, sehingga record klien yang tersanitasi tidak dianggap menghapus `passHash`/`tokenVersion`; `pass`/`password` klien langsung di-hash dan menaikkan versi token.
+- Perbandingan field `apiSyncChangedFields_` memakai semantik penyimpanan kolom: nilai kosong (absen/`null`/`''`) sederajat, angka vs teks-angka dibandingkan numerik (`apiSyncValueChanged_`).
 
 Validasi domain utama:
 
@@ -191,7 +196,7 @@ Format sama dengan `sync`, tetapi hanya superadmin dan **tidak** menjalankan val
 
 - Hanya `superadmin`; semua 19 koleksi diizinkan.
 - `baseRev` harus persis `rev.<koleksi>`; tidak cocok → `REV_CONFLICT`.
-- Upsert divalidasi: objek dengan `id` (atau `key` untuk `settings`/`fees`), tanpa field rahasia, tanpa ID duplikat, JSON ≤ 45000 karakter.
+- Upsert divalidasi: objek dengan `id` (atau `key` untuk `settings`/`fees`), tanpa field rahasia, tanpa ID duplikat, dan lolos skema kolom (`VALIDATION` untuk field tak dikenal).
 - Delete sebelum upsert; urutan lama dipertahankan; record baru di akhir.
 - Field password/`tokenVersion` yang tidak dikirim klien dipertahankan dari record lama.
 - Superadmin tidak boleh menghapus akunnya sendiri lewat `commit`.
@@ -216,19 +221,19 @@ Format sama dengan `sync`, tetapi hanya superadmin dan **tidak** menjalankan val
 - Spreadsheet tetap privat; jangan mengaktifkan “Anyone with the link” pada file.
 - Web App: **Execute as** `Me`, **Who has access** `Anyone`. URL adalah gerbang akses.
 - `Content-Type` POST: `text/plain;charset=utf-8` untuk menghindari preflight.
-- 265 asersi mock memeriksa secret/plaintext password tidak muncul di response/log/sheet akun yang sudah dimigrasi; token tamper/kedaluwarsa; revisi basi; seat conflict; whitelist field; hold booking server-side; pembayaran harus mengikuti booking; ledger; refund; tiket support; dan proyeksi KYC.
+- 286 asersi mock memeriksa secret/plaintext password tidak muncul di response/log/record akun; token tamper/kedaluwarsa; revisi basi; seat conflict; whitelist field; hold booking server-side; pembayaran harus mengikuti booking; ledger; refund; tiket support; round-trip storage v2; dan proyeksi KYC.
 - Jangan menaruh token/pepper/proxy key di frontend.
 
 ## Keamanan yang belum selesai
 
 - **CORS belum diuji dari browser.** Node probe melihat `Access-Control-Allow-Origin: *`, tetapi browser dari GitHub Pages belum diverifikasi.
-- Web App ter-deploy masih 1.1.0; `sync` belum tersedia.
+- Spreadsheet terpasang masih skema JSON lama; reset + seed ulang v2 wajib sebelum dipakai.
 - **Lifecycle belum server-side.** Hold kedaluwarsa, jadwal lampau, dan resolusi maintenance tidak diproses otomatis di mode Sheets. Perlu trigger Apps Script atau keputusan batasan resmi sebelum data nyata.
 - Rate limit berbasis cache bisa hilang; rate limit per IP belum ada.
 - Multi-koleksi belum transaksional.
 - `takenSeats` membaca seluruh booking pada setiap bootstrap publik; performa perlu dipantau.
 - Notifikasi lintas pengguna belum otomatis.
-- Media/KYC base64 berpotensi melebihi `API_MAX_JSON_CHARS = 45000` dan batas sel 50.000 karakter. Jangan simpan media nyata sampai ada Drive privat + endpoint media/kompresi/guard.
+- Media/KYC base64 berpotensi melebihi `API_MAX_CELL_CHARS = 45000` per sel (dataUrl foto). Jangan simpan media nyata sampai ada Drive privat + endpoint media/kompresi/guard.
 - Rekening agensi untuk instruksi transfer belum ada di jalur publik; perlu aksi scoped.
 - `commit` tetap melewati validator domain; hanya untuk superadmin/darurat.
 
@@ -237,8 +242,8 @@ Format sama dengan `sync`, tetapi hanya superadmin dan **tidak** menjalankan val
 1. ~~Seed produksi + validasi database~~ — selesai.
 2. ~~Backend `code.gs` mode direct: autentikasi, proyeksi publik, filter baris, aksi akun, throttle, token revocation~~ — selesai.
 3. ~~Fase B: adapter baca frontend + bootstrap async + token sesi + cache memori~~ — selesai di kode.
-4. ~~Fase C: `sync` ter-scope + validasi booking/kursi/payment/ledger + rollback frontend~~ — selesai di kode, 265 asersi.
-5. **Deploy + probe CORS** versi 1.2.0 dari origin produksi.
+4. ~~Fase C: `sync` ter-scope + validasi booking/kursi/payment/ledger + rollback frontend~~ — selesai di kode, 286 asersi (termasuk storage v2).
+5. **Deploy + probe CORS** versi 1.3.0 dan **reset spreadsheet + seed ulang** dari origin produksi.
 6. **Uji end-to-end** semua peran dengan data sintetis.
 7. **Fase D**: aktifkan `VITE_DATA_MODE=sheets` setelah deploy, CORS, E2E, dan lifecycle server-side lulus; jangan mencampur mode.
 8. Selesaikan media/KYC dan keputusan notifikasi lintas pengguna.
@@ -248,34 +253,39 @@ Lihat [[Lapisan Data dan Seed]] untuk perilaku data lokal, [[Build dan Deploy]] 
 
 ## Uji lokal
 
-`google-apps-script/local-tests/mock-harness.mjs` menjalankan **265 asersi**:
+`google-apps-script/local-tests/mock-harness.mjs` menjalankan **286 asersi**:
 
 1. `setupBackend` + mode direct + `REQUIRE_PROXY_KEY`.
-2. Login legacy → migrasi hash; login hash; token tamper/expired; token dicabut setelah ganti/reset password.
+2. Login via hash (`apiHashForUser_`); token tamper/expired; token dicabut setelah ganti/reset password.
 3. `bootstrap` superadmin/publik/agen/pengemudi/pelanggan; proyeksi tanpa KYC/NIK/rekening; filter baris; `takenSeats`; agensi pending.
 4. `commit`: upsert/delete/konflik/role/ID duplikat/field rahasia/self-delete; hash bertahan saat commit profil.
-5. `sync`: kepemilikan, revisi, kursi ganda, booking/payment/ledger palsu, nominal, voucher, refund, transisi status, larangan delete, rute/armada/jadwal/pengemudi, tiket support, notifikasi.
+5. `sync`: kepemilikan, revisi, kursi ganda, booking/payment/ledger palsu, nominal, voucher, refund, transisi status, larangan delete, rute/armada/jadwal/pengemudi, tiket support, notifikasi, whitelist field.
 6. `changePassword` + throttle login/ganti password.
 7. `register` pelanggan/agen, validasi, agen pending.
 8. `adminCreateUser`/`adminSetPassword`, aturan agen/pengemudi, pencabutan token.
 9. `doGet`/`doPost`, body bukan JSON, `proxyKey` salah.
-10. Tidak ada secret/plaintext password di response/log/sheet termigrasi.
+10. Round-trip storage v2: tulis ulang semua koleksi via engine, hasil baca identik; sel > 45000 karakter dan field di luar skema ditolak tanpa data loss.
+11. Tidak ada secret/plaintext password di response/log/record akun.
+
+Harness membuat semua tab dari `apiDescribeStore_()`, men-seed fixture lewat `apiWriteCollection_`, dan membaca record lewat `readRec()` (`apiReadCollection_`) — bukan dari sel JSON.
 
 ## Sumber
 
-- `google-apps-script/seed.gs:18-45` — versi skema, header, daftar 19 koleksi.
-- `google-apps-script/seed.gs:63-302` — alur seed dan validasi database.
-- `google-apps-script/seed.gs:314-431` — validasi Script Properties dan penulisan koleksi.
-- `google-apps-script/code.gs:1-120` — prinsip, versi 1.2.0, daftar aksi/koleksi, proyeksi publik, field rahasia.
-- `google-apps-script/code.gs:799-1058` — `doPost`, dispatch, health, gerbang proxy.
-- `google-apps-script/code.gs:1059-1744` — bootstrap + filter/proyeksi per peran.
-- `google-apps-script/code.gs:1745-2188` — `sync`, helper validasi, refund, voucher.
-- `google-apps-script/code.gs:2189-2840` — validasi user, rute, agensi, armada, pengemudi, jadwal, maintenance.
-- `google-apps-script/code.gs:2842-3381` - validasi booking, payment, ledger.
-- `google-apps-script/code.gs:3382-3731` - voucher, review, notifikasi, support tickets, route requests, dispatcher, cross-validate.
-- `google-apps-script/code.gs:3732-3850` - `commit`, penerapan koleksi, preservasi secret.
+- `google-apps-script/seed.gs:25-29` — `DB_SCHEMA_VERSION='2'`, `DB_SEED_VERSION='production-2'`, `MAX_CELL_CHARS_`.
+- `google-apps-script/seed.gs:44-173` — `requireSchema_`, alur `seedProduction_` (setupBackend dulu).
+- `google-apps-script/seed.gs:194-435` — `validateDatabase` dan helper pemeriksa tabel.
+- `google-apps-script/seed.gs:437-565` — util penulisan tab/`_meta`.
+- `google-apps-script/code.gs:1-260` — prinsip, versi 1.3.0, daftar aksi/koleksi, proyeksi publik, field rahasia, `apiConfig_`.
+- `google-apps-script/code.gs:519-845` — `API_MAIN_TABLES` (skema kolom v2 + tab anak, termasuk alias `src>col` dan `scalar`).
+- `google-apps-script/code.gs:845-1200` — `apiDescribeStore_`, validator skema, engine tulis/baca, guard sel.
+- `google-apps-script/code.gs:1200-1550` — `_meta`/rev, health, `doPost`, dispatch, gerbang proxy.
+- `google-apps-script/code.gs:1550-2430` — login/register/bootstrap+filter per peran, ganti password, admin user.
+- `google-apps-script/code.gs:2432-2980` — `apiSync_`, bentuk target, `apiSyncPrepareUsers_`, perbandingan field v2.
+- `google-apps-script/code.gs:2980-3980` — validasi rute/agensi/armada/pengemudi/jadwal/maintenance/booking/payment/ledger.
+- `google-apps-script/code.gs:3980-4445` — voucher, notifikasi, tiket, route request, cross-validate.
+- `google-apps-script/code.gs:4445-4575` — `apiCommit_`, `apiApplyCollection_`, preservasi secret.
 - `google-apps-script/appsscript.json:1-10` — manifest dan OAuth scope.
-- `google-apps-script/local-tests/mock-harness.mjs` — 265 asersi mock.
+- `google-apps-script/local-tests/mock-harness.mjs` — 286 asersi mock (termasuk round-trip v2).
 - `transaceh-react/src/lib/db.js:1-260` — cache, diff, antrean sync, rollback, hydrate.
 - `transaceh-react/src/lib/sheetsApi.js` — transport direct dan method `sync`.
 - `transaceh-react/src/lib/remote.js` — bootstrap, login, logout, hydrate revisi.

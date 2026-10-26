@@ -59,7 +59,7 @@ source:
 
 ### 6. Test terbatas
 
-- Ada 265 asersi mock Apps Script, tetapi belum ada unit test frontend atau E2E browser.
+- Ada 286 asersi mock Apps Script, tetapi belum ada unit test frontend atau E2E browser.
 - Perubahan refund/ledger/booking tetap berisiko.
 - Verifikasi manual per peran masih wajib sebelum mode Sheets.
 
