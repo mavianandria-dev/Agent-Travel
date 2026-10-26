@@ -72,13 +72,13 @@ function AlamatFields({ val, onPatch, manual, onManual, listId }) {
           : <select value={val.kecamatan} onChange={(e) => (e.target.value === LAIN ? onManual({ kecamatan: true }) : setKecamatan(e.target.value))} className={'w-full mt-1 ' + inC}><option value="">— Pilih —</option>{opsiKec.map((o) => <option key={o} value={o}>{o}</option>)}<option value={LAIN}>✏️ Tulis sendiri…</option></select>}
         {!manual.kecamatan && !opsiKec.length && val.kota ? <p className="text-[10.5px] font-bold text-slate-400 mt-1">Daftar kecamatan tersedia untuk Aceh & Sumatera Utara — untuk wilayah lain pilih "Tulis sendiri…".</p> : null}
       </div>
-      <div><label className="text-[11.5px] font-extrabold">KELURAHAN <span className="text-red-500">*</span></label>
-        <input list={listId} value={val.kelurahan} onChange={(e) => onPatch({ kelurahan: e.target.value })} placeholder={opsiKel.length ? 'Pilih atau ketik kelurahan' : 'cth: Calang Pasar Baru'} className={'w-full mt-1 ' + inC} />
+      <div><label className="text-[11.5px] font-extrabold">KELURAHAN<span className="text-red-500">*</span></label>
+        <input list={listId} value={val.kelurahan} onChange={(e) => onPatch({ kelurahan: e.target.value })} placeholder={opsiKel.length ? 'Pilih atau ketik kelurahan' : 'Silahkan Masukkan Kelurahan Domisili Anda'} className={'w-full mt-1 ' + inC} />
         <datalist id={listId}>{opsiKel.map((o) => <option key={o} value={o} />)}</datalist>
       </div>
-      <div><label className="text-[11.5px] font-extrabold">RT / RW <span className="text-red-500">*</span></label><input value={val.rtRw} onChange={(e) => onPatch({ rtRw: e.target.value })} placeholder="cth: 01 / 02" className={inC} /></div>
+      <div><label className="text-[11.5px] font-extrabold">RT / RW <span className="text-red-500">*</span></label><input value={val.rtRw} onChange={(e) => onPatch({ rtRw: e.target.value })} placeholder="cth: 001 / 002" className={inC} /></div>
       <div><label className="text-[11.5px] font-extrabold">KODE POS <span className="text-red-500">*</span></label><input value={val.kodePos} onChange={(e) => onPatch({ kodePos: e.target.value.replace(/\D/g, '').slice(0, 5) })} inputMode="numeric" maxLength={5} placeholder="5 digit" className={inC} /></div>
-      <div className="col-span-2"><label className="text-[11.5px] font-extrabold">NAMA JALAN / DUSUN <span className="text-red-500">*</span></label><input value={val.jalan} onChange={(e) => onPatch({ jalan: e.target.value })} placeholder="cth: Jl. Merdeka No.12, Pasar Baru" className={inC} /></div>
+      <div className="col-span-2"><label className="text-[11.5px] font-extrabold">NAMA JALAN / DUSUN <span className="text-red-500">*</span></label><input value={val.jalan} onChange={(e) => onPatch({ jalan: e.target.value })} placeholder="Silahkan Masukkan Nama Jalan atau Dusun" className={inC} /></div>
     </div>
   );
 }
@@ -291,9 +291,9 @@ export default function KycWizard() {
           <div className="space-y-2.5">
             <div className="grid grid-cols-2 gap-2.5">
               <div className="col-span-2"><label className="text-[12px] font-extrabold">JENIS AGEN <span className="text-red-500">*</span></label><div className="mt-1"><PillRadios options={KYC_JENIS} value={form.jenis} onChange={(v) => set('jenis', v)} /></div></div>
-              <div><label className="text-[12px] font-extrabold">NAMA LENGKAP (SESUAI KTP) <span className="text-red-500">*</span></label><input value={form.nama} onChange={(e) => set('nama', e.target.value)} placeholder="cth: Cut Meutia" className={'w-full mt-1 ' + inC} /></div>
+              <div><label className="text-[12px] font-extrabold">NAMA LENGKAP (SESUAI KTP) <span className="text-red-500">*</span></label><input value={form.nama} onChange={(e) => set('nama', e.target.value)} placeholder="Silahkan Masukkan Nama Lengkap Anda" className={'w-full mt-1 ' + inC} /></div>
               <div><label className="text-[12px] font-extrabold">NIK <span className="text-red-500">*</span></label><input value={form.nik} onChange={(e) => set('nik', e.target.value.replace(/\D/g, '').slice(0, 16))} inputMode="numeric" maxLength={16} placeholder="16 digit" className={'w-full mt-1 ' + inC} /></div>
-              <div><label className="text-[12px] font-extrabold">TEMPAT LAHIR <span className="text-red-500">*</span></label><input value={form.tmpLahir} onChange={(e) => set('tmpLahir', e.target.value)} placeholder="cth: Calang" className={'w-full mt-1 ' + inC} /></div>
+              <div><label className="text-[12px] font-extrabold">TEMPAT LAHIR <span className="text-red-500">*</span></label><input value={form.tmpLahir} onChange={(e) => set('tmpLahir', e.target.value)} placeholder="Silahkan Masukkan Tempat Lahir Anda" className={'w-full mt-1 ' + inC} /></div>
               <div><label className="text-[12px] font-extrabold">TANGGAL LAHIR <span className="text-red-500">*</span></label><input type="date" value={form.tglLahir} onChange={(e) => set('tglLahir', e.target.value)} className={'w-full mt-1 ' + inC} />{age !== null ? <p className={'text-[11px] font-bold mt-1 ' + (age >= KYC_MIN_AGE ? 'text-green-600' : 'text-red-500')}>Usia {age} tahun{age < KYC_MIN_AGE ? ' — minimal ' + KYC_MIN_AGE + ' tahun' : ''}</p> : <p className="text-[11px] font-bold text-slate-400 mt-1">Minimal usia {KYC_MIN_AGE} tahun</p>}</div>
             </div>
             <div className="grid grid-cols-2 gap-2.5">
@@ -323,11 +323,11 @@ export default function KycWizard() {
             <>
               <Sec index={SEC.usaha} title="DATA LEGALITAS USAHA" />
               <div className="grid grid-cols-2 gap-2.5">
-                <div><label className="text-[12px] font-extrabold">NAMA BADAN USAHA (SESUAI AKTA) <span className="text-red-500">*</span></label><input value={form.badanNama} onChange={(e) => set('badanNama', e.target.value)} className={'w-full mt-1 ' + inC} /></div>
-                <div><label className="text-[12px] font-extrabold">NAMA DIREKTUR / PENANGGUNG JAWAB <span className="text-red-500">*</span></label><input value={form.direktur} onChange={(e) => set('direktur', e.target.value)} className={'w-full mt-1 ' + inC} /></div>
+                <div><label className="text-[12px] font-extrabold">NAMA BADAN USAHA (SESUAI AKTA) <span className="text-red-500">*</span></label><input value={form.badanNama} onChange={(e) => set('badanNama', e.target.value)} className={'w-full mt-1 ' + inC} placeholder="Silahkan Masukkan Nama Badan Usaha" /></div>
+                <div><label className="text-[12px] font-extrabold">NAMA DIREKTUR / PENANGGUNG JAWAB <span className="text-red-500">*</span></label><input value={form.direktur} onChange={(e) => set('direktur', e.target.value)} className={'w-full mt-1 ' + inC} placeholder='Silahkan Masukkan Nama Direktur / Penanggung Jawab' /></div>
                 <div><label className="text-[12px] font-extrabold">BENTUK USAHA <span className="text-red-500">*</span></label><select value={form.badanBentuk} onChange={(e) => set('badanBentuk', e.target.value)} className={'w-full mt-1 ' + inC}><option value="">— Pilih —</option>{KYC_BENTUK.map((b) => <option key={b} value={b}>{b}</option>)}</select></div>
                 <div><label className="text-[12px] font-extrabold">NPWP BADAN USAHA <span className="text-red-500">*</span></label><input value={form.npwpUsaha} onChange={(e) => set('npwpUsaha', e.target.value.replace(/\D/g, '').slice(0, 16))} inputMode="numeric" maxLength={16} placeholder="15 atau 16 digit" className={'w-full mt-1 ' + inC} /></div>
-                <div><label className="text-[12px] font-extrabold">NOMOR AKTA PENDIRIAN <span className="text-red-500">*</span></label><input value={form.aktaNo} onChange={(e) => set('aktaNo', e.target.value)} className={'w-full mt-1 ' + inC} /></div>
+                <div><label className="text-[12px] font-extrabold">NOMOR AKTA PENDIRIAN <span className="text-red-500">*</span></label><input value={form.aktaNo} onChange={(e) => set('aktaNo', e.target.value)} className={'w-full mt-1 ' + inC} placeholder='Silahkan Masukkan Nomor Akta Pendirian' /></div>
                 <div><label className="text-[12px] font-extrabold">NIB <span className="text-red-500">*</span></label><input value={form.nib} onChange={(e) => set('nib', e.target.value.replace(/\D/g, '').slice(0, 13))} inputMode="numeric" maxLength={13} placeholder="13 digit" className={'w-full mt-1 ' + inC} /></div>
                 <div className="col-span-2"><label className="text-[12px] font-extrabold">ALAMAT LOKASI USAHA / KANTOR <span className="text-red-500">*</span></label>
                   <AlamatFields val={form.alamatUsaha} onPatch={setAuPatch} manual={form.manualAlamatUsaha} onManual={setManUsaha} listId="kyc-kelurahan-usaha" />
@@ -339,7 +339,7 @@ export default function KycWizard() {
           <Sec index={SEC.rekening} title={isBadan ? 'PROFIL REKENING BANK' : 'PROFIL REKENING BANK & INFORMASI NPWP'} />
           <div className="grid grid-cols-2 gap-2.5">
             <div><label className="text-[12px] font-extrabold">NAMA BANK <span className="text-red-500">*</span></label><select value={form.bank} onChange={(e) => set('bank', e.target.value)} className={'w-full mt-1 ' + inC}><option value="">— Pilih —</option>{KYC_BANKS.map((b) => <option key={b} value={b}>{b}</option>)}</select></div>
-            <div><label className="text-[12px] font-extrabold">NOMOR REKENING <span className="text-red-500">*</span></label><input value={form.rekeningNo} onChange={(e) => set('rekeningNo', e.target.value.replace(/\D/g, ''))} inputMode="numeric" placeholder="cth: 1234567890" className={'w-full mt-1 ' + inC} /></div>
+            <div><label className="text-[12px] font-extrabold">NOMOR REKENING <span className="text-red-500">*</span></label><input value={form.rekeningNo} onChange={(e) => set('rekeningNo', e.target.value.replace(/\D/g, ''))} inputMode="numeric" placeholder="Silahkan Masukkan Nomor Rekening Anda" className={'w-full mt-1 ' + inC} /></div>
             <div className={isBadan ? 'col-span-2' : ''}><label className="text-[12px] font-extrabold">NAMA PEMILIK REKENING <span className="text-red-500">*</span></label><input value={form.rekeningNama} onChange={(e) => set('rekeningNama', e.target.value)} placeholder="Harus sama dengan nama pemohon" className={'w-full mt-1 ' + inC} /></div>
             {!isBadan ? <div>
               <label className="text-[12px] font-extrabold">NPWP <span className="text-red-500">*</span></label>

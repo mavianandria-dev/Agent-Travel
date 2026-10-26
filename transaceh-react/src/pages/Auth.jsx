@@ -246,7 +246,7 @@ export function RegisterAgen() {
       try {
         await registerRemote({ name: nn, email: ee, phone: php, password: p, role: 'agen', agencyName: tname, agencyAddress: addr });
         go('login');
-        toast('Pendaftaran terkirim — menunggu persetujuan super admin', 'info');
+        toast('Akun berhasil dibuat, silahkan login untuk lengkapi data dan unggah dokumen', 'info');
       } catch (e2) {
         toast(e2.message || 'Pendaftaran gagal', 'err');
       } finally {
@@ -265,7 +265,7 @@ export function RegisterAgen() {
     refresh();
     audit('agency_register', tname + ' • ' + ee);
     go('login');
-    toast('Pendaftaran terkirim — menunggu persetujuan super admin', 'info');
+    toast('Akun berhasil dibuat, silahkan login untuk lengkapi data dan unggah dokumen', 'info');
   };
 
   return (
@@ -274,7 +274,7 @@ export function RegisterAgen() {
         <div><h2 className="font-extrabold text-[18px]">Daftar sebagai Mitra Travel</h2><p className="text-[12.5px] text-slate-500 font-medium mt-0.5">Gratis — aktif operasi setelah kelengkapan disetujui super admin.</p></div></div>
       <Sec index="A" title="A. DATA AKUN PEMILIK" />
       <div className="space-y-2.5">
-        <div><label className="text-[12px] font-extrabold">NAMA LENGKAP <span className="text-red-500">*</span></label><input value={n} onChange={(ev) => setN(ev.target.value)} autoComplete="name" placeholder="cth: Cut Meutia" className={'w-full mt-1 ' + inC} /></div>
+        <div><label className="text-[12px] font-extrabold">NAMA LENGKAP <span className="text-red-500">*</span></label><input value={n} onChange={(ev) => setN(ev.target.value)} autoComplete="name" placeholder="Silahkan Masukan Nama Lengkap Anda" className={'w-full mt-1 ' + inC} /></div>
         <div className="grid grid-cols-2 gap-2.5">
           <div><label className="text-[12px] font-extrabold">EMAIL <span className="text-red-500">*</span></label><input value={e} onChange={(ev) => setE(ev.target.value)} autoComplete="email" placeholder="nama@email.com" className={'w-full mt-1 ' + inC} /></div>
           <div><label className="text-[12px] font-extrabold">NO HP / WHATSAPP <span className="text-red-500">*</span></label><input value={ph} onChange={(ev) => setPh(ev.target.value)} autoComplete="tel" inputMode="tel" placeholder="08xxxxxxxxxx" className={'w-full mt-1 ' + inC} /></div></div>
@@ -285,9 +285,9 @@ export function RegisterAgen() {
       <div className="space-y-2.5">
         <div><label className="text-[12px] font-extrabold">NAMA TRAVEL <span className="text-red-500">*</span></label><input value={agN} onChange={(ev) => setAgN(ev.target.value)} placeholder="cth: Barakah Travel" className={'w-full mt-1 ' + inC} /></div>
         <div><label className="text-[12px] font-extrabold">ALAMAT TRAVEL <span className="text-red-500">*</span></label><input value={agA} onChange={(ev) => setAgA(ev.target.value)} placeholder="cth: Jl. Merdeka No.12, Aceh Jaya" className={'w-full mt-1 ' + inC} /></div>
-        <p className="text-[12px] text-amber-600 font-semibold bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">Pendaftaran agen travel diverifikasi super admin sebelum akun bisa dipakai.</p>
+        <p className="text-[12px] text-amber-600 font-semibold bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">Setelah akun berhasil dibuat, pengguna wajib melengkapi data dan unggah dokumen.</p>
       </div>
-      <div className="grid grid-cols-2 gap-2.5 mt-5"><button onClick={() => go('home')} className="bg-slate-100 font-extrabold text-[14px] py-3 rounded-2xl">Batal</button><button onClick={doRegisterAgen} disabled={busy} className="bg-sky-600 disabled:opacity-60 text-white font-extrabold text-[14px] py-3 rounded-2xl">{busy ? 'Mengirim…' : 'Kirim Pengajuan'}</button></div>
+      <div className="grid grid-cols-2 gap-2.5 mt-5"><button onClick={() => go('home')} className="bg-slate-100 font-extrabold text-[14px] py-3 rounded-2xl">Batal</button><button onClick={doRegisterAgen} disabled={busy} className="bg-sky-600 disabled:opacity-60 text-white font-extrabold text-[14px] py-3 rounded-2xl">{busy ? 'Mengirim…' : 'Daftar Akun'}</button></div>
       <div className="text-[12.5px] text-center mt-3 font-semibold text-slate-500">Sudah punya akun? <button onClick={() => go('login')} className="text-sky-600 font-extrabold">Masuk</button></div></div>
   );
 }
