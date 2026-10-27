@@ -7,8 +7,10 @@ import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
 import {
   agencyOf, agencyPending, validateKycStep1, kycAge, kycSummary, kycDocGroups, kycDocWajib,
-  syncAgencyProfileFromKyc, KYC_MIN_AGE, KYC_JENIS, KYC_BENTUK, KYC_AGAMA, KYC_HUBUNGAN, KYC_BANKS,
+  normName, currentUser, syncAgencyProfileFromKyc, KYC_MIN_AGE, KYC_JENIS, KYC_BENTUK, KYC_AGAMA, KYC_HUBUNGAN, KYC_BANKS,
 } from '@/lib/domain.js';
+import { IS_SHEETS } from '@/lib/runtime.js';
+import { refreshSnapshot } from '@/lib/remote.js';
 import { inC } from '@/lib/utils.js';
 import { DOC_ACCEPT, DOCS_BUDGET_BYTES, fileToDoc, formatBytes, docsBytes } from '@/lib/upload.js';
 import { Icon, Sec, PillRadios } from '@/components/ui.jsx';
@@ -73,12 +75,12 @@ function AlamatFields({ val, onPatch, manual, onManual, listId }) {
         {!manual.kecamatan && !opsiKec.length && val.kota ? <p className="text-[10.5px] font-bold text-slate-400 mt-1">Daftar kecamatan tersedia untuk Aceh & Sumatera Utara — untuk wilayah lain pilih "Tulis sendiri…".</p> : null}
       </div>
       <div><label className="text-[11.5px] font-extrabold">KELURAHAN<span className="text-red-500">*</span></label>
-        <input list={listId} value={val.kelurahan} onChange={(e) => onPatch({ kelurahan: e.target.value })} placeholder={opsiKel.length ? 'Pilih atau ketik kelurahan' : 'Silahkan Masukkan Kelurahan Domisili Anda'} className={'w-full mt-1 ' + inC} />
+        <input list={listId} value={val.kelurahan} onChange={(e) => onPatch({ kelurahan: e.target.value })} placeholder={opsiKel.length ? 'Pilih atau ketik kelurahan' : 'Silahkan masukkan kelurahan domisili anda'} className={'w-full mt-1 ' + inC} />
         <datalist id={listId}>{opsiKel.map((o) => <option key={o} value={o} />)}</datalist>
       </div>
       <div><label className="text-[11.5px] font-extrabold">RT / RW <span className="text-red-500">*</span></label><input value={val.rtRw} onChange={(e) => onPatch({ rtRw: e.target.value })} placeholder="cth: 001 / 002" className={inC} /></div>
       <div><label className="text-[11.5px] font-extrabold">KODE POS <span className="text-red-500">*</span></label><input value={val.kodePos} onChange={(e) => onPatch({ kodePos: e.target.value.replace(/\D/g, '').slice(0, 5) })} inputMode="numeric" maxLength={5} placeholder="5 digit" className={inC} /></div>
-      <div className="col-span-2"><label className="text-[11.5px] font-extrabold">NAMA JALAN / DUSUN <span className="text-red-500">*</span></label><input value={val.jalan} onChange={(e) => onPatch({ jalan: e.target.value })} placeholder="Silahkan Masukkan Nama Jalan atau Dusun" className={inC} /></div>
+      <div className="col-span-2"><label className="text-[11.5px] font-extrabold">NAMA JALAN / DUSUN <span className="text-red-500">*</span></label><input value={val.jalan} onChange={(e) => onPatch({ jalan: e.target.value })} placeholder="Silahkan masukkan nama jalan atau dusun" className={inC} /></div>
     </div>
   );
 }
@@ -122,6 +124,7 @@ export default function KycWizard() {
   const [busy, setBusy] = useState('');
   const [docErr, setDocErr] = useState({});
   const [view, setView] = useState('');
+  const [busyStatus, setBusyStatus] = useState(false);
 
   if (!ag) return <div className="anim max-w-2xl mx-auto bg-white rounded-3xl shadow-card p-7 text-center font-bold text-slate-500">Data travel tidak ditemukan</div>;
 
@@ -208,6 +211,9 @@ export default function KycWizard() {
   const butuhLengkapi = !sum.dataOk || !sum.docsOk || !sum.termsOk;
   const age = kycAge(form.tglLahir);
   const isBadan = form.jenis === 'Badan Usaha (PT/CV)';
+  /* Peringatan langsung nama pemilik rekening: harus mengikuti jenis agen
+     (Perorangan = nama pemohon, Badan Usaha = nama badan usaha sesuai akta). */
+  const rekeningOwnerOk = normName(form.rekeningNama) === normName(isBadan ? form.badanNama : form.nama);
 
   /* Huruf section ikut jenis agen: Perorangan tidak punya Legalitas Usaha,
      jadi Rekab-rekening jadi B, Dokumen C, S&K D (tidak ada lompatan huruf). */
@@ -242,6 +248,27 @@ export default function KycWizard() {
     );
   }
 
+  /* Mode Sheets: tarik kondisi terkini dari server (dorong antrean tulis →
+     bootstrap ulang) supaya hasil peninjauan admin terlihat tanpa login ulang.
+     Mode lokal: cukup baca ulang data di perangkat yang sama. */
+  const perbaruiStatus = async () => {
+    if (busyStatus) return;
+    if (!IS_SHEETS) { refresh(); toast('Status diperbarui', 'info'); return; }
+    setBusyStatus(true);
+    try {
+      await refreshSnapshot();
+      const fresh = currentUser();
+      refresh();
+      if (!fresh) throw new Error('Sesi berakhir — silakan login kembali');
+      if (!agencyPending(fresh)) toast('Pengajuan disetujui — selamat! Panel agen terbuka.', 'ok');
+      else toast('Status diperbarui', 'info');
+    } catch (e2) {
+      toast(e2.message || 'Gagal memuat status terbaru — coba lagi', 'err');
+    } finally {
+      setBusyStatus(false);
+    }
+  };
+
   /* ---------- Status: sudah diajukan, menunggu persetujuan ----------
      Bila pengajuan lama belum memenuhi aturan baru (mis. NPWP), tetap
      tampilkan wizard agar agen bisa melengkapi data/dokumennya. */
@@ -262,9 +289,9 @@ export default function KycWizard() {
           {row(sum.docsOk, 'Lampiran dokumen')}
           {row(sum.termsOk, 'Syarat & Ketentuan')}
         </div>
-        <p className="text-[12px] text-slate-500 font-medium mt-3">Super admin sedang meninjau data Anda. Fitur Armada, Rute, Jadwal, dan Pemesanan otomatis terbuka setelah disetujui — tidak perlu daftar ulang.</p>
+        <p className="text-[12px] text-slate-500 font-medium mt-3">Operator kami sedang meninjau data Anda. Fitur Armada, Rute, Jadwal, dan Pemesanan otomatis terbuka setelah disetujui — tidak perlu daftar ulang.</p>
         <div className="grid grid-cols-2 gap-2.5 mt-4">
-          <button onClick={() => { refresh(); toast('Status diperbarui', 'info'); }} className="bg-sky-600 text-white font-extrabold text-[14px] py-3 rounded-2xl">Perbarui Status</button>
+          <button onClick={perbaruiStatus} disabled={busyStatus} className="bg-sky-600 disabled:opacity-60 text-white font-extrabold text-[14px] py-3 rounded-2xl">{busyStatus ? 'Memeriksa…' : 'Perbarui Status'}</button>
           <button onClick={logout} className="bg-slate-100 font-extrabold text-[14px] py-3 rounded-2xl">Keluar</button>
         </div>
       </div>
@@ -291,9 +318,9 @@ export default function KycWizard() {
           <div className="space-y-2.5">
             <div className="grid grid-cols-2 gap-2.5">
               <div className="col-span-2"><label className="text-[12px] font-extrabold">JENIS AGEN <span className="text-red-500">*</span></label><div className="mt-1"><PillRadios options={KYC_JENIS} value={form.jenis} onChange={(v) => set('jenis', v)} /></div></div>
-              <div><label className="text-[12px] font-extrabold">NAMA LENGKAP (SESUAI KTP) <span className="text-red-500">*</span></label><input value={form.nama} onChange={(e) => set('nama', e.target.value)} placeholder="Silahkan Masukkan Nama Lengkap Anda" className={'w-full mt-1 ' + inC} /></div>
+              <div><label className="text-[12px] font-extrabold">NAMA LENGKAP (SESUAI KTP) <span className="text-red-500">*</span></label><input value={form.nama} onChange={(e) => set('nama', e.target.value)} placeholder="Silahkan masukkan nama lengkap Anda" className={'w-full mt-1 ' + inC} /></div>
               <div><label className="text-[12px] font-extrabold">NIK <span className="text-red-500">*</span></label><input value={form.nik} onChange={(e) => set('nik', e.target.value.replace(/\D/g, '').slice(0, 16))} inputMode="numeric" maxLength={16} placeholder="16 digit" className={'w-full mt-1 ' + inC} /></div>
-              <div><label className="text-[12px] font-extrabold">TEMPAT LAHIR <span className="text-red-500">*</span></label><input value={form.tmpLahir} onChange={(e) => set('tmpLahir', e.target.value)} placeholder="Silahkan Masukkan Tempat Lahir Anda" className={'w-full mt-1 ' + inC} /></div>
+              <div><label className="text-[12px] font-extrabold">TEMPAT LAHIR <span className="text-red-500">*</span></label><input value={form.tmpLahir} onChange={(e) => set('tmpLahir', e.target.value)} placeholder="Silahkan masukkan tempat lahir anda" className={'w-full mt-1 ' + inC} /></div>
               <div><label className="text-[12px] font-extrabold">TANGGAL LAHIR <span className="text-red-500">*</span></label><input type="date" value={form.tglLahir} onChange={(e) => set('tglLahir', e.target.value)} className={'w-full mt-1 ' + inC} />{age !== null ? <p className={'text-[11px] font-bold mt-1 ' + (age >= KYC_MIN_AGE ? 'text-green-600' : 'text-red-500')}>Usia {age} tahun{age < KYC_MIN_AGE ? ' — minimal ' + KYC_MIN_AGE + ' tahun' : ''}</p> : <p className="text-[11px] font-bold text-slate-400 mt-1">Minimal usia {KYC_MIN_AGE} tahun</p>}</div>
             </div>
             <div className="grid grid-cols-2 gap-2.5">
@@ -323,11 +350,11 @@ export default function KycWizard() {
             <>
               <Sec index={SEC.usaha} title="DATA LEGALITAS USAHA" />
               <div className="grid grid-cols-2 gap-2.5">
-                <div><label className="text-[12px] font-extrabold">NAMA BADAN USAHA (SESUAI AKTA) <span className="text-red-500">*</span></label><input value={form.badanNama} onChange={(e) => set('badanNama', e.target.value)} className={'w-full mt-1 ' + inC} placeholder="Silahkan Masukkan Nama Badan Usaha" /></div>
-                <div><label className="text-[12px] font-extrabold">NAMA DIREKTUR / PENANGGUNG JAWAB <span className="text-red-500">*</span></label><input value={form.direktur} onChange={(e) => set('direktur', e.target.value)} className={'w-full mt-1 ' + inC} placeholder='Silahkan Masukkan Nama Direktur / Penanggung Jawab' /></div>
+                <div><label className="text-[12px] font-extrabold">NAMA BADAN USAHA (SESUAI AKTA) <span className="text-red-500">*</span></label><input value={form.badanNama} onChange={(e) => set('badanNama', e.target.value)} className={'w-full mt-1 ' + inC} placeholder="Silahkan masukkan nama badan usaha" /></div>
+                <div><label className="text-[12px] font-extrabold">NAMA DIREKTUR / PENANGGUNG JAWAB <span className="text-red-500">*</span></label><input value={form.direktur} onChange={(e) => set('direktur', e.target.value)} className={'w-full mt-1 ' + inC} placeholder='Silahkan masukkan nama direktur / penanggung jawab' /></div>
                 <div><label className="text-[12px] font-extrabold">BENTUK USAHA <span className="text-red-500">*</span></label><select value={form.badanBentuk} onChange={(e) => set('badanBentuk', e.target.value)} className={'w-full mt-1 ' + inC}><option value="">— Pilih —</option>{KYC_BENTUK.map((b) => <option key={b} value={b}>{b}</option>)}</select></div>
                 <div><label className="text-[12px] font-extrabold">NPWP BADAN USAHA <span className="text-red-500">*</span></label><input value={form.npwpUsaha} onChange={(e) => set('npwpUsaha', e.target.value.replace(/\D/g, '').slice(0, 16))} inputMode="numeric" maxLength={16} placeholder="15 atau 16 digit" className={'w-full mt-1 ' + inC} /></div>
-                <div><label className="text-[12px] font-extrabold">NOMOR AKTA PENDIRIAN <span className="text-red-500">*</span></label><input value={form.aktaNo} onChange={(e) => set('aktaNo', e.target.value)} className={'w-full mt-1 ' + inC} placeholder='Silahkan Masukkan Nomor Akta Pendirian' /></div>
+                <div><label className="text-[12px] font-extrabold">NOMOR AKTA PENDIRIAN <span className="text-red-500">*</span></label><input value={form.aktaNo} onChange={(e) => set('aktaNo', e.target.value)} className={'w-full mt-1 ' + inC} placeholder='Silahkan masukkan nomor akta pendirian' /></div>
                 <div><label className="text-[12px] font-extrabold">NIB <span className="text-red-500">*</span></label><input value={form.nib} onChange={(e) => set('nib', e.target.value.replace(/\D/g, '').slice(0, 13))} inputMode="numeric" maxLength={13} placeholder="13 digit" className={'w-full mt-1 ' + inC} /></div>
                 <div className="col-span-2"><label className="text-[12px] font-extrabold">ALAMAT LOKASI USAHA / KANTOR <span className="text-red-500">*</span></label>
                   <AlamatFields val={form.alamatUsaha} onPatch={setAuPatch} manual={form.manualAlamatUsaha} onManual={setManUsaha} listId="kyc-kelurahan-usaha" />
@@ -340,7 +367,11 @@ export default function KycWizard() {
           <div className="grid grid-cols-2 gap-2.5">
             <div><label className="text-[12px] font-extrabold">NAMA BANK <span className="text-red-500">*</span></label><select value={form.bank} onChange={(e) => set('bank', e.target.value)} className={'w-full mt-1 ' + inC}><option value="">— Pilih —</option>{KYC_BANKS.map((b) => <option key={b} value={b}>{b}</option>)}</select></div>
             <div><label className="text-[12px] font-extrabold">NOMOR REKENING <span className="text-red-500">*</span></label><input value={form.rekeningNo} onChange={(e) => set('rekeningNo', e.target.value.replace(/\D/g, ''))} inputMode="numeric" placeholder="Silahkan Masukkan Nomor Rekening Anda" className={'w-full mt-1 ' + inC} /></div>
-            <div className={isBadan ? 'col-span-2' : ''}><label className="text-[12px] font-extrabold">NAMA PEMILIK REKENING <span className="text-red-500">*</span></label><input value={form.rekeningNama} onChange={(e) => set('rekeningNama', e.target.value)} placeholder="Harus sama dengan nama pemohon" className={'w-full mt-1 ' + inC} /></div>
+            <div className={isBadan ? 'col-span-2' : ''}><label className="text-[12px] font-extrabold">NAMA PEMILIK REKENING <span className="text-red-500">*</span></label><input value={form.rekeningNama} onChange={(e) => set('rekeningNama', e.target.value)} placeholder={isBadan ? 'Harus sama dengan nama badan usaha' : 'Harus sama dengan nama pemohon'} className={'w-full mt-1 ' + inC} />
+              {!String(form.rekeningNama || '').trim() ? null : rekeningOwnerOk
+                ? <p className="text-[11px] font-bold mt-1 text-green-600">Sesuai dengan nama {isBadan ? 'badan usaha' : 'pemohon'}</p>
+                : <p className="text-[11px] font-bold mt-1 text-red-500">Belum sama dengan nama {isBadan ? 'badan usaha (sesuai akta)' : 'pemohon'}</p>}
+            </div>
             {!isBadan ? <div>
               <label className="text-[12px] font-extrabold">NPWP <span className="text-red-500">*</span></label>
               <div className="mt-1 bg-sky-50 border-2 border-sky-200 rounded-2xl px-3 py-2.5">

@@ -98,7 +98,6 @@ export function Login() {
   const demoLogin = useDemoLogin();
   const [email, setEmail] = useState(IS_SHEETS ? '' : 'user@demo.com');
   const [pass, setPass] = useState(IS_SHEETS ? '' : 'user123');
-  const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const doLogin = async () => {
@@ -138,7 +137,7 @@ export function Login() {
       <h2 className="font-extrabold text-[22px] text-center mt-3 tracking-tight">Selamat datang kembali</h2><p className="text-[13px] text-slate-500 text-center font-medium">Masuk untuk booking &amp; kelola travel</p>
       <ResumeBanner />
       <label className="text-[12px] font-extrabold mt-4 block">EMAIL</label><input value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" placeholder="nama@email.com" className="mt-1 w-full text-[14px] font-semibold border-2 border-slate-200 rounded-2xl px-4 py-3 focus-ring" />
-      <label className="text-[12px] font-extrabold mt-3 block">PASSWORD</label><div className="relative mt-1"><input value={pass} onChange={(e) => setPass(e.target.value)} type={show ? 'text' : 'password'} autoComplete="current-password" placeholder="Masukkan password" className="w-full text-[14px] font-semibold border-2 border-slate-200 rounded-2xl px-4 py-3 pr-12 focus-ring" /><button type="button" onClick={() => setShow(!show)} aria-label="Tampilkan password" className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-sky-600 p-1"><Icon name={show ? 'eye-off' : 'eye'} className="w-5 h-5 pointer-events-none" /></button></div>
+      <label className="text-[12px] font-extrabold mt-3 block">PASSWORD</label><div className="mt-1"><input value={pass} onChange={(e) => setPass(e.target.value)} type="password" autoComplete="current-password" placeholder="Masukkan password" className="w-full text-[14px] font-semibold border-2 border-slate-200 rounded-2xl px-4 py-3 pr-12 focus-ring" /></div>
       <button onClick={doLogin} disabled={busy} className="mt-4 w-full bg-[#0b2447] hover:bg-sky-600 disabled:opacity-60 text-white font-extrabold py-3.5 rounded-2xl transition">{busy ? 'Memproses…' : 'Masuk'}</button>
       <div className="text-[12.5px] text-center mt-3 font-semibold text-slate-500">Belum punya akun? <button onClick={() => go('register')} className="text-sky-600 font-extrabold">Daftar gratis</button></div>
       <div className="text-[12px] text-center mt-2 font-semibold text-slate-400">atau</div>
@@ -160,7 +159,6 @@ export function Register() {
   const [ph, setPh] = useState('');
   const [p, setP] = useState('');
   const [p2, setP2] = useState('');
-  const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const doRegister = async () => {
@@ -208,8 +206,8 @@ export function Register() {
       <ResumeBanner />
       <div className="grid grid-cols-2 gap-2.5 mt-4"><input value={n} onChange={(ev) => setN(ev.target.value)} autoComplete="name" placeholder="Nama lengkap" className="col-span-2 text-[14px] font-semibold border-2 border-slate-200 rounded-2xl px-4 py-3 focus-ring" />
         <input value={e} onChange={(ev) => setE(ev.target.value)} autoComplete="email" placeholder="Email" className="text-[14px] border-2 border-slate-200 rounded-2xl px-4 py-3 focus-ring" /><input value={ph} onChange={(ev) => setPh(ev.target.value)} autoComplete="tel" inputMode="tel" placeholder="No HP" className="text-[14px] border-2 border-slate-200 rounded-2xl px-4 py-3 focus-ring" /></div>
-      <div className="relative mt-2.5"><input value={p} onChange={(ev) => setP(ev.target.value)} type={show ? 'text' : 'password'} autoComplete="new-password" placeholder="Password" className="w-full text-[14px] border-2 border-slate-200 rounded-2xl px-4 py-3 pr-12 focus-ring" /><button type="button" onClick={() => setShow(!show)} aria-label="Tampilkan password" className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-sky-600 p-1"><Icon name={show ? 'eye-off' : 'eye'} className="w-5 h-5 pointer-events-none" /></button></div>
-      <div className="relative mt-2.5"><input value={p2} onChange={(ev) => setP2(ev.target.value)} type={show ? 'text' : 'password'} autoComplete="new-password" placeholder="Ulangi password" className="w-full text-[14px] border-2 border-slate-200 rounded-2xl px-4 py-3 focus-ring" /></div>
+      <div className="mt-2.5"><input value={p} onChange={(ev) => setP(ev.target.value)} type="password" autoComplete="new-password" placeholder="Password" className="w-full text-[14px] border-2 border-slate-200 rounded-2xl px-4 py-3 pr-12 focus-ring" /></div>
+      <div className="mt-2.5"><input value={p2} onChange={(ev) => setP2(ev.target.value)} type="password" autoComplete="new-password" placeholder="Ulangi password" className="w-full text-[14px] border-2 border-slate-200 rounded-2xl px-4 py-3 pr-12 focus-ring" /></div>
       <button onClick={doRegister} disabled={busy} className="mt-4 w-full bg-sky-600 disabled:opacity-60 text-white font-extrabold py-3.5 rounded-2xl">{busy ? 'Mendaftar…' : 'Daftar'}</button>
       {!IS_SHEETS ? (
         <button onClick={() => { toast('Google OAuth (simulasi) — login berhasil'); demoLogin('user@demo.com', 'user123'); }} className="mt-2 w-full bg-white border-2 border-slate-200 font-extrabold text-[13px] py-3 rounded-2xl flex items-center justify-center gap-2"><span className="font-extrabold text-sky-500 text-[16px]">G</span> Daftar dengan Google</button>
@@ -227,7 +225,6 @@ export function RegisterAgen() {
   const [ph, setPh] = useState('');
   const [p, setP] = useState('');
   const [p2, setP2] = useState('');
-  const [show, setShow] = useState(false);
   const [agN, setAgN] = useState('');
   const [agA, setAgA] = useState('');
   const [busy, setBusy] = useState(false);
@@ -278,8 +275,8 @@ export function RegisterAgen() {
         <div className="grid grid-cols-2 gap-2.5">
           <div><label className="text-[12px] font-extrabold">EMAIL <span className="text-red-500">*</span></label><input value={e} onChange={(ev) => setE(ev.target.value)} autoComplete="email" placeholder="nama@email.com" className={'w-full mt-1 ' + inC} /></div>
           <div><label className="text-[12px] font-extrabold">NO HP / WHATSAPP <span className="text-red-500">*</span></label><input value={ph} onChange={(ev) => setPh(ev.target.value)} autoComplete="tel" inputMode="tel" placeholder="08xxxxxxxxxx" className={'w-full mt-1 ' + inC} /></div></div>
-        <div><label className="text-[12px] font-extrabold">PASSWORD <span className="text-red-500">*</span></label><div className="relative mt-1"><input value={p} onChange={(ev) => setP(ev.target.value)} type={show ? 'text' : 'password'} autoComplete="new-password" placeholder="Minimal 8 karakter" className={inC + ' pr-11'} /><button type="button" onClick={() => setShow(!show)} aria-label="Tampilkan password" className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-sky-600 p-1"><Icon name={show ? 'eye-off' : 'eye'} className="w-5 h-5 pointer-events-none" /></button></div></div>
-        <div><label className="text-[12px] font-extrabold">ULANGI PASSWORD <span className="text-red-500">*</span></label><input value={p2} onChange={(ev) => setP2(ev.target.value)} type={show ? 'text' : 'password'} autoComplete="new-password" placeholder="Ketik ulang password" className={'w-full mt-1 ' + inC} /></div>
+        <div><label className="text-[12px] font-extrabold">PASSWORD <span className="text-red-500">*</span></label><div className="mt-1"><input value={p} onChange={(ev) => setP(ev.target.value)} type="password" autoComplete="new-password" placeholder="Minimal 8 karakter" className={inC + ' pr-12'} /></div></div>
+        <div><label className="text-[12px] font-extrabold">ULANGI PASSWORD <span className="text-red-500">*</span></label><input value={p2} onChange={(ev) => setP2(ev.target.value)} type="password" autoComplete="new-password" placeholder="Ketik ulang password" className={'w-full mt-1 ' + inC + ' pr-12'} /></div>
       </div>
       <Sec index="B" title="B. DATA TRAVEL" />
       <div className="space-y-2.5">

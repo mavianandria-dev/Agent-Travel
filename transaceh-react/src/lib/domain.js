@@ -2735,8 +2735,13 @@ export function validateKycStep1(k) {
   if (!g(k, 'bank')) return 'Pilih nama bank';
   if (digits(k.rekeningNo).length < 6) return 'Nomor rekening wajib diisi';
   if (!g(k, 'rekeningNama')) return 'Nama pemilik rekening wajib diisi';
-  const owners = [normName(k.nama), normName(k.badanNama)].filter(Boolean);
-  if (!owners.includes(normName(k.rekeningNama))) return 'Nama pemilik rekening harus sama dengan nama pemohon / badan usaha';
+  /* Nama pemilik rekening mengikuti jenis agen: Perorangan menyamai nama
+     pemohon, Badan Usaha menyamai nama badan usaha (sesuai akta). */
+  const isBadanUsaha = k.jenis === 'Badan Usaha (PT/CV)';
+  const rekeningOwner = normName(isBadanUsaha ? k.badanNama : k.nama);
+  if (normName(k.rekeningNama) !== rekeningOwner) {
+    return 'Nama pemilik rekening harus sama dengan nama ' + (isBadanUsaha ? 'badan usaha' : 'pemohon');
+  }
   /* NPWP pemohon hanya untuk Perorangan — Badan Usaha memakai NPWP badan usaha.
      Default tidak memakai NIK: wajib isi nomor, kecuali checkbox sama dengan KTP dicentang.
      Bila memakai NIK, NIK 16 digit sudah menjadi NPWP sehingga tidak perlu nomor lain. */
