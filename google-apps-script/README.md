@@ -113,7 +113,7 @@ Salin URL `/exec`, bukan `/dev`. Setelah mengganti `code.gs`, buat **versi deplo
 Untuk spreadsheet produksi yang sudah terisi data, **jangan** menjalankan `seedProduction()` (fungsi ini memang memblokir dirinya bila data ada). Urutannya:
 
 1. Salin isi `code.gs` dan `seed.gs` versi terbaru ke project Apps Script (timpa yang lama).
-2. Jalankan `ensureSchema()` sekali — tab skema yang belum ada dibuat tanpa menyentuh data; tab `agency_kyc_docs` versi lama otomatis dimigrasi ke skema blob (`_meta.tableCount` ikut disesuaikan). Menu: **TransAceh → Perbaiki skema (tanpa reset)**.
+2. Jalankan `ensureSchema()` sekali — tab skema yang belum ada dibuat tanpa menyentuh data; tab `agency_kyc_docs` versi lama otomatis dimigrasi ke skema blob (`_meta.tableCount` ikut disesuaikan); kolom swafoto `selfie` yang masih ada di tab `drivers` dihapus sungguhan dan baris chunk swafotonya di `driver_doc_blob` dibersihkan. Menu: **TransAceh → Perbaiki skema (tanpa reset)**.
 3. Jalankan `validateDatabase()` — hasil "Database valid. Total tab: **58**" (19 utama + 39 anak, ditambah `_meta`).
 
 Jika ada tab yang headernya tidak sesuai skema dan tidak punya jalur migrasi otomatis, `ensureSchema()` berhenti dengan pesan header yang bermasalah — jangan paksa; periksa perubahan skema terlebih dahulu.
@@ -153,7 +153,7 @@ Catatan:
 node google-apps-script/local-tests/mock-harness.mjs
 ```
 
-Harness mem-mock `SpreadsheetApp`, `PropertiesService`, `LockService`, `Utilities`, `CacheService`, `ContentService`, dan `Logger`, serta memuat `seed.gs` ke sandbox yang sama. Saat ini **320 asersi** lulus.
+Harness mem-mock `SpreadsheetApp`, `PropertiesService`, `LockService`, `Utilities`, `CacheService`, `ContentService`, dan `Logger`, serta memuat `seed.gs` ke sandbox yang sama. Saat ini **333 asersi** lulus.
 
 ## Struktur tab
 
@@ -176,14 +176,14 @@ Header = `parent_id | slot | <kolom skema anak>` (`slot` = urutan untuk list, `k
 Tab yang menyimpan string lebih besar dari satu sel Sheets ada dua bentuk:
 
 - **kind `blob`** — tab `agency_kyc_doc_blob`: object `kyc.docs.<tipe>` dari `agencies` dengan kolom besar `dataUrl`; header `parent_id | key | i | chunk`. Metadatanya (`name`, `type`, `size`, `at`) tetap di tab `agency_kyc_docs` (`parent_id | key`).
-- **kind `sblob`** — tab `driver_doc_blob` (milik `drivers`) dan `vehicle_doc_blob` (milik `vehicles`): field string besar **langsung pada record** tanpa pembungkus object. Foto pengemudi (`photo`, `simPhoto`, `ktpPhoto`, `selfie`) dan foto/STNK/KTP pemilik kendaraan (`photo`, `stnkPhoto`, `ktpOwnerPhoto`) kini hidup di sini; header `parent_id | field | i | chunk`.
+- **kind `sblob`** — tab `driver_doc_blob` (milik `drivers`) dan `vehicle_doc_blob` (milik `vehicles`): field string besar **langsung pada record** tanpa pembungkus object. Foto pengemudi (`photo`, `simPhoto`, `ktpPhoto`) dan foto/STNK/KTP pemilik kendaraan (`photo`, `stnkPhoto`, `ktpOwnerPhoto`) kini hidup di sini; header `parent_id | field | i | chunk`. Field swafoto (`selfie`) **dihapus** dari seluruh stack — lihat butir migrasi di bawah.
 
 Aturan keduanya sama:
 
 - Isi dipecah menjadi baris chunk ≤ `API_MAX_CELL_CHARS` (45.000 karakter) dan digabung kembali sesuai urutan `i` saat dibaca — pecah dan gabung terjadi di engine, bentuk data frontend tidak berubah.
 - Field/entri kosong tidak menulis baris apa pun.
 - Kompatibilitas data lama: record tanpa baris chunk tetap memakai nilai yang tertanam di sel utama. Kolom utama asalnya memakai prefix `x:` (kolom *ghost*): header dipertahankan agar spreadsheet lama tetap selaras, selnya selalu dikosongkan, dan nilai baru selalu lewat tab pecahan.
-- `ensureSchema()` (seed.gs) membuat tab pecahan yang belum ada tanpa menyentuh data dan memindahkan dataURL besar yang masih tertanam di kolom `drivers`/`vehicles` ke baris chunk (idempoten); `_meta.tableCount` ikut diperbarui.
+- `ensureSchema()` (seed.gs) membuat tab pecahan yang belum ada tanpa menyentuh data dan memindahkan dataURL besar yang masih tertanam di kolom `drivers`/`vehicles` ke baris chunk (idempoten); `_meta.tableCount` ikut diperbarui. Ia juga menghapus kolom swafoto `selfie` dari tab `drivers` (dengan validasi header lama – `selfie` harus persis skema baru) dan membersihkan baris chunk `field=selfie` di `driver_doc_blob` (`migrateSelfieColumn_`, idempoten — tanpa kolom/chunk selfie tidak ada perubahan).
 - Total ukuran media tetap ditekan di sisi browser: `UpBox` memampatkan foto (sisi terpanjang ≤ 1280px, JPEG kualitas 0,8), KYC punya budget `DOCS_BUDGET_BYTES`; tab pecahan menyelesaikan batas teknis sel, bukan ajakan menaikkan ukuran berkas.
 
 ## Data awal
@@ -364,6 +364,7 @@ node google-apps-script/local-tests/mock-harness.mjs
 13. Tidak ada secret/plaintext password di response, log, atau record akun.
 14. Alamat berjenjang pengemudi: tab anak `driver_alamat` (kind `one`: `jalan, rtRw, kelurahan, kecamatan, kota, provinsi, kodePos`) tersinkron oleh pengemudi sendiri via whitelist `alamat`, terbaca kembali identik, tetap menolak field di luar whitelist, dan `validateDatabase` menghitung tab baru dengan valid.
 15. Foto pengemudi & kendaraan di tab sblob: sync foto >45.000 karakter (dataURL asli, kasus bug produksi) diterima penuh lewat `driver_doc_blob` dan `vehicle_doc_blob`, kolom ghost di tab utama kosong, chunk utuh tersimpan per field, dataURL lama yang masih tertanam di sel utama ditandai `validateDatabase` lalu dipindahkan `ensureSchema` ke tab blob secara idempoten.
+16. Penghapusan swafoto (selfie): tab `drivers` tanpa kolom `selfie`, sync KTP besar lewat jalur agen diterima utuh, upsert berbawa field `selfie` ditolak `VALIDATION`, header lama (dengan `selfie`) + 2 baris chunk swafoto dimigrasi `ensureSchema` → kolom dihapus, chunk dibersihkan, `ktpPhoto` tetap utuh, `validateDatabase` hijau; migrasi idempoten.
 
 ## Batasan dan risiko produksi
 
@@ -394,9 +395,10 @@ node google-apps-script/local-tests/mock-harness.mjs
 
 ## Sumber
 
-- `google-apps-script/seed.gs:75-330` — `ensureSchema()` (tambah tab tanpa reset + migrasi `agency_kyc_docs` lama ke blob + `migratePhotoBlob_` memindahkan dataURL tertanam di `drivers`/`vehicles` ke tab blob, idempoten).
-- `google-apps-script/seed.gs:335-461` — seed produksi v2.
-- `google-apps-script/seed.gs:463-827` — validateDatabase (total tab 58).
+- `google-apps-script/seed.gs:75-223` — `ensureSchema()` (tambah tab tanpa reset + migrasi `agency_kyc_docs` lama ke blob + `migrateSelfieColumn_` menghapus kolom swafoto `drivers` & membersihkan chunk swafoto di `driver_doc_blob`, idempoten).
+- `google-apps-script/seed.gs:225-400` — `migrateDocsBlob_` + `PHOTO_BLOB_TABLES_` + `migratePhotoBlob_` memindahkan dataURL tertanam di `drivers`/`vehicles` ke tab blob (idempoten).
+- `google-apps-script/seed.gs:411-528` — seed produksi v2.
+- `google-apps-script/seed.gs:530-892` — validateDatabase (total tab 58).
 - `google-apps-script/code.gs:1-483` — versi API, daftar aksi/koleksi, proyeksi publik, field rahasia, config.
 - `google-apps-script/code.gs:484-544` — `apiSheet_` + `apiEnsureChildSheet_` (tab anak dibuat otomatis bila belum ada).
 - `google-apps-script/code.gs:545-809` — `API_MAIN_TABLES` (skema kolom v2; kolom ghost `x:`; `agencies` memakai tab blob `agency_kyc_doc_blob`; `drivers` pakai `driver_alamat` + `driver_doc_blob`; `vehicles` pakai `vehicle_doc_blob`).
@@ -408,7 +410,7 @@ node google-apps-script/local-tests/mock-harness.mjs
 - `google-apps-script/code.gs:2580-4592` — engine `sync` + validator per koleksi (agensi di ~3330, whitelist pengemudi di 3460, booking/payment/ledger, voucher, notifikasi, tiket, route request, lintas koleksi).
 - `google-apps-script/code.gs:4593-akhir` — `apiCommit_`, penerapan koleksi, preservasi secret.
 - `google-apps-script/appsscript.json` — manifest dan OAuth scope.
-- `google-apps-script/local-tests/mock-harness.mjs` — 320 asersi mock (termasuk round-trip v2, blob chunk, migrasi `ensureSchema`, cek slot sadar-skema, alamat berjenjang pengemudi, dan foto pengemudi/kendaraan di tab sblob).
+- `google-apps-script/local-tests/mock-harness.mjs` — 333 asersi mock (termasuk round-trip v2, blob chunk, migrasi `ensureSchema` + penghapusan kolom selfie, cek slot sadar-skema, alamat berjenjang pengemudi, foto pengemudi/kendaraan di tab sblob, dan upload KTP besar lewat jalur agen).
 - `transaceh-react/src/lib/db.js` — cache, diff, antrean sync, rollback.
 - `transaceh-react/src/lib/sheetsApi.js` — transport direct.
 - `transaceh-react/src/lib/remote.js` — bootstrap, login, logout, hydrate revisi.

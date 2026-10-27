@@ -655,7 +655,7 @@ var API_MAIN_TABLES = {
   drivers: {
     cols: [
       'agencyId', 'name', 'phone', 'wa', 'simType', 'simExp', 'x:simPhoto',
-      'x:ktpPhoto', 'x:selfie', 'x:photo', 'status', 'n:rating', 'n:trips',
+      'x:ktpPhoto', 'x:photo', 'status', 'n:rating', 'n:trips',
       'userEmail', 'birthPlace', 'birthDate', 'gender', 'address', 'nik',
       'marital', 'education', 'emName', 'emPhone', 'emRelation', 'simNumber',
       'bank', 'createdAt', 'updatedAt', 'pendingAt', 'profileVerifiedAt',
@@ -669,7 +669,7 @@ var API_MAIN_TABLES = {
         'kodePos'
       ] },
       { table: 'driver_doc_blob', kind: 'sblob',
-        fields: ['photo', 'simPhoto', 'ktpPhoto', 'selfie'],
+        fields: ['photo', 'simPhoto', 'ktpPhoto'],
         cols: ['n:i', 'chunk'] }
     ]
   },

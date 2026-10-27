@@ -510,13 +510,13 @@ export function backupDriverForVehicle(v) {
    Field yang langsung berlaku: kontak, alamat, rekening, foto profil.
    Field identitas/dokumen: disimpan sebagai usulan, berlaku setelah disetujui agen. */
 export const DRIVER_DIRECT_FIELDS = ['phone', 'address', 'emName', 'emPhone', 'emRelation', 'bank', 'photo'];
-export const DRIVER_VERIFY_FIELDS = ['nik', 'birthPlace', 'birthDate', 'gender', 'marital', 'education', 'simType', 'simNumber', 'simExp', 'simPhoto', 'ktpPhoto', 'selfie'];
+export const DRIVER_VERIFY_FIELDS = ['nik', 'birthPlace', 'birthDate', 'gender', 'marital', 'education', 'simType', 'simNumber', 'simExp', 'simPhoto', 'ktpPhoto'];
 export const DRIVER_FIELD_LABELS = {
   phone: 'No HP', address: 'Alamat', emName: 'Nama kontak darurat', emPhone: 'No HP kontak darurat',
   emRelation: 'Hubungan kontak darurat', bank: 'Rekening bank', photo: 'Foto profil',
   nik: 'NIK', birthPlace: 'Tempat lahir', birthDate: 'Tanggal lahir', gender: 'Jenis kelamin',
   marital: 'Status perkawinan', education: 'Pendidikan', simType: 'Jenis SIM', simNumber: 'Nomor SIM',
-  simExp: 'Masa berlaku SIM', simPhoto: 'Dokumen SIM', ktpPhoto: 'Foto KTP', selfie: 'Swafoto',
+  simExp: 'Masa berlaku SIM', simPhoto: 'Dokumen SIM', ktpPhoto: 'Foto KTP',
 };
 export const driverFieldLabel = (k) => DRIVER_FIELD_LABELS[k] || k;
 
@@ -601,9 +601,10 @@ export function approveDriverProfile(driverId, by = 'agen') {
   const d = arr.find((x) => x.id === driverId);
   if (!d) return { ok: false, msg: 'Data driver tidak ditemukan' };
   const pending = (d.pendingProfile && typeof d.pendingProfile === 'object') ? d.pendingProfile : {};
-  const keys = Object.keys(pending);
+  /* Sisa usulan `selfie` dari data lama dibuang — field swafoto tidak lagi. */
+  const keys = Object.keys(pending).filter((k) => k !== 'selfie');
   if (!keys.length) return { ok: false, msg: 'Tidak ada usulan perubahan' };
-  Object.entries(pending).forEach(([k, v]) => { d[k] = v; });
+  keys.forEach((k) => { d[k] = pending[k]; });
   d.pendingProfile = {};
   d.pendingAt = null;
   d.profileVerifiedAt = new Date().toISOString();
@@ -622,7 +623,8 @@ export function rejectDriverProfile(driverId, reason = '', by = 'agen') {
   const d = arr.find((x) => x.id === driverId);
   if (!d) return { ok: false, msg: 'Data driver tidak ditemukan' };
   const pending = (d.pendingProfile && typeof d.pendingProfile === 'object') ? d.pendingProfile : {};
-  const keys = Object.keys(pending);
+  /* Sisa usulan `selfie` dari data lama ikut dibuang saat penolakan. */
+  const keys = Object.keys(pending).filter((k) => k !== 'selfie');
   if (!keys.length) return { ok: false, msg: 'Tidak ada usulan perubahan' };
   const why = String(reason || '').trim() || 'Tidak sesuai data yang tercatat di agen';
   d.pendingProfile = {};

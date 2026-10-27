@@ -93,6 +93,22 @@ class MockSheet {
     return new MockRange(this, row, col, numRows, numCols);
   }
   clearContents() { this.rows = []; return this; }
+  /* Semantik Apps Script: posisi berbasis 1, sisanya bergeser ke kiri/atas. */
+  deleteRow(rowPosition) {
+    const idx = Number(rowPosition) - 1;
+    if (idx >= 0 && idx < this.rows.length) this.rows.splice(idx, 1);
+    return this;
+  }
+  deleteColumn(colPosition) {
+    const idx = Number(colPosition) - 1;
+    if (idx >= 0) {
+      for (let i = 0; i < this.rows.length; i++) {
+        const row = this.rows[i];
+        if (idx < row.length) row.splice(idx, 1);
+      }
+    }
+    return this;
+  }
   setNumberFormat() { return this; }
   setFrozenRows() { return this; }
   setColumnWidth() { return this; }
@@ -477,10 +493,10 @@ seedCollection('vehicles', [
 ]);
 
 seedCollection('drivers', [
-  { id: 'd_1', agencyId: 'ag_1', name: 'Bang Jamil', phone: '0812000003', simType: 'A', simExp: 2030, simPhoto: 'data:image/png;base64,AAAASIM1', ktpPhoto: 'data:image/png;base64,AAAAKTPD1', selfie: 'data:image/png;base64,AAAASELF1', photo: '', status: 'aktif', rating: 4.9, trips: 320, userEmail: 'driver1@test.local', nik: '1173011203850001', bank: 'BCA 8210099001 a.n. Bang Jamil' },
-  { id: 'd_2', agencyId: 'ag_1', name: 'Teuku Rizal', phone: '0812000007', simType: 'A', simExp: 2027, simPhoto: '', ktpPhoto: '', selfie: '', photo: '', status: 'aktif', rating: 4.7, trips: 180, userEmail: 'driver2@test.local', nik: '1173021507900002', bank: 'BRI 0022010190002 a.n. Teuku Rizal' },
-  { id: 'd_3', agencyId: 'ag_2', name: 'Bang Hendra', phone: '0812000004', simType: 'A', simExp: 2026, simPhoto: '', ktpPhoto: '', selfie: '', photo: '', status: 'aktif', rating: 4.8, trips: 210, userEmail: 'driver3@test.local', nik: '1171012204880004', bank: 'BCA 8210099004 a.n. Bang Hendra' },
-  { id: 'd_new', agencyId: 'ag_2', name: 'Pengemudi Baru', phone: '0812000088', simType: 'B1', simExp: 2029, simPhoto: '', ktpPhoto: '', selfie: '', photo: '', status: 'aktif', rating: 5.0, trips: 0, userEmail: '', nik: '1171011208940012', bank: '' }
+  { id: 'd_1', agencyId: 'ag_1', name: 'Bang Jamil', phone: '0812000003', simType: 'A', simExp: 2030, simPhoto: 'data:image/png;base64,AAAASIM1', ktpPhoto: 'data:image/png;base64,AAAAKTPD1', photo: '', status: 'aktif', rating: 4.9, trips: 320, userEmail: 'driver1@test.local', nik: '1173011203850001', bank: 'BCA 8210099001 a.n. Bang Jamil' },
+  { id: 'd_2', agencyId: 'ag_1', name: 'Teuku Rizal', phone: '0812000007', simType: 'A', simExp: 2027, simPhoto: '', ktpPhoto: '', photo: '', status: 'aktif', rating: 4.7, trips: 180, userEmail: 'driver2@test.local', nik: '1173021507900002', bank: 'BRI 0022010190002 a.n. Teuku Rizal' },
+  { id: 'd_3', agencyId: 'ag_2', name: 'Bang Hendra', phone: '0812000004', simType: 'A', simExp: 2026, simPhoto: '', ktpPhoto: '', photo: '', status: 'aktif', rating: 4.8, trips: 210, userEmail: 'driver3@test.local', nik: '1171012204880004', bank: 'BCA 8210099004 a.n. Bang Hendra' },
+  { id: 'd_new', agencyId: 'ag_2', name: 'Pengemudi Baru', phone: '0812000088', simType: 'B1', simExp: 2029, simPhoto: '', ktpPhoto: '', photo: '', status: 'aktif', rating: 5.0, trips: 0, userEmail: '', nik: '1171011208940012', bank: '' }
 ]);
 
 seedCollection('schedules', [
@@ -2095,6 +2111,78 @@ res = dispatch(bodyOf({}, { action: 'bootstrap', token: driverToken }));
 ok('bootstrap pengemudi tanpa jadwal tetap memuat baris sendiri',
   res.ok === true && (res.data.records.drivers || []).some((x) => String(x.id) === 'd_1'),
   (res.data.records.drivers || []).map((x) => x.id));
+
+/* ------------------------------------------------------------------ */
+/* 16) Upload KTP via agen + penghapusan swafoto (`selfie`)            */
+
+console.log('\n== 16) upload KTP agen + penghapusan kolom selfie ==');
+
+/* Skema baru tidak lagi mengenal selfie. */
+const drvHdrLive = spread.getSheetByName('drivers').rows[0].join('|');
+ok('tab drivers tanpa kolom selfie', drvHdrLive.indexOf('selfie') === -1, drvHdrLive);
+
+/* Foto KTP besar lewat jalur agen (form Tambah Pengemudi) → tab blob.
+   d_1 dipakai karena satu-satunya driver fixture yang punya akun user. */
+const BIG_KTP = 'data:image/jpeg;base64,' + 'E'.repeat(58000);
+res = sync({
+  drivers: { baseRev: revOf('drivers'), upserts: [Object.assign({}, readRec('drivers', 'd_1'), { ktpPhoto: BIG_KTP })], deletes: [] }
+}, agenToken);
+ok('sync foto KTP besar lewat jalur agen diterima', res.ok === true, res);
+ok('foto KTP terbaca kembali identik', schemaValueEqual(readRec('drivers', 'd_1').ktpPhoto, BIG_KTP));
+
+/* Field yang sudah dihapus dari skema ditolak server (bukan didiamkan). */
+res = sync({
+  drivers: { baseRev: revOf('drivers'), upserts: [Object.assign({}, readRec('drivers', 'd_2'), { selfie: 'data:image/png;base64,SELESAI' })], deletes: [] }
+}, agenToken);
+ok('upsert berbawa field selfie ditolak VALIDATION',
+  res.ok === false && res.error.code === 'VALIDATION' && String(res.error.message || '').indexOf('selfie') >= 0, res);
+
+/* Kondisi pra-migrasi: tab drivers dari deploy lama masih berisi kolom
+   selfie (persis di posisi lama: x:ktpPhoto | selfie | x:photo) + dua
+   baris chunk swafoto di driver_doc_blob. */
+const drvMigSheet = spread.getSheetByName('drivers');
+const drvMigHdr = drvMigSheet.rows[0];
+const ktpPos = drvMigHdr.indexOf('ktpPhoto');
+drvMigSheet.rows.forEach((row) => { row.splice(ktpPos + 1, 0, ''); });
+drvMigHdr[ktpPos + 1] = 'selfie';
+const d1MigRow = drvMigSheet.rows.find((r) => String(r[0]) === 'd_1');
+d1MigRow[ktpPos + 1] = 'data:image/png;base64,SELESAI_LAMA';
+const blobMigSheet = spread.getSheetByName('driver_doc_blob');
+const blobMigHdr = blobMigSheet.rows[0];
+const mkBlobRow = (parent, field, i, chunk) => blobMigHdr.map((h) =>
+  h === 'parent_id' ? parent : h === 'field' ? field : h === 'i' ? String(i) : h === 'chunk' ? chunk : '');
+blobMigSheet.rows.push(mkBlobRow('d_1', 'selfie', 1, 'SELFIE-A'));
+blobMigSheet.rows.push(mkBlobRow('d_3', 'selfie', 1, 'SELFIE-B'));
+
+const ensureSelfie = S.ensureSchema_();
+ok('migrasi penghapusan kolom selfie terjalankan',
+  ensureSelfie.ok === true && (ensureSelfie.fixes || []).some((f) => f.indexOf('kolom selfie dihapus') === 0), ensureSelfie);
+ok('pesan migrasi menyebut pembersihan swafoto', (ensureSelfie.fixes || []).join('; ').indexOf('baris swafoto dibersihkan') >= 0, ensureSelfie.fixes);
+
+const blobSelfieAfter = blobMigSheet.rows.slice(1).filter((row) =>
+  row.some((cell) => String(cell == null ? '' : cell).trim() !== ''));
+ok('chunk selfie dibersihkan, chunk foto lain utuh',
+  blobSelfieAfter.every((row) => String(row[blobMigHdr.indexOf('field')] || '').trim() !== 'selfie') &&
+  blobSelfieAfter.some((row) => String(row[blobMigHdr.indexOf('field')] || '').trim() === 'ktpPhoto'),
+  blobSelfieAfter.length);
+ok('kolom selfie hilang dari header drivers',
+  spread.getSheetByName('drivers').rows[0].indexOf('selfie') === -1);
+ok('data kolom tetangga tidak bergeser (ktpPhoto d_1 tetap BIG_KTP)',
+  schemaValueEqual(readRec('drivers', 'd_1').ktpPhoto, BIG_KTP));
+
+res = dispatch(bodyOf({}, { action: 'bootstrap', token: driverToken }));
+ok('bootstrap driver tetap normal tanpa selfie',
+  res.ok === true && (res.data.records.drivers || []).some((x) => String(x.id) === 'd_1') &&
+  !Object.prototype.hasOwnProperty.call(readRec('drivers', 'd_1') || {}, 'selfie'),
+  (res.data.records.drivers || []).map((x) => x.id));
+
+const vdSelfie = S.validateDatabase();
+ok('validateDatabase hijau setelah penghapusan selfie', vdSelfie.ok === true, vdSelfie.problems);
+
+const ensureIdemSelfie = S.ensureSchema_();
+ok('migrasi selfie idempoten (tidak menulis ulang)',
+  ensureIdemSelfie.ok === true &&
+  (ensureIdemSelfie.fixes || []).every((f) => f.indexOf('selfie') < 0 && f.indexOf('swafoto') < 0), ensureIdemSelfie.fixes);
 
 console.log('\n== Ringkasan ==');
 console.log('PASS: ' + passed + ', FAIL: ' + failed);

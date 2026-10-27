@@ -90,6 +90,11 @@ function ensureSchema_() {
   }
   try {
     var fixes = [];
+    /* Kolom swafoto (`selfie`) dihapus sungguhan dari skema drivers. Migrasi
+       berjalan sebelum pemeriksaan header agar tab produksi lama yang masih
+       memuat kolom itu tidak memicu gagal "header tidak sesuai". */
+    var selfieFix = migrateSelfieColumn_(ss, described.tables);
+    if (selfieFix) fixes.push(selfieFix);
     described.tables.forEach(function (table) {
       var sheet = ss.getSheetByName(table.name);
       if (!sheet) {
@@ -147,6 +152,68 @@ function updateMetaTableCount_(metaSheet, described) {
   var appendRow = metaSheet.getLastRow() + 1;
   metaSheet.getRange(appendRow, 1, 1, META_HEADERS.length).setNumberFormat('@');
   metaSheet.getRange(appendRow, 1, 1, META_HEADERS.length).setValues([['tableCount', want]]);
+}
+
+/**
+ * Penghapusan kolom swafoto (`selfie`) dari tab drivers versi lama, tanpa
+ * reset: kolom dihapus sungguhan setelah memvalidasi header lama dikurangi
+ * `selfie` persis sama dengan skema baru, lalu baris chunk `field=selfie`
+ * di driver_doc_blob dibersihkan agar data swafoto benar-benar keluar dari
+ * database. Idempoten: header tanpa `selfie` tanpa baris chunk `selfie`
+ * menghasilkan null (tidak ada catatan perubahan).
+ */
+function migrateSelfieColumn_(ss, tables) {
+  var fixes = [];
+  var driversTable = null;
+  var blobTable = null;
+  tables.forEach(function (t) {
+    if (t.name === 'drivers') driversTable = t;
+    if (t.name === 'driver_doc_blob') blobTable = t;
+  });
+  if (!driversTable || !blobTable) return null;
+  var expected = driversTable.headers;
+
+  var sheet = ss.getSheetByName('drivers');
+  if (sheet && sheet.getLastColumn() > 0) {
+    var hdr = (sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0] || []);
+    var selfieIdx = -1;
+    for (var i = 0; i < hdr.length; i++) {
+      if (String(hdr[i]).trim() === 'selfie') { selfieIdx = i; break; }
+    }
+    if (selfieIdx >= 0) {
+      var minus = hdr.slice(0, selfieIdx).concat(hdr.slice(selfieIdx + 1));
+      var match = minus.length >= expected.length;
+      for (var c = 0; match && c < expected.length; c++) {
+        if (String(minus[c]).trim() !== String(expected[c])) match = false;
+      }
+      if (!match) {
+        throw new Error('Kolom selfie ditemukan di tab drivers, tetapi susunan kolom lainnya tidak sesuai skema; migrasi dihentikan agar data tidak bergeser. /' + hdr.join('|'));
+      }
+      sheet.deleteColumn(selfieIdx + 1);
+      fixes.push('kolom selfie dihapus dari tab drivers');
+    }
+  }
+
+  /* Bersihkan pecahan swafoto yang pernah tersimpan sebagai chunk blob. */
+  var blobSheet = ss.getSheetByName(blobTable.name);
+  if (blobSheet && blobSheet.getLastRow() > 1) {
+    var width = Math.max(blobSheet.getLastColumn(), blobTable.headers.length);
+    var blobHdr = (blobSheet.getRange(1, 1, 1, width).getDisplayValues()[0] || []);
+    var fieldIdx = blobHdr.indexOf('field');
+    if (fieldIdx >= 0) {
+      var rows = blobSheet.getRange(2, 1, blobSheet.getLastRow() - 1, width).getDisplayValues();
+      var removed = 0;
+      for (var r = rows.length - 1; r >= 0; r--) {
+        if (String(rows[r][fieldIdx]).trim() === 'selfie') {
+          blobSheet.deleteRow(r + 2);
+          removed++;
+        }
+      }
+      if (removed) fixes.push(removed + ' baris swafoto dibersihkan dari ' + blobTable.name);
+    }
+  }
+
+  return fixes.length ? fixes.join('; ') : null;
 }
 
 /**
@@ -236,7 +303,7 @@ function migrateDocsBlob_(ss, docsSheet, docsTable, tables) {
    penjaga header (selalu dikosongkan). */
 var PHOTO_BLOB_TABLES_ = [
   { main: 'drivers', blob: 'driver_doc_blob',
-    fields: ['photo', 'simPhoto', 'ktpPhoto', 'selfie'] },
+    fields: ['photo', 'simPhoto', 'ktpPhoto'] },
   { main: 'vehicles', blob: 'vehicle_doc_blob',
     fields: ['photo', 'stnkPhoto', 'ktpOwnerPhoto'] }
 ];

@@ -73,6 +73,7 @@ function DrvFormInner({ agId, raw, did }) {
   const [simExp, setSimExp] = useState(raw ? s0.exp : '');
   const [photo, setPhoto] = useState(d0.photo || '');
   const [simPhoto, setSimPhoto] = useState(raw?.simPhoto || '');
+  const [ktpPhoto2, setKtpPhoto2] = useState(raw?.ktpPhoto || '');
   const [mail, setMail] = useState(d0.userEmail || '');
   const [pass, setPass] = useState('');
   const [pass2, setPass2] = useState('');
@@ -175,7 +176,10 @@ function DrvFormInner({ agId, raw, did }) {
     if (!extra.emRelation) { toast('Hubungan kontak darurat wajib diisi', 'err'); return; }
     if (!photo) { toast('Upload foto profil dulu', 'err'); return; }
     if (!simPhoto) { toast('Upload dokumen SIM dulu', 'err'); return; }
-    Object.assign(extra, { simPhoto, ktpPhoto: raw?.ktpPhoto || '', selfie: raw?.selfie || '', photo });
+    /* Foto KTP wajib untuk pengemudi baru; saat edit nilai lama dipakai bila
+       upload kosong, agar perubahan field lain tidak terhalang. */
+    if (!did && !ktpPhoto2) { toast('Upload foto KTP dulu', 'err'); return; }
+    Object.assign(extra, { simPhoto, ktpPhoto: ktpPhoto2 || raw?.ktpPhoto || '', photo });
     if (pass && pass !== pass2) { toast('Verifikasi password tidak sama', 'err'); return; }
     /* Panjang password divalidasi di sini — sebelum ada penulisan apa pun
        (driver/user) — agar gagal tervalidasi server tidak menyisakan record
@@ -257,6 +261,7 @@ function DrvFormInner({ agId, raw, did }) {
       <div className="grid grid-cols-2 gap-2.5">
         <UpBox title="FOTO PROFIL" req src={photo} onPick={setPhoto} />
         <UpBox title="DOKUMEN SIM (FOTO)" req src={simPhoto} onPick={setSimPhoto} />
+        <div className="col-span-2"><UpBox title="FOTO KTP (WAJIB, NOMOR SESUAI NIK DI ATAS)" req src={ktpPhoto2} onPick={setKtpPhoto2} /></div>
       </div>
       <Sec index="D" title="D. AKUN LOGIN & STATUS" />
       <div className="space-y-2.5">
