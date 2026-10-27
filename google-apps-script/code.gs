@@ -653,7 +653,11 @@ var API_MAIN_TABLES = {
     ],
     children: [
       { table: 'driver_pending_profile', path: 'pendingProfile', kind: 'map',
-        scalar: true, cols: ['val'] }
+        scalar: true, cols: ['val'] },
+      { table: 'driver_alamat', path: 'alamat', kind: 'one', cols: [
+        'jalan', 'rtRw', 'kelurahan', 'kecamatan', 'kota', 'provinsi',
+        'kodePos'
+      ] }
     ]
   },
   schedules: {
@@ -3395,7 +3399,7 @@ function apiSyncValidateDrivers_(ctx, target) {
           throw apiError_('FORBIDDEN', 'Email pengemudi tidak boleh diubah.');
         }
         var driverSelfAllowed = {
-          phone: 1, address: 1, emName: 1, emPhone: 1, emRelation: 1,
+          phone: 1, address: 1, alamat: 1, emName: 1, emPhone: 1, emRelation: 1,
           bank: 1, photo: 1, wa: 1, pendingProfile: 1, pendingAt: 1, updatedAt: 1
         };
         var driverSelfChanged = apiSyncChangedFields_(rec, old);

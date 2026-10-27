@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { agencyOf, driverById, simParse, audit, uid, todayStr } from '@/lib/domain.js';
+import { agencyOf, driverById, simParse, audit, uid, todayStr, cekAlamat, KYC_HUBUNGAN, KYC_BANKS, normName } from '@/lib/domain.js';
 import { SIM_TYPES, GENDERS, MARITALS, EDUCATIONS, inC } from '@/lib/utils.js';
 import { Icon, Sec, PillRadios, UpBox } from '@/components/ui.jsx';
+import { AlamatFields } from '@/components/AlamatFields.jsx';
 
 export default function DrvForm() {
   const { user, drvEdit, setDrvEdit, setAgenTab, go, tick } = useApp();
@@ -23,9 +24,23 @@ export default function DrvForm() {
   return <DrvFormInner key={did || 'new'} agId={agId} raw={raw} did={did} />;
 }
 
+/* Heuristik prefill rekening lama ("BCA 8210099001 a.n. Bang Jamil") ke
+   { bank, no, owner }; hanya untuk isi form — kolom `bank` tetap string
+   terkomposisi (pola sama dengan KYC agen di domain.js). */
+function parseBankStr(s) {
+  s = String(s || '').trim();
+  if (!s) return { bank: '', no: '', owner: '' };
+  const anSplit = s.split(/\s*a\.?n\.?\s+/i);
+  const owner = (anSplit[1] || '').trim();
+  const left = anSplit[0].trim();
+  const m = /(\d[\d\s.\-]*\d|\d+)/.exec(left);
+  if (!m) return { bank: left, no: '', owner };
+  return { bank: left.slice(0, m.index).trim(), no: m[0].replace(/[\s.\-]/g, ''), owner };
+}
+
 function DrvFormInner({ agId, raw, did }) {
   const { setDrvEdit, setAgenTab, go, toast, refresh } = useApp();
-  const d0 = Object.assign({ name: '', phone: '', status: 'aktif', userEmail: '', birthPlace: '', birthDate: '', gender: '', address: '', nik: '', marital: '', education: '', emName: '', emPhone: '', emRelation: '', simNumber: '' }, raw || {});
+  const d0 = Object.assign({ name: '', phone: '', status: 'aktif', userEmail: '', birthPlace: '', birthDate: '', gender: '', address: '', nik: '', marital: '', education: '', emName: '', emPhone: '', emRelation: '', simNumber: '', alamat: null }, raw || {});
   const s0 = simParse(raw || {});
   const cur = new Date().getFullYear();
 
@@ -33,7 +48,17 @@ function DrvFormInner({ agId, raw, did }) {
   const [bPlace, setBPlace] = useState(d0.birthPlace);
   const [bDate, setBDate] = useState(d0.birthDate || '');
   const [gender, setGender] = useState(d0.gender || '');
-  const [addr, setAddr] = useState(d0.address);
+  /* Alamat berjenjang — pola sama dengan KYC. Pengemudi lama yang alamatnya
+     masih teks bebas: seluruh teks lama di-prefill ke NAMA JALAN untuk sekali
+     diseni; setelah tersimpan, alamat tersusun dalam objek terstruktur. */
+  const alamatAwal = d0.alamat && typeof d0.alamat === 'object'
+    ? Object.assign({ jalan: '', rtRw: '', kelurahan: '', kecamatan: '', kota: '', provinsi: '', kodePos: '' }, d0.alamat)
+    : { jalan: d0.address || '', rtRw: '', kelurahan: '', kecamatan: '', kota: '', provinsi: '', kodePos: '' };
+  const legacyAlamat = !(d0.alamat && typeof d0.alamat === 'object') && !!d0.address;
+  const [alamat, setAlamatState] = useState(alamatAwal);
+  const [alamatManual, setAlamatManualState] = useState({ kota: false, kecamatan: false });
+  const setAlPatch = (patch) => setAlamatState((p) => ({ ...p, ...patch }));
+  const setAlMan = (patch) => setAlamatManualState((p) => ({ ...p, ...patch }));
   const [phone, setPhone] = useState(d0.phone);
   const [nik, setNik] = useState(d0.nik);
   const [marital, setMarital] = useState(d0.marital || '');
@@ -41,7 +66,7 @@ function DrvFormInner({ agId, raw, did }) {
   const [emN, setEmN] = useState(d0.emName);
   const [emP, setEmP] = useState(d0.emPhone);
   const [emR, setEmR] = useState(d0.emRelation);
-  const [simTypeSel, setSimTypeSel] = useState(s0.type || '');
+  const [simTypeSel, setSimTypeSel] = useState(raw ? (s0.type || '') : '');
   const [simOther, setSimOther] = useState(!SIM_TYPES.includes(s0.type) && raw ? s0.type : '');
   const [simSame, setSimSame] = useState(!d0.simNumber || (d0.simNumber || '').replace(/\D/g, '') === (d0.nik || '').replace(/\D/g, ''));
   const [simNum, setSimNum] = useState(d0.simNumber || '');
@@ -50,8 +75,14 @@ function DrvFormInner({ agId, raw, did }) {
   const [simPhoto, setSimPhoto] = useState(raw?.simPhoto || '');
   const [mail, setMail] = useState(d0.userEmail || '');
   const [pass, setPass] = useState('');
+  const [pass2, setPass2] = useState('');
   const [status, setStatus] = useState(d0.status || 'aktif');
-  const [bank, setBank] = useState(d0.bank || '');
+  /* Rekening bank pengemudi — tiga komponen seperti form rekening kelengkapan
+     agen (KYC); kolom `bank` tetap string terkomposisi untuk tampilan lama. */
+  const b0 = parseBankStr(d0.bank);
+  const [bankSel, setBankSel] = useState(b0.bank);
+  const [bankNo, setBankNo] = useState(b0.no);
+  const [bankOwner, setBankOwner] = useState(b0.owner);
 
   const drvBack = () => { setDrvEdit(null); setAgenTab('driver'); go('agen'); };
 
@@ -84,6 +115,29 @@ function DrvFormInner({ agId, raw, did }) {
     if (!nm) { toast('Nama lengkap wajib diisi', 'err'); return; }
     if (ph.replace(/\D/g, '').length < 9) { toast('No HP minimal 9 digit angka', 'err'); return; }
     if (nk.length !== 16) { toast('NIK harus 16 digit angka', 'err'); return; }
+    /* Alamat lengkap berjenjang (bagian A DATA DIRI) — divalidasi sebelum
+       bagian B SIM agar toast mengikuti urutan form. */
+    const al = {
+      jalan: String(alamat.jalan || '').trim(),
+      rtRw: String(alamat.rtRw || '').replace(/\s+/g, ''),
+      kelurahan: String(alamat.kelurahan || '').trim(),
+      kecamatan: String(alamat.kecamatan || '').trim(),
+      kota: String(alamat.kota || '').trim(),
+      provinsi: String(alamat.provinsi || '').trim(),
+      kodePos: String(alamat.kodePos || '').replace(/\D/g, ''),
+    };
+    const errAlamat = cekAlamat(al, '');
+    if (errAlamat) { toast(errAlamat, 'err'); return; }
+    /* Satu string untuk kolom `address` yang ditampilkan di banyak halaman:
+       [jalan, RT/RW, kelurahan, kecamatan, kota, provinsi kodePos]. */
+    const address = [
+      al.jalan,
+      'RT ' + al.rtRw.replace('/', '/RW '),
+      al.kelurahan,
+      al.kecamatan,
+      al.kota,
+      (al.provinsi + ' ' + al.kodePos),
+    ].filter(Boolean).join(', ');
     if (!simTypeSel) { toast('Pilih jenis SIM', 'err'); return; }
     const simType = simTypeSel === 'Lainnya' ? simOther.trim() : simTypeSel;
     if (!simType) { toast('Isi jenis SIM lainnya', 'err'); return; }
@@ -102,11 +156,16 @@ function DrvFormInner({ agId, raw, did }) {
     if (clashUser) { toast('Email dipakai akun lain', 'err'); return; }
     const clashDrv = arr.find((x) => x.userEmail && x.userEmail.toLowerCase() === m && x.agencyId === agId && x.id !== did);
     if (clashDrv) { toast('Email dipakai pengemudi lain (' + clashDrv.name + ')', 'err'); return; }
-    const extra = { birthPlace: bPlace.trim(), birthDate: bDate || '', gender: gender || '', address: addr.trim(), nik: nk, marital: marital || '', education: (edu || '').trim(), emName: emN.trim(), emPhone: emP.trim(), emRelation: emR.trim(), simNumber, bank: (bank || '').trim() };
+    /* Rekening opsional, tetapi kalau salah satu komponen terisi maka
+       ketiganya wajib agar kolom `bank` tidak cacat. */
+    const bBank = (bankSel || '').trim();
+    const bNo = (bankNo || '').replace(/\D/g, '');
+    const bOwner = (bankOwner || '').trim();
+    if ((bBank || bNo || bOwner) && (!bBank || !bNo || !bOwner)) { toast('Lengkapi rekening bank pengemudi (nama bank, nomor, nama pemilik)', 'err'); return; }
+    const extra = { birthPlace: bPlace.trim(), birthDate: bDate || '', gender: gender || '', address, alamat: al, nik: nk, marital: marital || '', education: (edu || '').trim(), emName: emN.trim(), emPhone: emP.trim(), emRelation: emR.trim(), simNumber, bank: (bBank || bNo || bOwner) ? [bBank, bNo, 'a.n. ' + bOwner].join(' ') : '' };
     if (!extra.birthPlace) { toast('Tempat lahir wajib diisi', 'err'); return; }
     if (!extra.birthDate) { toast('Tanggal lahir wajib diisi', 'err'); return; }
     if (!extra.gender) { toast('Pilih jenis kelamin', 'err'); return; }
-    if (!extra.address) { toast('Alamat lengkap wajib diisi', 'err'); return; }
     if (!extra.marital) { toast('Pilih status pernikahan', 'err'); return; }
     if (!extra.education) { toast('Pilih pendidikan terakhir', 'err'); return; }
     if (!extra.emName) { toast('Nama kontak darurat wajib diisi', 'err'); return; }
@@ -115,6 +174,7 @@ function DrvFormInner({ agId, raw, did }) {
     if (!photo) { toast('Upload foto profil dulu', 'err'); return; }
     if (!simPhoto) { toast('Upload dokumen SIM dulu', 'err'); return; }
     Object.assign(extra, { simPhoto, ktpPhoto: raw?.ktpPhoto || '', selfie: raw?.selfie || '', photo });
+    if (pass && pass !== pass2) { toast('Verifikasi password tidak sama', 'err'); return; }
     let d;
     if (did) {
       d = arr.find((x) => x.id === did);
@@ -163,25 +223,28 @@ function DrvFormInner({ agId, raw, did }) {
       <div className="flex items-center gap-2"><button onClick={drvBack} className="bg-slate-100 hover:bg-slate-200 active:scale-95 transition p-2.5 rounded-xl cursor-pointer" aria-label="Kembali ke data pengemudi"><Icon name="arrow-left" className="w-4 h-4 pointer-events-none" /></button><h2 className="font-extrabold text-[18px]">{did ? 'Edit' : 'Tambah'} Pengemudi</h2></div>
       <Sec index="A" title="A. DATA DIRI CALON PENGEMUDI" />
       <div className="space-y-2.5">
-        <div><label className="text-[12px] font-extrabold">NAMA LENGKAP <span className="text-red-500">*</span></label><input value={name} onChange={(e) => setName(e.target.value)} className={'w-full mt-1 ' + inC} /></div>
-        <div className="grid grid-cols-2 gap-2.5"><div><label className="text-[12px] font-extrabold">TEMPAT LAHIR <span className="text-red-500">*</span></label><input value={bPlace} onChange={(e) => setBPlace(e.target.value)} className={'w-full mt-1 ' + inC} /></div>
+        <div><label className="text-[12px] font-extrabold">NAMA LENGKAP <span className="text-red-500">*</span></label><input value={name} onChange={(e) => setName(e.target.value)} className={'w-full mt-1 ' + inC} placeholder='Silahkan masukkan nama lengkap' /></div>
+        <div className="grid grid-cols-2 gap-2.5"><div><label className="text-[12px] font-extrabold">TEMPAT LAHIR <span className="text-red-500">*</span></label><input value={bPlace} onChange={(e) => setBPlace(e.target.value)} className={'w-full mt-1 ' + inC} placeholder='Silahkan masukkan tempat lahir' /></div>
           <div><label className="text-[12px] font-extrabold">TANGGAL LAHIR <span className="text-red-500">*</span></label><input type="date" value={bDate} onChange={(e) => setBDate(e.target.value)} className={'w-full mt-1 ' + inC} /></div></div>
         <div><label className="text-[12px] font-extrabold">JENIS KELAMIN <span className="text-red-500">*</span></label><PillRadios options={GENDERS} value={gender} onChange={setGender} /></div>
-        <div><label className="text-[12px] font-extrabold">ALAMAT LENGKAP <span className="text-red-500">*</span></label><input value={addr} onChange={(e) => setAddr(e.target.value)} className={'w-full mt-1 ' + inC} /></div>
-        <div className="grid grid-cols-2 gap-2.5"><div><label className="text-[12px] font-extrabold">NO HP / WHATSAPP <span className="text-red-500">*</span></label><input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" className={'w-full mt-1 ' + inC} /></div>
+        <div><label className="text-[12px] font-extrabold">ALAMAT LENGKAP <span className="text-red-500">*</span></label>
+          {legacyAlamat ? <p className="text-[12px] font-semibold text-sky-900 bg-sky-50 border-2 border-sky-200 rounded-2xl px-3.5 py-2.5 mt-1 mb-0.5">Alamat lama berformat bebas — lengkapi pilihan wilayah, lalu rapikan teks Nama Jalan/Dusun.</p> : null}
+          <AlamatFields val={alamat} onPatch={setAlPatch} manual={alamatManual} onManual={setAlMan} listId="drv-kelurahan-diri" kelurahanPhFb="Silahkan masukkan kelurahan" />
+        </div>
+        <div className="grid grid-cols-2 gap-2.5"><div><label className="text-[12px] font-extrabold">NO HP / WHATSAPP <span className="text-red-500">*</span></label><input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" className={'w-full mt-1 ' + inC} placeholder='No. hp/wa aktif' /></div>
           <div><label className="text-[12px] font-extrabold">NOMOR KTP / NIK <span className="text-red-500">*</span></label><input value={nik} onChange={(e) => setNik(e.target.value)} inputMode="numeric" maxLength={16} placeholder="16 digit" className={'w-full mt-1 ' + inC} /></div></div>
         <div><label className="text-[12px] font-extrabold">STATUS PERNIKAHAN <span className="text-red-500">*</span></label><PillRadios options={MARITALS} value={marital} onChange={setMarital} /></div>
         <div><label className="text-[12px] font-extrabold">PENDIDIKAN TERAKHIR <span className="text-red-500">*</span></label><select value={edu} onChange={(e) => setEdu(e.target.value)} className={'w-full mt-1 ' + inC}><option value="">— Pilih —</option>{EDUCATIONS.map((o) => <option key={o} value={o}>{o}</option>)}</select></div>
-        <div className="grid grid-cols-2 gap-2.5"><div><label className="text-[12px] font-extrabold">KONTAK DARURAT (NAMA) <span className="text-red-500">*</span></label><input value={emN} onChange={(e) => setEmN(e.target.value)} className={'w-full mt-1 ' + inC} /></div>
-          <div><label className="text-[12px] font-extrabold">NO HP DARURAT <span className="text-red-500">*</span></label><input value={emP} onChange={(e) => setEmP(e.target.value)} inputMode="tel" className={'w-full mt-1 ' + inC} /></div></div>
-        <div><label className="text-[12px] font-extrabold">HUBUNGAN KONTAK DARURAT <span className="text-red-500">*</span></label><input value={emR} onChange={(e) => setEmR(e.target.value)} placeholder="cth: Istri / Saudara" className={'w-full mt-1 ' + inC} /></div>
+        <div className="grid grid-cols-2 gap-2.5"><div><label className="text-[12px] font-extrabold">KONTAK DARURAT (NAMA) <span className="text-red-500">*</span></label><input value={emN} onChange={(e) => setEmN(e.target.value)} className={'w-full mt-1 ' + inC} placeholder='Masukkan nama' /></div>
+          <div><label className="text-[12px] font-extrabold">NO HP DARURAT <span className="text-red-500">*</span></label><input value={emP} onChange={(e) => setEmP(e.target.value)} inputMode="tel" className={'w-full mt-1 ' + inC} placeholder='No. hp aktif' /></div></div>
+        <div><label className="text-[12px] font-extrabold">HUBUNGAN KONTAK DARURAT <span className="text-red-500">*</span></label><select value={emR} onChange={(e) => setEmR(e.target.value)} className={'w-full mt-1 ' + inC}><option value="">— Hubungan —</option>{emR && !KYC_HUBUNGAN.includes(emR) ? <option value={emR}>{emR} (nilai lama)</option> : null}{KYC_HUBUNGAN.map((h) => <option key={h} value={h}>{h}</option>)}</select></div>
       </div>
       <Sec index="B" title="B. DATA SIM" />
       <div className="space-y-2.5">
         <div className="grid grid-cols-2 gap-2.5 items-end"><div><label className="text-[12px] font-extrabold">JENIS SIM <span className="text-red-500">*</span></label><select value={simTypeSel} onChange={(e) => setSimTypeSel(e.target.value)} className={'w-full mt-1 ' + inC}><option value="">— Pilih —</option>{SIM_TYPES.map((t) => <option key={t} value={t}>SIM {t}</option>)}<option value="Lainnya">SIM lainnya…</option></select></div>
           <div><label className="flex items-center gap-2.5 bg-sky-50 border-2 border-sky-200 rounded-2xl px-3.5 py-2.5 cursor-pointer text-[12.5px] font-bold text-sky-800 leading-snug"><input type="checkbox" checked={simSame} onChange={(e) => setSimSame(e.target.checked)} className="w-5 h-5 accent-sky-600 shrink-0" />Apakah nomor SIM sesuai dengan nomor KTP?</label></div></div>
         <div className={!SIM_TYPES.includes(simTypeSel) && simTypeSel ? '' : 'hidden'}><label className="text-[12px] font-extrabold">SIM LAINNYA <span className="text-red-500">*</span></label><input value={simOther} onChange={(e) => setSimOther(e.target.value)} placeholder="cth: B2 Umum" className={'w-full mt-1 ' + inC} /></div>
-        <div className="grid grid-cols-2 gap-2.5"><div className={simSame ? 'hidden' : ''}><label className="text-[12px] font-extrabold">NOMOR SIM <span className="text-red-500">*</span></label><input value={simNum} onChange={(e) => setSimNum(e.target.value)} className={'w-full mt-1 ' + inC} /></div>
+        <div className="grid grid-cols-2 gap-2.5"><div className={simSame ? 'hidden' : ''}><label className="text-[12px] font-extrabold">NOMOR SIM <span className="text-red-500">*</span></label><input value={simNum} onChange={(e) => setSimNum(e.target.value)} className={'w-full mt-1 ' + inC} placeholder='14 atau 16 digit' /></div>
           <div><label className="text-[12px] font-extrabold">MASA BERLAKU (TAHUN) <span className="text-red-500">*</span></label><input type="number" min={cur} max={2100} value={simExp} onChange={(e) => setSimExp(e.target.value)} placeholder={'cth: ' + (cur + 5)} className={'w-full mt-1 ' + inC} /></div></div>
       </div>
       <Sec index="C" title="C. FOTO & DOKUMEN" />
@@ -192,9 +255,23 @@ function DrvFormInner({ agId, raw, did }) {
       <Sec index="D" title="D. AKUN LOGIN & STATUS" />
       <div className="space-y-2.5">
         <input value={mail} onChange={(e) => setMail(e.target.value)} placeholder="Email akun login (wajib)" className="w-full text-[13px] border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" />
-        <input value={pass} onChange={(e) => setPass(e.target.value)} type="password" autoComplete="new-password" placeholder={did ? 'Password baru (kosongkan bila tak diubah)' : 'Password login (wajib)'} className="w-full text-[13px] border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" />
+        <div className="grid grid-cols-2 gap-2.5">
+          <input value={pass} onChange={(e) => setPass(e.target.value)} type="password" autoComplete="new-password" placeholder={did ? 'Password baru (kosong = tetap)' : 'Password login (wajib)'} className="w-full text-[13px] border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" />
+          <input value={pass2} onChange={(e) => setPass2(e.target.value)} type="password" autoComplete="new-password" placeholder="Ulangi password" className={'w-full text-[13px] border-2 rounded-xl px-3 py-2.5 focus-ring ' + ((pass && pass2 && pass !== pass2) ? 'border-red-400' : 'border-slate-200')} />
+        </div>
+        {pass && pass2 && pass !== pass2 ? <p className="text-[11px] font-bold text-red-500">Password tidak sama</p> : null}
         <div><label className="text-[12px] font-extrabold">STATUS</label><select value={status} onChange={(e) => setStatus(e.target.value)} className={'w-full mt-1 ' + inC}><option value="aktif">aktif</option><option value="nonaktif">nonaktif</option></select></div>
-        <div><label className="text-[12px] font-extrabold">REKENING BANK (untuk pencairan dana tiket)</label><input value={bank} onChange={(e) => setBank(e.target.value)} placeholder="cth: BCA 1234567890 a.n. Nama" className={'w-full mt-1 ' + inC} /></div>
+        <div><label className="text-[12px] font-extrabold">REKENING BANK (untuk pencairan dana tiket)</label>
+          <div className="grid grid-cols-2 gap-2.5 mt-1">
+            <div><label className="text-[11.5px] font-extrabold">NAMA BANK</label><select value={bankSel} onChange={(e) => setBankSel(e.target.value)} className={'w-full mt-1 ' + inC}><option value="">— Nama bank —</option>{bankSel && !KYC_BANKS.includes(bankSel) ? <option value={bankSel}>{bankSel} (nilai lama)</option> : null}{KYC_BANKS.map((b) => <option key={b} value={b}>{b}</option>)}</select></div>
+            <div><label className="text-[11.5px] font-extrabold">NOMOR REKENING</label><input value={bankNo} onChange={(e) => setBankNo(e.target.value.replace(/\D/g, ''))} inputMode="numeric" placeholder="Silahkan masukkan nomor rekening" className={'w-full mt-1 ' + inC} /></div>
+          </div>
+          <div className="mt-2.5"><label className="text-[11.5px] font-extrabold">NAMA PEMILIK REKENING</label><input value={bankOwner} onChange={(e) => setBankOwner(e.target.value)} placeholder="Harus sama dengan nama pengemudi" className={'w-full mt-1 ' + inC} />
+            {!String(bankOwner || '').trim() ? null : normName(bankOwner) === normName(name)
+              ? <p className="text-[11px] font-bold mt-1 text-green-600">Sesuai dengan nama pengemudi</p>
+              : <p className="text-[11px] font-bold mt-1 text-red-500">Belum sama dengan nama pengemudi</p>}
+          </div>
+        </div>
         <p className="text-[11.5px] text-slate-400 font-medium">Nonaktif = suspend: pengemudi tidak bisa masuk & tak bisa dijadwalkan.</p></div>
       <div className="grid grid-cols-2 gap-2.5 mt-5"><button onClick={drvBack} className="bg-slate-100 font-extrabold text-[14px] py-3 rounded-2xl">Batal</button><button onClick={saveDrvPage} className="bg-sky-600 text-white font-extrabold text-[14px] py-3 rounded-2xl">Simpan</button></div></div>
   );

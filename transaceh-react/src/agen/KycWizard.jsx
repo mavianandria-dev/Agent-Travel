@@ -14,7 +14,7 @@ import { refreshSnapshot } from '@/lib/remote.js';
 import { inC } from '@/lib/utils.js';
 import { DOC_ACCEPT, DOCS_BUDGET_BYTES, fileToDoc, formatBytes, docsBytes } from '@/lib/upload.js';
 import { Icon, Sec, PillRadios } from '@/components/ui.jsx';
-import { PROVINSI, KABKOTA, KECAMATAN, KELURAHAN, PILIHAN_LAIN as LAIN } from '@/lib/daerah.js';
+import { AlamatFields } from '@/components/AlamatFields.jsx';
 
 const STEPS = [['Kelengkapan Data', 'clipboard-list'], ['Lampiran Dokumen', 'scan-line'], ['Syarat & Ketentuan', 'scroll-text']];
 
@@ -49,41 +49,9 @@ function Stepper({ step, done }) {
   );
 }
 
-/* Blok alamat berjenjang — dipakai untuk Alamat Domisili (A) dan Alamat Lokasi Usaha (B).
-   val: objek alamat, onPatch: gabung patch, manual: { kota, kecamatan }, onManual: ubah mode manual. */
-function AlamatFields({ val, onPatch, manual, onManual, listId }) {
-  const opsiKota = KABKOTA[val.provinsi] || [];
-  const opsiKec = KECAMATAN[val.kota] || [];
-  const opsiKel = KELURAHAN[val.kecamatan] || [];
-  const setProvinsi = (v) => { onManual({ kota: false, kecamatan: false }); onPatch({ provinsi: v, kota: '', kecamatan: '', kelurahan: '' }); };
-  const setKota = (v) => { onManual({ kecamatan: false }); onPatch({ kota: v, kecamatan: '', kelurahan: '' }); };
-  const setKecamatan = (v) => onPatch({ kecamatan: v, kelurahan: '' });
-  const keDaftar = (f) => { onManual({ [f]: false }); onPatch({ [f]: '' }); };
-  return (
-    <div className="grid grid-cols-2 gap-2.5 mt-1">
-      <div><label className="text-[11.5px] font-extrabold">PROVINSI <span className="text-red-500">*</span></label><select value={val.provinsi} onChange={(e) => setProvinsi(e.target.value)} className={'w-full mt-1 ' + inC}><option value="">— Pilih —</option>{PROVINSI.map((p) => <option key={p} value={p}>{p}</option>)}</select></div>
-      <div><label className="text-[11.5px] font-extrabold">KOTA / KABUPATEN <span className="text-red-500">*</span></label>
-        {manual.kota
-          ? <div className="relative mt-1"><input value={val.kota} onChange={(e) => onPatch({ kota: e.target.value })} placeholder="cth: Kabupaten/Kota lain" className={inC + ' pr-10'} /><button type="button" onClick={() => keDaftar('kota')} aria-label="Kembali ke daftar" className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-sky-600"><Icon name="x" className="w-4 h-4 pointer-events-none" /></button></div>
-          : <select value={val.kota} onChange={(e) => (e.target.value === LAIN ? onManual({ kota: true }) : setKota(e.target.value))} className={'w-full mt-1 ' + inC}><option value="">— Pilih —</option>{opsiKota.map((o) => <option key={o} value={o}>{o}</option>)}<option value={LAIN}>✏️ Tulis sendiri…</option></select>}
-        {!manual.kota && !opsiKota.length && val.provinsi ? <p className="text-[10.5px] font-bold text-slate-400 mt-1">Kabupaten/kota belum terdaftar — pilih "Tulis sendiri…".</p> : null}
-      </div>
-      <div><label className="text-[11.5px] font-extrabold">KECAMATAN <span className="text-red-500">*</span></label>
-        {manual.kecamatan
-          ? <div className="relative mt-1"><input value={val.kecamatan} onChange={(e) => onPatch({ kecamatan: e.target.value })} placeholder="cth: Kecamatan" className={inC + ' pr-10'} /><button type="button" onClick={() => keDaftar('kecamatan')} aria-label="Kembali ke daftar" className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-sky-600"><Icon name="x" className="w-4 h-4 pointer-events-none" /></button></div>
-          : <select value={val.kecamatan} onChange={(e) => (e.target.value === LAIN ? onManual({ kecamatan: true }) : setKecamatan(e.target.value))} className={'w-full mt-1 ' + inC}><option value="">— Pilih —</option>{opsiKec.map((o) => <option key={o} value={o}>{o}</option>)}<option value={LAIN}>✏️ Tulis sendiri…</option></select>}
-        {!manual.kecamatan && !opsiKec.length && val.kota ? <p className="text-[10.5px] font-bold text-slate-400 mt-1">Daftar kecamatan tersedia untuk Aceh & Sumatera Utara — untuk wilayah lain pilih "Tulis sendiri…".</p> : null}
-      </div>
-      <div><label className="text-[11.5px] font-extrabold">KELURAHAN<span className="text-red-500">*</span></label>
-        <input list={listId} value={val.kelurahan} onChange={(e) => onPatch({ kelurahan: e.target.value })} placeholder={opsiKel.length ? 'Pilih atau ketik kelurahan' : 'Silahkan masukkan kelurahan domisili anda'} className={'w-full mt-1 ' + inC} />
-        <datalist id={listId}>{opsiKel.map((o) => <option key={o} value={o} />)}</datalist>
-      </div>
-      <div><label className="text-[11.5px] font-extrabold">RT / RW <span className="text-red-500">*</span></label><input value={val.rtRw} onChange={(e) => onPatch({ rtRw: e.target.value })} placeholder="cth: 001 / 002" className={inC} /></div>
-      <div><label className="text-[11.5px] font-extrabold">KODE POS <span className="text-red-500">*</span></label><input value={val.kodePos} onChange={(e) => onPatch({ kodePos: e.target.value.replace(/\D/g, '').slice(0, 5) })} inputMode="numeric" maxLength={5} placeholder="5 digit" className={inC} /></div>
-      <div className="col-span-2"><label className="text-[11.5px] font-extrabold">NAMA JALAN / DUSUN <span className="text-red-500">*</span></label><input value={val.jalan} onChange={(e) => onPatch({ jalan: e.target.value })} placeholder="Silahkan masukkan nama jalan atau dusun" className={inC} /></div>
-    </div>
-  );
-}
+/* Blok alamat berjenjang dibungkus di '@/components/AlamatFields.jsx' supaya
+   bisa dipakai bersama oleh Alamat Domisili/Usaha (di sini) dan Tambah/Edit
+   Pengemudi (DrvForm). */
 
 export default function KycWizard() {
   const { user, go, toast, refresh, logout } = useApp();
@@ -366,7 +334,7 @@ export default function KycWizard() {
           <Sec index={SEC.rekening} title={isBadan ? 'PROFIL REKENING BANK' : 'PROFIL REKENING BANK & INFORMASI NPWP'} />
           <div className="grid grid-cols-2 gap-2.5">
             <div><label className="text-[12px] font-extrabold">NAMA BANK <span className="text-red-500">*</span></label><select value={form.bank} onChange={(e) => set('bank', e.target.value)} className={'w-full mt-1 ' + inC}><option value="">— Pilih —</option>{KYC_BANKS.map((b) => <option key={b} value={b}>{b}</option>)}</select></div>
-            <div><label className="text-[12px] font-extrabold">NOMOR REKENING <span className="text-red-500">*</span></label><input value={form.rekeningNo} onChange={(e) => set('rekeningNo', e.target.value.replace(/\D/g, ''))} inputMode="numeric" placeholder="Silahkan Masukkan Nomor Rekening Anda" className={'w-full mt-1 ' + inC} /></div>
+            <div><label className="text-[12px] font-extrabold">NOMOR REKENING <span className="text-red-500">*</span></label><input value={form.rekeningNo} onChange={(e) => set('rekeningNo', e.target.value.replace(/\D/g, ''))} inputMode="numeric" placeholder="Silahkan masukkan nomor rekening Anda" className={'w-full mt-1 ' + inC} /></div>
             <div className={isBadan ? 'col-span-2' : ''}><label className="text-[12px] font-extrabold">NAMA PEMILIK REKENING <span className="text-red-500">*</span></label><input value={form.rekeningNama} onChange={(e) => set('rekeningNama', e.target.value)} placeholder={isBadan ? 'Harus sama dengan nama badan usaha' : 'Harus sama dengan nama pemohon'} className={'w-full mt-1 ' + inC} />
               {!String(form.rekeningNama || '').trim() ? null : rekeningOwnerOk
                 ? <p className="text-[11px] font-bold mt-1 text-green-600">Sesuai dengan nama {isBadan ? 'badan usaha' : 'pemohon'}</p>

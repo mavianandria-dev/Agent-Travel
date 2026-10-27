@@ -1942,6 +1942,59 @@ ok('baris list map blob tanpa tetap slot tetap dilaporkan',
   vdBad.problems);
 
 /* ------------------------------------------------------------------ */
+/* 17) driver_alamat: alamat berjenjang pengemudi (kind one)           */
+/* ------------------------------------------------------------------ */
+
+console.log('\n== 17) driver_alamat pengemudi ==');
+
+/* Buang baris bermasalah yang sengaja dipasang pada seksi 16 supaya
+   validateDatabase kembali hijau untuk seksi ini. */
+const lastRefund = refundSheet.getLastRow();
+if (lastRefund > 1) refundSheet.getRange(lastRefund, 1, 1, 4).clearContent();
+
+const D1_ADDR = {
+  jalan: 'Jl. Tuan Haji', rtRw: '001/002', kelurahan: 'Lampineung',
+  kecamatan: 'Baiturrahman', kota: 'Kota Banda Aceh', provinsi: 'Aceh',
+  kodePos: '23112'
+};
+const D1_ADDR_STR = 'Jl. Tuan Haji, RT 001/RW 002, Lampineung, Baiturrahman, Kota Banda Aceh, Aceh 23112';
+/* driverToken = driver1@test.local → ownDriverId = d_1 (cocok via userEmail). */
+const d1Now = readRec('drivers', 'd_1');
+res = sync({
+  drivers: {
+    baseRev: revOf('drivers'),
+    upserts: [Object.assign({}, d1Now, {
+      address: D1_ADDR_STR,
+      alamat: D1_ADDR
+    })],
+    deletes: []
+  }
+}, driverToken);
+ok('pengemudi memperbarui alamat berjenjang sendiri (whitelist alamat)', res.ok === true, res);
+
+const d1Read = readRec('drivers', 'd_1');
+ok('alamat berjenjang tersimpan & terbaca kembali identik',
+  schemaValueEqual(d1Read.alamat, D1_ADDR) && d1Read.address ===
+  D1_ADDR_STR);
+
+/* Whitelist self-edit pengemudi tetap menolak field di luar daftar. */
+res = sync({
+  drivers: {
+    baseRev: revOf('drivers'),
+    upserts: [Object.assign({}, readRec('drivers', 'd_1'), { name: 'Nama Beda' })],
+    deletes: []
+  }
+}, driverToken);
+ok('whitelist self-edit pengemudi masih menolak perubahan nama sendiri',
+  res.ok === false && res.error.code === 'FORBIDDEN', res);
+
+const vdDrv = S.validateDatabase();
+ok('validateDatabase: tab driver_alamat terbentuk & valid',
+  vdDrv.ok === true && vdDrv.counts.driver_alamat === 1 &&
+  !vdDrv.problems.some((p) => p.indexOf('driver_alamat') >= 0),
+  vdDrv.counts.driver_alamat);
+
+/* ------------------------------------------------------------------ */
 
 console.log('\n== Ringkasan ==');
 console.log('PASS: ' + passed + ', FAIL: ' + failed);

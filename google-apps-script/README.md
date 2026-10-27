@@ -14,7 +14,7 @@ Folder ini berisi backend Google Sheets untuk TransAceh. `seed.gs` membuat datab
 | Skema tab kolom (v2, 1NF) dan seed produksi | Selesai — **reset spreadsheet wajib** (format lama tidak dimigrasi) |
 | Superadmin awal | Selesai — password di-hash sejak seeding |
 | Validasi struktur database | Selesai |
-| API `code.gs` mode direct | Selesai — **305 asersi mock lokal hijau** |
+| API `code.gs` mode direct | Selesai — **309 asersi mock lokal hijau** |
 | Proyeksi publik & filter baris per peran | Selesai di backend |
 | Aksi akun (`register`, `adminCreateUser`, `adminSetPassword`) | Selesai di backend |
 | Throttling login/ganti password/registrasi | Selesai (best effort) |
@@ -96,7 +96,7 @@ Jalankan **TransAceh → Validasi database** atau `validateDatabase()`. Hasil ya
 
 - `ok: true`
 - `users: 1`, `settings: 1`, `fees: 1`, `audit: 1`
-- 19 tab koleksi utama + 36 tab anak + `_meta` (jumlah tepat mengikuti `apiDescribeStore_()`)
+- 19 tab koleksi utama + 37 tab anak + `_meta` (jumlah tepat mengikuti `apiDescribeStore_()`)
 - tidak ada masalah header, ID duplikat, `ord` duplikat, baris anak tanpa `parent_id`, atau sel melebihi 45000 karakter
 
 ### 7. Deploy Web App
@@ -114,7 +114,7 @@ Untuk spreadsheet produksi yang sudah terisi data, **jangan** menjalankan `seedP
 
 1. Salin isi `code.gs` dan `seed.gs` versi terbaru ke project Apps Script (timpa yang lama).
 2. Jalankan `ensureSchema()` sekali — tab skema yang belum ada dibuat tanpa menyentuh data; tab `agency_kyc_docs` versi lama otomatis dimigrasi ke skema blob (`_meta.tableCount` ikut disesuaikan). Menu: **TransAceh → Perbaiki skema (tanpa reset)**.
-3. Jalankan `validateDatabase()` — hasil "Database valid. Total tab: **55**" (19 utama + 36 anak, ditambah `_meta`).
+3. Jalankan `validateDatabase()` — hasil "Database valid. Total tab: **56**" (19 utama + 37 anak, ditambah `_meta`).
 
 Jika ada tab yang headernya tidak sesuai skema dan tidak punya jalur migrasi otomatis, `ensureSchema()` berhenti dengan pesan header yang bermasalah — jangan paksa; periksa perubahan skema terlebih dahulu.
 
@@ -153,11 +153,11 @@ Catatan:
 node google-apps-script/local-tests/mock-harness.mjs
 ```
 
-Harness mem-mock `SpreadsheetApp`, `PropertiesService`, `LockService`, `Utilities`, `CacheService`, `ContentService`, dan `Logger`, serta memuat `seed.gs` ke sandbox yang sama. Saat ini **305 asersi** lulus.
+Harness mem-mock `SpreadsheetApp`, `PropertiesService`, `LockService`, `Utilities`, `CacheService`, `ContentService`, dan `Logger`, serta memuat `seed.gs` ke sandbox yang sama. Saat ini **309 asersi** lulus.
 
 ## Struktur tab
 
-Format penyimpanan **v2**: tidak ada JSON di dalam sel; satu kolom per field skalar, dan setiap array/object dipecah ke tab anak dengan `parent_id`. Tabel utama (19 koleksi): `users`, `agencies`, `routes`, `routeRequests`, `vehicles`, `drivers`, `schedules`, `maintenanceRequests`, `bookings`, `payments`, `ledger`, `vouchers`, `reviews`, `notifications`, `audit`, `banners`, `supportTickets`, `settings`, `fees` — ditambah 36 tab anak, antara lain `user_favorites`, `agency_kyc_docs`, `agency_kyc_doc_blob`, `vehicle_layout`, `schedule_delay_history`, `booking_passengers`, `booking_fare`, `support_messages`, `notifications_meta`, dst., dan `_meta`. Daftar tab dan header lengkap ada di `API_MAIN_TABLES` (`code.gs`) dan bisa dicetak via `apiDescribeStore_()`; `seed.gs` membuat semua tab dari daftar itu.
+Format penyimpanan **v2**: tidak ada JSON di dalam sel; satu kolom per field skalar, dan setiap array/object dipecah ke tab anak dengan `parent_id`. Tabel utama (19 koleksi): `users`, `agencies`, `routes`, `routeRequests`, `vehicles`, `drivers`, `schedules`, `maintenanceRequests`, `bookings`, `payments`, `ledger`, `vouchers`, `reviews`, `notifications`, `audit`, `banners`, `supportTickets`, `settings`, `fees` — ditambah 37 tab anak, antara lain `user_favorites`, `agency_kyc_docs`, `agency_kyc_doc_blob`, `driver_alamat`, `vehicle_layout`, `schedule_delay_history`, `booking_passengers`, `booking_fare`, `support_messages`, `notifications_meta`, dst., dan `_meta`. Daftar tab dan header lengkap ada di `API_MAIN_TABLES` (`code.gs`) dan bisa dicetak via `apiDescribeStore_()`; `seed.gs` membuat semua tab dari daftar itu.
 
 ### Tab `_meta`
 
@@ -295,7 +295,7 @@ Validasi domain utama:
 - **Payments**: satu payment per booking; nominal baru = total booking; fee = perhitungan `splitFare`; status baru `pending`; update hanya status/fee/refund; `pending→paid/cancelled`; refund tidak boleh melebihi refund booking; pencairan/penyelesaian refund hanya admin; delete hanya superadmin.
 - **Ledger**: hanya untuk booking lunas, satu ledger per booking, dan payment harus sudah `paid`; identitas jadwal/agensi/pengemudi/email/kursi harus cocok; nominal harus sama dengan `splitFare` dan total booking; status `ditahan→layak/void`, `layak→dicairkan/void`; pindah ledger hanya lewat maintenance; delete hanya superadmin.
 - **Voucher**: pelanggan hanya boleh menaikkan `used`; agen hanya boleh mengubah voucher miliknya; voucher global/agen lain hanya `used`; voucher baru agen wajib punya `id` dan `agencyId`; voucher agen hanya berlaku pada jadwal agensi tersebut.
-- **Routes/schedules/vehicles/drivers/maintenance**: agen hanya pada agensinya; agen tidak boleh membuat/menghapus rute, hanya menugaskan pengemudi agensinya; jadwal agen harus pada rute yang menawarkan agensinya; pengemudi hanya jadwal yang ditugaskan; kendaraan/jadwal yang masih dipakai tidak boleh dihapus; pengemudi yang masih terpasang di kendaraan/rute tidak boleh dihapus.
+- **Routes/schedules/vehicles/drivers/maintenance**: agen hanya pada agensinya; agen tidak boleh membuat/menghapus rute, hanya menugaskan pengemudi agensinya; jadwal agen harus pada rute yang menawarkan agensinya; pengemudi hanya jadwal yang ditugaskan; kendaraan/jadwal yang masih dipakai tidak boleh dihapus; pengemudi yang masih terpasang di kendaraan/rute tidak boleh dihapus. Akun pengemudi hanya boleh mengubah data pengemudinya sendiri dan hanya field pada whitelist `driverSelfAllowed` (telepon/WA, `alamat` berjenjang + `address`, kontak darurat, rekening, foto, `pendingProfile`).
 - **Notifikasi**: pengguna hanya boleh membuat notifikasi untuk dirinya sendiri dan menghapus miliknya; superadmin dapat mengelola semua. Notifikasi lintas pengguna belum dibuat otomatis oleh server.
 - **Support tickets**: tiket baru atas nama akun sendiri, bukan guest, status `new`; pelanggan tidak boleh menempelkan `agencyId`; agen/pengemudi harus agensinya; update tiket sendiri hanya pesan/status/`updatedAt`; transisi `waiting→process`; agen boleh membalas tiket agensinya sebagai CS; pengemudi tidak boleh menghapus tiket.
 
@@ -340,7 +340,7 @@ Karena cache bersifat sementara, throttle bukan jaminan keamanan mutlak. Proxy d
 node google-apps-script/local-tests/mock-harness.mjs
 ```
 
-305 asersi mencakup:
+309 asersi mencakup:
 
 1. `setupBackend` + mode direct + `REQUIRE_PROXY_KEY`.
 2. Login via hash (`apiHashForUser_`); token tamper/expired; token lama dicabut setelah ganti/reset password.
@@ -355,6 +355,7 @@ node google-apps-script/local-tests/mock-harness.mjs
 11. Blob chunk dokumen KYC: dataUrl besar dipecah menjadi 4-ish chunk (per 45.000 karakter), dibaca ulang identik, ganti/hapus dokumen membersihkan chunk lama; `ensureSchema` memigrasi header + dataUrl versi lama dan menaikkan `_meta.tableCount`.
 12. Slot check `validateDatabase` sadar-skema: baris kind `one` boleh punya kolom data pertama kosong; baris list/map/blob tanpa slot/key tetap dilaporkan.
 13. Tidak ada secret/plaintext password di response, log, atau record akun.
+14. Alamat berjenjang pengemudi: tab anak `driver_alamat` (kind `one`: `jalan, rtRw, kelurahan, kecamatan, kota, provinsi, kodePos`) tersinkron oleh pengemudi sendiri via whitelist `alamat`, terbaca kembali identik, tetap menolak field di luar whitelist, dan `validateDatabase` menghitung tab baru dengan valid.
 
 ## Batasan dan risiko produksi
 
@@ -387,19 +388,19 @@ node google-apps-script/local-tests/mock-harness.mjs
 
 - `google-apps-script/seed.gs:75-232` — `ensureSchema()` (tambah tab tanpa reset + migrasi `agency_kyc_docs` lama ke blob).
 - `google-apps-script/seed.gs:234-360` — seed produksi v2.
-- `google-apps-script/seed.gs:362-419` — validateDatabase (total tab 55).
+- `google-apps-script/seed.gs:362-419` — validateDatabase (total tab 56).
 - `google-apps-script/code.gs:1-483` — versi API, daftar aksi/koleksi, proyeksi publik, field rahasia, config.
 - `google-apps-script/code.gs:484-538` — `apiSheet_` + `apiEnsureChildSheet_` (tab anak dibuat otomatis bila belum ada).
-- `google-apps-script/code.gs:539-808` — `API_MAIN_TABLES` (skema kolom v2; `agencies` memakai tab blob `agency_kyc_doc_blob`).
-- `google-apps-script/code.gs:810-1006` — `apiTables_`, validasi skema, guard sel 45.000 karakter.
-- `google-apps-script/code.gs:1008-1292` — engine tulis/baca kolom: `apiBuildChildRows_` (cabang blob) dan `apiReadCollection_` (gabung chunk).
-- `google-apps-script/code.gs:1293-1597` — meta/rev, health, `doPost`, dispatch.
-- `google-apps-script/code.gs:1598-2239` — login, register, bootstrap dan filter per peran.
-- `google-apps-script/code.gs:2240-2514` — ganti password, admin user.
-- `google-apps-script/code.gs:2515-4527` — engine `sync` + validator per koleksi (agensi di ~3266, booking/payment/ledger, voucher, notifikasi, tiket, route request, lintas koleksi).
-- `google-apps-script/code.gs:4528-akhir` — `apiCommit_`, penerapan koleksi, preservasi secret.
+- `google-apps-script/code.gs:539-812` — `API_MAIN_TABLES` (skema kolom v2; `agencies` memakai tab blob `agency_kyc_doc_blob`; `drivers` memakai anak `driver_alamat`).
+- `google-apps-script/code.gs:814-1010` — `apiTables_`, validasi skema, guard sel 45.000 karakter.
+- `google-apps-script/code.gs:1012-1296` — engine tulis/baca kolom: `apiBuildChildRows_` (cabang blob) dan `apiReadCollection_` (gabung chunk).
+- `google-apps-script/code.gs:1297-1601` — meta/rev, health, `doPost`, dispatch.
+- `google-apps-script/code.gs:1602-2243` — login, register, bootstrap dan filter per peran.
+- `google-apps-script/code.gs:2244-2518` — ganti password, admin user.
+- `google-apps-script/code.gs:2519-4531` — engine `sync` + validator per koleksi (agensi di ~3270, pengemudi di ~3377, booking/payment/ledger, voucher, notifikasi, tiket, route request, lintas koleksi).
+- `google-apps-script/code.gs:4532-akhir` — `apiCommit_`, penerapan koleksi, preservasi secret.
 - `google-apps-script/appsscript.json` — manifest dan OAuth scope.
-- `google-apps-script/local-tests/mock-harness.mjs` — 305 asersi mock (termasuk round-trip v2, blob chunk, migrasi `ensureSchema`, dan cek slot sadar-skema).
+- `google-apps-script/local-tests/mock-harness.mjs` — 309 asersi mock (termasuk round-trip v2, blob chunk, migrasi `ensureSchema`, cek slot sadar-skema, dan alamat berjenjang pengemudi).
 - `transaceh-react/src/lib/db.js` — cache, diff, antrean sync, rollback.
 - `transaceh-react/src/lib/sheetsApi.js` — transport direct.
 - `transaceh-react/src/lib/remote.js` — bootstrap, login, logout, hydrate revisi.

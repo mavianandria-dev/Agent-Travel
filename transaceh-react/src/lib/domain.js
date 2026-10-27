@@ -2692,7 +2692,8 @@ const g = (k, f) => String(((k || {})[f]) || '').trim();
 /* Cek satu blok alamat berjenjang (domisili maupun lokasi usaha).
    awalan dipakai untuk pesan agar tidak ambigu saat dua blok sama-sama kosong. */
 const ALAMAT_FIELDS = [['provinsi', 'Provinsi'], ['kota', 'Kota/Kabupaten'], ['kecamatan', 'Kecamatan'], ['kelurahan', 'Kelurahan'], ['rtRw', 'RT/RW'], ['jalan', 'Alamat jalan']];
-function cekAlamat(al, awalan) {
+/** Validasi satu blok alamat berjenjang; dipakai KYC dan Tambah Pengemudi. */
+export function cekAlamat(al, awalan) {
   const a = al || {};
   for (const [f, l] of ALAMAT_FIELDS) if (!String(a[f] || '').trim()) return awalan + l + ' wajib diisi';
   if (!/^\d{5}$/.test(String(a.kodePos || '').trim())) return awalan + 'Kode pos harus 5 digit angka';
