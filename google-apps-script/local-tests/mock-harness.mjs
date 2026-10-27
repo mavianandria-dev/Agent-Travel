@@ -51,7 +51,14 @@ class MockRange {
     }
     return this;
   }
+  setValue(value) { return this.setValues([[value]]); }
   setNumberFormat() { return this; }
+  setFontWeight() { return this; }
+  setBackground() { return this; }
+  setFontColor() { return this; }
+  getDisplayValues() {
+    return this.getValues().map((row) => row.map((v) => String(v == null ? '' : v)));
+  }
   clearContent() {
     for (let i = 0; i < this.numRows; i++) {
       const line = this.sheet.rows[this.row - 1 + i];
@@ -72,11 +79,23 @@ class MockSheet {
     }
     return lastRow;
   }
+  getLastColumn() {
+    let lastCol = 0;
+    for (let i = 0; i < this.rows.length; i++) {
+      const row = this.rows[i] || [];
+      for (let j = row.length - 1; j >= lastCol; j--) {
+        if (String(row[j] == null ? '' : row[j]).trim() !== '') { lastCol = j + 1; break; }
+      }
+    }
+    return lastCol;
+  }
   getRange(row, col, numRows = 1, numCols = 1) {
     return new MockRange(this, row, col, numRows, numCols);
   }
   clearContents() { this.rows = []; return this; }
   setNumberFormat() { return this; }
+  setFrozenRows() { return this; }
+  setColumnWidth() { return this; }
   setFontWeight() { return this; }
   setBackground() { return this; }
   setFontColor() { return this; }
@@ -241,6 +260,9 @@ metaSheet.rows.push(['seedVersion', 'production-2']);
 metaSheet.rows.push(['storage', 'columns-v2']);
 metaSheet.rows.push(['databaseMode', 'produksi-minimal']);
 metaSheet.rows.push(['seededAt', '2026-10-24T00:00:00.000Z']);
+metaSheet.rows.push(['seededBy', 'admin@transaceh.id']);
+metaSheet.rows.push(['lastMutationAt', '2026-10-24T00:00:00.000Z']);
+metaSheet.rows.push(['collections', JSON.stringify(seedKeys)]);
 metaSheet.rows.push(['tableCount', String(storeSchema.tables.length)]);
 metaSheet.rows.push(['collectionCount', String(seedKeys.length)]);
 seedKeys.forEach((key) => metaSheet.rows.push(['rev.' + key, '1']));
@@ -1782,6 +1804,142 @@ try {
   unknownFieldErr = String((err && err.message) || err);
 }
 ok('field di luar skema ditolak tanpa data loss', unknownFieldErr.indexOf('tidak dikenal') >= 0, unknownFieldErr);
+
+/* ------------------------------------------------------------------ */
+/* 14) blob chunk dokumen KYC (dataUrl melebihi satu sel Sheets)        */
+/* ------------------------------------------------------------------ */
+
+console.log('\n== 14) blob chunk dokumen KYC ==');
+
+function blobRowsFor(id) {
+  const sh = spread.getSheetByName('agency_kyc_doc_blob');
+  const n = sh.getLastRow();
+  const rows = n > 1 ? sh.getRange(2, 1, n - 1, 4).getValues() : [];
+  return rows.filter((r) => String(r[0]).trim() === String(id));
+}
+
+const BIG_URL = 'data:image/png;base64,' + 'B'.repeat(150000);
+const SMALL_URL = 'data:image/png;base64,SMALL';
+const blobAgency = {
+  id: 'ag_blob', name: 'Agen Blob', address: '-', phone: '-', bank: '-',
+  status: 'pending', feeType: 'percent', feeValue: 8, rating: 0, trips: 0,
+  kyc: { nama: 'Agen Blob KYC', docs: {
+    ktp: { name: 'ktp.png', type: 'image/png', size: 112500, dataUrl: BIG_URL, at: '2026-10-26T00:00:00.000Z' },
+    kecil: { name: 'kecil.png', type: 'image/png', size: 14, dataUrl: SMALL_URL, at: '2026-10-26T00:00:00.000Z' }
+  } }
+};
+res = sync({ agencies: { baseRev: revOf('agencies'), upserts: [blobAgency], deletes: [] } }, adminToken);
+ok('sync agensi dengan dataUrl raksasa diterima (chunk blob)', res.ok === true, res);
+
+let blobRec = readRec('agencies', 'ag_blob');
+ok('dataUrl besar dibaca ulang utuh dari gabungan chunk',
+  !!blobRec && blobRec.kyc && blobRec.kyc.docs &&
+  blobRec.kyc.docs.ktp.dataUrl === BIG_URL &&
+  blobRec.kyc.docs.kecil.dataUrl === SMALL_URL,
+  blobRec && blobRec.kyc && Object.keys(blobRec.kyc.docs || {}));
+
+const blobKtpRows = blobRowsFor('ag_blob').filter((r) => String(r[1]).trim() === 'ktp');
+ok('dataUrl 150.022 karakter dipecah menjadi 4 chunk', blobKtpRows.length === 4, blobKtpRows.length);
+ok('nomor urut chunk rapi (1..4)', blobKtpRows.map((r) => Number(r[2])).join(',') === '1,2,3,4',
+  blobKtpRows.map((r) => r[2]));
+ok('setiap chunk ≤ 45000 karakter',
+  blobKtpRows.every((r) => String(r[3]).length <= 45000),
+  blobKtpRows.map((r) => String(r[3]).length));
+ok('gabungan chunk identik dengan dataUrl asli',
+  blobKtpRows.map((r) => String(r[3])).join('') === BIG_URL);
+ok('kolom metadata agency_kyc_docs tanpa dataUrl',
+  JSON.stringify(spread.getSheetByName('agency_kyc_docs').getRange(1, 1, 1, 6).getValues()[0]) ===
+  JSON.stringify(['parent_id', 'key', 'name', 'type', 'size', 'at']));
+
+blobRec = readRec('agencies', 'ag_blob');
+blobRec.kyc.docs.ktp = { name: 'ktp.png', type: 'image/png', size: 15, dataUrl: SMALL_URL, at: '2026-10-26T01:00:00.000Z' };
+res = sync({ agencies: { baseRev: revOf('agencies'), upserts: [blobRec], deletes: [] } }, adminToken);
+ok('ganti dokumen besar dengan kecil tersinkron', res.ok === true, res);
+ok('chunk lama menipis menjadi 1 baris per dokumen',
+  blobRowsFor('ag_blob').length === 2 &&
+  readRec('agencies', 'ag_blob').kyc.docs.ktp.dataUrl === SMALL_URL,
+  blobRowsFor('ag_blob').length);
+
+blobRec = readRec('agencies', 'ag_blob');
+blobRec.kyc.docs = {};
+res = sync({ agencies: { baseRev: revOf('agencies'), upserts: [blobRec], deletes: [] } }, adminToken);
+ok('hapus seluruh dokumen membersihkan tab blob juga', res.ok === true && blobRowsFor('ag_blob').length === 0, blobRowsFor('ag_blob').length);
+ok('kyc tanpa dokumen terbaca tanpa docs',
+  !readRec('agencies', 'ag_blob').kyc.docs, readRec('agencies', 'ag_blob').kyc);
+
+/* ------------------------------------------------------------------ */
+/* 15) ensureSchema: migrasi agency_kyc_docs versi lama (dataUrl inline) */
+/* ------------------------------------------------------------------ */
+
+console.log('\n== 15) ensureSchema migrasi dataUrl lama ==');
+const OLD_BIG = 'data:image/png;base64,' + 'X'.repeat(120000);
+const OLD_SMALL = 'data:image/png;base64,OLD';
+const docsSheetOld = spread.getSheetByName('agency_kyc_docs');
+docsSheetOld.clearContents();
+docsSheetOld.getRange(1, 1, 1, 7).setValues([
+  ['parent_id', 'key', 'name', 'type', 'size', 'dataUrl', 'at']
+]);
+docsSheetOld.getRange(2, 1, 2, 7).setValues([
+  ['ag_blob', 'ktp', 'ktp.png', 'image/png', 90000, OLD_BIG, '2026-10-01T00:00:00.000Z'],
+  ['ag_blob', 'kecil', 'kecil.png', 'image/png', 5, OLD_SMALL, '2026-10-01T00:00:00.000Z']
+]);
+
+const ensureRes = S.ensureSchema_();
+ok('ensureSchema terjalankan tanpa reset', ensureRes.ok === true &&
+  ensureRes.fixes.some((f) => f.indexOf('agency_kyc_docs dimigrasi') === 0), ensureRes);
+ok('header agency_kyc_docs ditulis ulang ke versi blob',
+  JSON.stringify(docsSheetOld.getRange(1, 1, 1, 6).getValues()[0]) ===
+  JSON.stringify(['parent_id', 'key', 'name', 'type', 'size', 'at']),
+  docsSheetOld.getRange(1, 1, 1, 6).getValues()[0]);
+
+const migRows = blobRowsFor('ag_blob');
+ok('dataUrl inline lama pindah menjadi 2 dokumen × chunk',
+  migRows.filter((r) => String(r[1]).trim() === 'ktp').map((r) => String(r[3])).join('') === OLD_BIG &&
+  migRows.filter((r) => String(r[1]).trim() === 'kecil').map((r) => String(r[3])).join('') === OLD_SMALL &&
+  migRows.filter((r) => String(r[1]).trim() === 'ktp').every((r) => String(r[3]).length <= 45000),
+  migRows.length);
+const migRec = readRec('agencies', 'ag_blob');
+ok('membaca ulang record setelah migrasi utuh',
+  !!migRec.kyc && !!migRec.kyc.docs &&
+  migRec.kyc.docs.ktp.dataUrl === OLD_BIG &&
+  migRec.kyc.docs.kecil.dataUrl === OLD_SMALL);
+ok('_meta.tableCount diperbarui ke jumlah tab skema',
+  (() => {
+    const meta = spread.getSheetByName('_meta');
+    const n = meta.getLastRow();
+    const rows = n > 1 ? meta.getRange(2, 1, n - 1, 2).getValues() : [];
+    const row = rows.find((r) => String(r[0]).trim() === 'tableCount');
+    return !!row && String(row[1]) === String(S.apiDescribeStore_().tables.length);
+  })());
+
+/* ------------------------------------------------------------------ */
+/* 16) validateDatabase sadar-skema: kolom ke-2 kind 'one' itu data     */
+/* ------------------------------------------------------------------ */
+
+console.log('\n== 16) validateDatabase: slot sadar-skema ==');
+
+const agBlobNow = readRec('agencies', 'ag_blob');
+agBlobNow.kyc.alamatUsaha = {
+  jalan: '', kelurahan: 'Kuta Baru', kecamatan: 'Kuta Cot Glie',
+  kota: 'Kabupaten Aceh Besar', provinsi: 'Aceh', kodePos: '23930'
+};
+const agenciesAll = S.apiReadCollection_(spread, 'agencies');
+agenciesAll.forEach((r, i) => { if (String(r.id) === 'ag_blob') agenciesAll[i] = agBlobNow; });
+S.apiWriteCollection_(spread, 'agencies', agenciesAll);
+const vdOk = S.validateDatabase();
+ok('baris kind one dengan kolom data pertama kosong lolos validasi',
+  vdOk.ok === true && !vdOk.problems.some((p) => p.indexOf('batch/slot kosong') >= 0),
+  vdOk.problems);
+ok('kepala tab one tetap terhitung', vdOk.counts.agency_kyc_alamat_usaha === 1,
+  vdOk.counts.agency_kyc_alamat_usaha);
+
+const refundSheet = spread.getSheetByName('agencies_refund_policy');
+refundSheet.getRange(refundSheet.getLastRow() + 1, 1, 1, 4).setValues([['ag_blob', '', '', '']]);
+const vdBad = S.validateDatabase();
+ok('baris list map blob tanpa tetap slot tetap dilaporkan',
+  vdBad.ok === false && vdBad.problems.some((p) =>
+    p.indexOf('agencies_refund_policy') === 0 && p.indexOf('batch/slot kosong') >= 0),
+  vdBad.problems);
 
 /* ------------------------------------------------------------------ */
 

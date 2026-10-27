@@ -487,6 +487,21 @@ function apiSheet_(ss, key) {
   return sheet;
 }
 
+/**
+ * Ambil tab anak; bila belum ada (skema menambah tab setelah deploy)
+ * tab dibuat otomatis bersama header-nya supaya engine tidak macet sebelum
+ * `ensureSchema()` (seed.gs) dijalankan.
+ */
+function apiEnsureChildSheet_(ss, child) {
+  var sheet = ss.getSheetByName(child.table);
+  if (!sheet) {
+    sheet = ss.insertSheet(child.table);
+    sheet.getRange(1, 1, 1, child.headers.length).setValues([child.headers]);
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
 /* ------------------------------------------------------------------ */
 /* Skema penyimpanan v2 (normalisasi 1NF penuh)                        */
 /* ------------------------------------------------------------------ */
@@ -510,6 +525,11 @@ function apiSheet_(ss, key) {
  *    Elemen skalar juga ditandai `scalar: true`.
  *  - kind 'one' → object 1:1, satu baris per record induk
  *    (kolom anak: parent_id | nilai). Path boleh bertingkat ("kyc.alamat").
+ *  - kind 'blob' → object key→objek (mis. kyc.docs) yang kolom besarnya
+ *    (`field`, mis. dataUrl base64) lebih besar dari satu sel Sheets.
+ *    Nilai dipecah menjadi beberapa baris chunk ≤ API_MAX_CELL_CHARS
+ *    (kolom anak: parent_id | key | i | chunk) dan digabung kembali saat
+ *    dibaca; kolom lain (metadata) tetap di tab `map` sesama path.
  *  - path '*' (khusus notifications) → semua field record yang bukan kolom
  *    skema disimpan sebagai baris key→val di tab meta notifikasi.
  *
@@ -555,8 +575,10 @@ var API_MAIN_TABLES = {
         'nama', 'hubungan', 'hp'
       ] },
       { table: 'agency_kyc_docs', path: 'kyc.docs', kind: 'map', cols: [
-        'name', 'type', 'n:size', 'dataUrl', 'at'
-      ] }
+        'name', 'type', 'n:size', 'at'
+      ] },
+      { table: 'agency_kyc_doc_blob', path: 'kyc.docs', kind: 'blob',
+        field: 'dataUrl', cols: ['n:i', 'chunk'] }
     ]
   },
   routes: {
@@ -806,13 +828,15 @@ function apiTables_() {
       }
       var childHeaders = childDef.kind === 'one'
         ? ['parent_id'].concat(cols2.map(function (c) { return c.col; }))
-        : ['parent_id', childDef.kind === 'map' ? 'key' : 'slot']
+        : ['parent_id',
+            (childDef.kind === 'map' || childDef.kind === 'blob') ? 'key' : 'slot']
             .concat(cols2.map(function (c) { return c.col; }));
       var built = {
         table: childDef.table,
         parent: key,
         path: childDef.path,
         kind: childDef.kind,
+        field: childDef.field || '',
         scalar: !!childDef.scalar,
         headers: childHeaders,
         cols: cols2
@@ -1025,7 +1049,7 @@ function apiWriteCollection_(ss, key, records) {
     range.setValues(rows);
   }
   main.children.forEach(function (child) {
-    apiWriteTableRows_(ss.getSheetByName(child.table), child, childRows[child.table]);
+    apiWriteTableRows_(apiEnsureChildSheet_(ss, child), child, childRows[child.table]);
   });
   return rows.length;
 }
@@ -1071,6 +1095,37 @@ function apiBuildChildRows_(child, parentId, rec, key, sink) {
       }
       sink.push(row);
     }
+    return;
+  }
+
+  /* kind 'blob': string besar (mis. dataUrl dokumen KYC) dipecah menjadi
+     beberapa baris chunk; panjang tiap sel ≤ API_MAX_CELL_CHARS agar lolos
+     batas keras Google Sheets (50.000 karakter/sel). */
+  if (child.kind === 'blob') {
+    if (typeof raw !== 'object' || Array.isArray(raw)) {
+      throw apiError_('VALIDATION', 'Field "' + child.path + '" pada ' + key +
+        '/' + parentId + ' harus objek.');
+    }
+    var bField = child.field || 'dataUrl';
+    Object.keys(raw).forEach(function (bmk) {
+      var bv = raw[bmk];
+      if (bv == null) return;
+      if (!bv || typeof bv !== 'object' || Array.isArray(bv)) {
+        throw apiError_('VALIDATION', 'Nilai "' + child.path + '.' + bmk +
+          '" pada ' + key + '/' + parentId + ' harus objek.');
+      }
+      var bText = String(bv[bField] == null ? '' : bv[bField]);
+      if (!bText) {
+        sink.push([parentId, bmk, '1', '']);
+        return;
+      }
+      for (var boff = 0; boff < bText.length; boff += API_MAX_CELL_CHARS) {
+        var bi = Math.floor(boff / API_MAX_CELL_CHARS) + 1;
+        sink.push([parentId, bmk, String(bi),
+          apiCellFor_('s', bText.slice(boff, boff + API_MAX_CELL_CHARS),
+            child.table + '/' + parentId + '.' + bmk + '#' + bi)]);
+      }
+    });
     return;
   }
 
@@ -1160,7 +1215,7 @@ function apiReadCollection_(ss, key) {
   if (!out.length) return out;
 
   main.children.forEach(function (child) {
-    var childRows = apiReadRows_(ss.getSheetByName(child.table), child.headers.length);
+    var childRows = apiReadRows_(apiEnsureChildSheet_(ss, child), child.headers.length);
     var grouped = {};
     for (var r = 0; r < childRows.length; r++) {
       var crow = childRows[r];
@@ -1168,6 +1223,17 @@ function apiReadCollection_(ss, key) {
       if (!pid) continue;
       var val;
       var off = child.kind === 'one' ? 1 : 2;
+      if (child.kind === 'blob') {
+        /* blob: kumpulkan pecahan [i, teks]; digabung saat attach. */
+        var bkey = String(crow[1] == null ? '' : crow[1]);
+        if (!bkey) continue;
+        var bidx = apiValueFor_(child.cols[0].type, crow[off]);
+        var btext = crow[off + 1] == null ? '' : String(crow[off + 1]);
+        if (!grouped[pid]) grouped[pid] = {};
+        if (!grouped[pid][bkey]) grouped[pid][bkey] = [];
+        grouped[pid][bkey].push([Number(bidx) || 0, btext]);
+        continue;
+      }
       if (child.scalar) {
         val = apiValueFor_(child.cols[0].type, crow[off]);
       } else {
@@ -1200,6 +1266,22 @@ function apiReadCollection_(ss, key) {
       }
       if (child.kind === 'list' && !Array.isArray(grouped[sid])) {
         apiPutPath_(rec, child.path, []);
+      } else if (child.kind === 'blob' && grouped[sid] != null) {
+        /* blob: gabungkan pecahan ke objek di path yang sama (metadata
+           dari tab map sudah dilekatkan lebih dulu, urutan children). */
+        var holder = apiPathValue_(rec, child.path);
+        if (!holder || typeof holder !== 'object') {
+          holder = {};
+          apiPutPath_(rec, child.path, holder);
+        }
+        Object.keys(grouped[sid]).forEach(function (bk) {
+          var parts = grouped[sid][bk].slice()
+            .sort(function (x, y) { return x[0] - y[0]; })
+            .map(function (p) { return p[1]; });
+          var blobDoc = holder[bk];
+          if (!blobDoc || typeof blobDoc !== 'object') { blobDoc = {}; holder[bk] = blobDoc; }
+          blobDoc[child.field || 'dataUrl'] = parts.join('');
+        });
       } else if (grouped[sid] != null) {
         apiPutPath_(rec, child.path, grouped[sid]);
       }

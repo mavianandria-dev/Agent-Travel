@@ -18,6 +18,11 @@
  *    ADMIN_PASSWORD.
  * 6. Jalankan `seedProduction()` lalu `validateDatabase()`.
  *
+ * Migrasi deployment lama (tanpa reset): salin kedua file versi terbaru ke
+ * project versi lama, jalankan `ensureSchema()` sekali, lalu
+ * `validateDatabase()`. Data yang sudah ada dibaca ulang tanpa reset;
+ * fungsi ini MEMBLOKIR seed ulang bila database sudah terisi.
+ *
  * Password admin di-hash terlebih dahulu (tidak pernah plaintext di sheet).
  * Jangan menaruh password di source code atau membagikan spreadsheet ini.
  */
@@ -34,6 +39,7 @@ function onOpen() {
       .createMenu('TransAceh')
       .addItem('Isi seed produksi', 'seedProduction')
       .addItem('Validasi database', 'validateDatabase')
+      .addItem('Perbaiki skema (tanpa reset)', 'ensureSchema')
       .addToUi();
   } catch (err) {
     log_('Menu TransAceh tidak bisa dipasang: ' + err.message);
@@ -57,6 +63,168 @@ function requireSchema_() {
       'bersamaan.');
   }
   return described;
+}
+
+/**
+ * Menambahkan tab skema yang belum ada TANPA menyentuh data.
+ * Jalankan sekali setelah memasang versi code.gs yang menambah tab baru
+ * (mis. `agency_kyc_doc_blob` untuk chunk dokumen KYC), lalu jalankan
+ * `validateDatabase()`. Untuk `agency_kyc_docs` versi lama (kolom dataUrl
+ * inline), isinya dimigrasikan ke tab blob secara otomatis.
+ */
+function ensureSchema() {
+  try {
+    return ensureSchema_();
+  } catch (err) {
+    alert_('ensureSchema gagal', err.message || String(err));
+    throw err;
+  }
+}
+
+function ensureSchema_() {
+  var ss = requireSpreadsheet_();
+  var described = requireSchema_();
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(15000)) {
+    throw new Error('Spreadsheet sedang diproses oleh eksekusi lain. Coba lagi sebentar.');
+  }
+  try {
+    var fixes = [];
+    described.tables.forEach(function (table) {
+      var sheet = ss.getSheetByName(table.name);
+      if (!sheet) {
+        sheet = ss.insertSheet(table.name);
+        writeHeader_(sheet, table.headers);
+        sheet.setColumnWidth(1, table.name === META_SHEET ? 220 : 180);
+        sheet.setColumnWidth(2, table.kind === 'main' ? 60 : 110);
+        fixes.push('tab ' + table.name + ' dibuat');
+        return;
+      }
+      var lastCol = Math.max(sheet.getLastColumn(), table.headers.length);
+      var header = (sheet.getRange(1, 1, 1, lastCol).getDisplayValues()[0] || [])
+        .slice(0, table.headers.length).join('|');
+      if (header === table.headers.join('|')) return;
+      if (table.name === 'agency_kyc_docs') {
+        migrateDocsBlob_(ss, sheet, table, described.tables);
+        fixes.push('agency_kyc_docs dimigrasi ke skema blob (dataUrl dipindah ke agency_kyc_doc_blob)');
+        return;
+      }
+      throw new Error('Header tab ' + table.name + ' tidak sesuai skema dan tidak ada jalur migrasi otomatis. /' + header);
+    });
+
+    var metaSheet = ss.getSheetByName(META_SHEET) || ss.insertSheet(META_SHEET);
+    updateMetaTableCount_(metaSheet, described);
+    SpreadsheetApp.flush();
+
+    var msg = fixes.length ? fixes.join('; ') : 'Tidak ada perubahan — semua tab sudah sesuai skema.';
+    log_('[ensureSchema] ' + msg);
+    alert_('ensureSchema selesai', msg + '\n\nJalankan "Validasi database" untuk memeriksa struktur.');
+    return { ok: true, fixes: fixes };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function updateMetaTableCount_(metaSheet, described) {
+  var lastRow = metaSheet.getLastRow();
+  var rows = lastRow > 1
+    ? metaSheet.getRange(2, 1, lastRow - 1, META_HEADERS.length).getValues()
+    : [];
+  var want = String(described.tables.length);
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i][0]).trim() === 'tableCount') {
+      var rowNumber = i + 2;
+      metaSheet.getRange(rowNumber, 2).setNumberFormat('@');
+      metaSheet.getRange(rowNumber, 2).setValue(want);
+      return;
+    }
+  }
+  var appendRow = metaSheet.getLastRow() + 1;
+  metaSheet.getRange(appendRow, 1, 1, META_HEADERS.length).setNumberFormat('@');
+  metaSheet.getRange(appendRow, 1, 1, META_HEADERS.length).setValues([['tableCount', want]]);
+}
+
+/**
+ * Migrasi satu arah agency_kyc_docs versi lama (dataUrl inline di kolom)
+ * ke agency_kyc_doc_blob (baris chunk ≤ MAX_CELL_CHARS_), lalu tulis ulang
+ * header + isi tab docs ke bentuk baru. Idempoten: pasangan parent|key yang
+ * sudah punya baris blob tidak dimigrasikan lagi.
+ */
+function migrateDocsBlob_(ss, docsSheet, docsTable, tables) {
+  var blobDef = null;
+  tables.forEach(function (t) { if (t.name === 'agency_kyc_doc_blob') blobDef = t; });
+  if (!blobDef) throw new Error('Definisi tab agency_kyc_doc_blob tidak ditemukan pada skema.');
+
+  var lastRow = docsSheet.getLastRow();
+  var headerRow = docsSheet.getLastColumn() > 0
+    ? (docsSheet.getRange(1, 1, 1, docsSheet.getLastColumn()).getDisplayValues()[0] || [])
+    : [];
+  var dataUrlIdx = headerRow.indexOf('dataUrl');
+  var rows = lastRow > 1
+    ? docsSheet.getRange(2, 1, lastRow - 1, Math.max(docsSheet.getLastColumn(), docsTable.headers.length)).getValues()
+    : [];
+
+  /* baris blob yang sudah ada — jejas idempotensi */
+  var blobSheet = ss.getSheetByName(blobDef.name);
+  var existingBlob = {};
+  if (blobSheet) {
+    var br = blobSheet.getLastRow();
+    var bvals = br > 1
+      ? blobSheet.getRange(2, 1, br - 1, blobDef.headers.length).getValues()
+      : [];
+    bvals.forEach(function (r) {
+      var pid = String(r[0] == null ? '' : r[0]).trim();
+      var key = String(r[1] == null ? '' : r[1]).trim();
+      if (pid && key) existingBlob[pid + '|' + key] = true;
+    });
+  }
+
+  var blobRows = [];
+  var docsRows = [];
+  rows.forEach(function (row) {
+    var pid = String(row[0] == null ? '' : row[0]).trim();
+    var key = String(row[1] == null ? '' : row[1]).trim();
+    var empty = row.every(function (cell) { return String(cell == null ? '' : cell).trim() === ''; });
+    if (empty) return;
+    if (dataUrlIdx >= 0 && pid && key) {
+      var big = String(row[dataUrlIdx] == null ? '' : row[dataUrlIdx]);
+      if (big && !existingBlob[pid + '|' + key]) {
+        for (var off = 0; off < big.length; off += MAX_CELL_CHARS_) {
+          blobRows.push([pid, key, String(Math.floor(off / MAX_CELL_CHARS_) + 1),
+            big.slice(off, off + MAX_CELL_CHARS_)]);
+        }
+      }
+    }
+    docsRows.push(docsTable.headers.map(function (name) {
+      if (name === 'parent_id') return pid;
+      if (name === 'key') return key;
+      var oldIdx = headerRow.indexOf(name);
+      return oldIdx >= 0 && row[oldIdx] != null ? row[oldIdx] : '';
+    }));
+  });
+
+  /* tulis ulang tab docs dengan header versi baru */
+  docsSheet.clearContents();
+  writeHeader_(docsSheet, docsTable.headers);
+  if (docsRows.length) {
+    var range = docsSheet.getRange(2, 1, docsRows.length, docsTable.headers.length);
+    range.setNumberFormat('@');
+    range.setValues(docsRows);
+  }
+
+  /* tulis baris blob hasil pemecahan */
+  if (!blobSheet) {
+    blobSheet = ss.insertSheet(blobDef.name);
+    writeHeader_(blobSheet, blobDef.headers);
+    blobSheet.setColumnWidth(1, 180);
+    blobSheet.setColumnWidth(2, 110);
+  }
+  if (blobRows.length) {
+    var appendRange = blobSheet.getRange(blobSheet.getLastRow() + 1, 1, blobRows.length, blobDef.headers.length);
+    appendRange.setNumberFormat('@');
+    appendRange.setValues(blobRows);
+  }
+  log_('[ensureSchema] migrasi docs: ' + docsRows.length + ' baris metadata, ' + blobRows.length + ' baris blob.');
 }
 
 /**
@@ -323,7 +491,9 @@ function validateDatabase() {
         problems.push(table.name + ': baris ' + rowNumber + ' parent_id ' + parentId +
           ' tidak ada di tab ' + table.collection + '.');
       }
-      if (!String(row[1] == null ? '' : row[1]).trim()) {
+      /* kind 'one' tidak punya kolom slot/key: kolom ke-2 adalah data dan
+         boleh kosong. Cek penanda hanya untuk list/map/blob. */
+      if (table.kind !== 'one' && !String(row[1] == null ? '' : row[1]).trim()) {
         problems.push(table.name + ': baris ' + rowNumber + ' batch/slot kosong.');
       }
     });
@@ -495,15 +665,6 @@ function sheetHasData_(sheet, expectedHeaders) {
     if (isHeader && !extraContent) return false;
   }
   return true;
-}
-
-/** Hapus tab default kosong ("Sheet1") bila ada tab lain. */
-function removeBlankDefaultSheet_(ss) {
-  var sheet = ss.getSheetByName('Sheet1');
-  if (!sheet || ss.getSheets().length < 2) return;
-  if (sheet.getLastRow() === 0 && sheet.getLastColumn() === 0) {
-    ss.deleteSheet(sheet);
-  }
 }
 
 /** Hapus tab default kosong ("Sheet1") bila ada tab lain. */
