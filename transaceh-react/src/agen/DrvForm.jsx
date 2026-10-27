@@ -87,6 +87,8 @@ function DrvFormInner({ agId, raw, did }) {
   const drvBack = () => { setDrvEdit(null); setAgenTab('driver'); go('agen'); };
 
   const syncDrvUser = (d, pw, oldMail) => {
+    /* Guard kedua: jangan pernah menulis akun dengan password yang pendek. */
+    if (pw && pw.length < 8) { toast('Password minimal 8 karakter', 'err'); return false; }
     const us = DB.load('users', []);
     if (oldMail && oldMail !== (d.userEmail || '').toLowerCase()) {
       const stillUsed = DB.load('drivers', []).some((x) => x.id !== d.id && x.userEmail && x.userEmail.toLowerCase() === oldMail);
@@ -175,6 +177,10 @@ function DrvFormInner({ agId, raw, did }) {
     if (!simPhoto) { toast('Upload dokumen SIM dulu', 'err'); return; }
     Object.assign(extra, { simPhoto, ktpPhoto: raw?.ktpPhoto || '', selfie: raw?.selfie || '', photo });
     if (pass && pass !== pass2) { toast('Verifikasi password tidak sama', 'err'); return; }
+    /* Panjang password divalidasi di sini — sebelum ada penulisan apa pun
+       (driver/user) — agar gagal tervalidasi server tidak menyisakan record
+       optimis yang terangkat saat rollback/bootstrap (bug "pengemudi hilang"). */
+    if (pass && pass.length < 8) { toast('Password minimal 8 karakter', 'err'); return; }
     let d;
     if (did) {
       d = arr.find((x) => x.id === did);
@@ -256,7 +262,7 @@ function DrvFormInner({ agId, raw, did }) {
       <div className="space-y-2.5">
         <input value={mail} onChange={(e) => setMail(e.target.value)} placeholder="Email akun login (wajib)" className="w-full text-[13px] border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" />
         <div className="grid grid-cols-2 gap-2.5">
-          <input value={pass} onChange={(e) => setPass(e.target.value)} type="password" autoComplete="new-password" placeholder={did ? 'Password baru (kosong = tetap)' : 'Password login (wajib)'} className="w-full text-[13px] border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" />
+          <input value={pass} onChange={(e) => setPass(e.target.value)} type="password" autoComplete="new-password" placeholder={did ? 'Password baru (kosong = tetap, min. 8)' : 'Password login (wajib, min. 8)'} className="w-full text-[13px] border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" />
           <input value={pass2} onChange={(e) => setPass2(e.target.value)} type="password" autoComplete="new-password" placeholder="Ulangi password" className={'w-full text-[13px] border-2 rounded-xl px-3 py-2.5 focus-ring ' + ((pass && pass2 && pass !== pass2) ? 'border-red-400' : 'border-slate-200')} />
         </div>
         {pass && pass2 && pass !== pass2 ? <p className="text-[11px] font-bold text-red-500">Password tidak sama</p> : null}

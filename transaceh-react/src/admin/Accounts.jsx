@@ -176,7 +176,7 @@ function AccountCreateModal({ defaultRole = 'pelanggan', defaultAgencyId = '' })
         </div>
         <div className="grid sm:grid-cols-2 gap-2.5">
           <Field label="PASSWORD">
-            <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" className={inC + ' mt-1'} placeholder="Minimal 6 karakter" autoComplete="new-password" />
+            <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" className={inC + ' mt-1'} placeholder="Minimal 8 karakter" autoComplete="new-password" />
           </Field>
           <Field label="ULANGI PASSWORD">
             <input value={password2} onChange={(e) => setPassword2(e.target.value)} type="password" className={inC + ' mt-1'} placeholder="Ketik ulang password" autoComplete="new-password" />

@@ -113,6 +113,36 @@ export function CheckPills({ options, values, onChange }) {
   );
 }
 
+/* Kecilkan foto sebelum disimpan: sisi terpanjang ≤ 1280px, JPEG 0,8
+   (PNG dibiarkan PNG agar transparansi logo tetap). Gagal gambar/dukungan
+   canvas → pakai dataURL asli. Output lebih besar dari sumber → batal. */
+function compressImage(dataUrl) {
+  return new Promise((resolve) => {
+    try {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const MAX = 1280;
+          const sc = Math.min(1, MAX / Math.max(img.naturalWidth, img.naturalHeight));
+          const w = Math.max(1, Math.round(img.naturalWidth * sc));
+          const h = Math.max(1, Math.round(img.naturalHeight * sc));
+          const cv = document.createElement('canvas');
+          cv.width = w; cv.height = h;
+          const ctx = cv.getContext('2d');
+          if (!ctx) return resolve(null);
+          ctx.drawImage(img, 0, 0, w, h);
+          const out = dataUrl.startsWith('data:image/png')
+            ? cv.toDataURL('image/png')
+            : cv.toDataURL('image/jpeg', 0.8);
+          resolve(out.length < dataUrl.length ? out : null);
+        } catch { resolve(null); }
+      };
+      img.onerror = () => resolve(null);
+      img.src = dataUrl;
+    } catch { resolve(null); }
+  });
+}
+
 export function UpBox({ title, req, src, onPick }) {
   const { toast } = useApp();
   const pick = (e) => {
@@ -120,7 +150,11 @@ export function UpBox({ title, req, src, onPick }) {
     if (!f) return;
     if (f.size > 700 * 1024) { toast('Foto maksimal 700KB — kecilkan dulu', 'err'); e.target.value = ''; return; }
     const r = new FileReader();
-    r.onload = () => onPick(r.result);
+    r.onload = async () => {
+      const raw = String(r.result || '');
+      const compressed = await compressImage(raw);
+      onPick(compressed || raw);
+    };
     r.readAsDataURL(f);
   };
   return (

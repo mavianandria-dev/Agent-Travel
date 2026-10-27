@@ -14,7 +14,7 @@ Folder ini berisi backend Google Sheets untuk TransAceh. `seed.gs` membuat datab
 | Skema tab kolom (v2, 1NF) dan seed produksi | Selesai — **reset spreadsheet wajib** (format lama tidak dimigrasi) |
 | Superadmin awal | Selesai — password di-hash sejak seeding |
 | Validasi struktur database | Selesai |
-| API `code.gs` mode direct | Selesai — **309 asersi mock lokal hijau** |
+| API `code.gs` mode direct | Selesai — **320 asersi mock lokal hijau** |
 | Proyeksi publik & filter baris per peran | Selesai di backend |
 | Aksi akun (`register`, `adminCreateUser`, `adminSetPassword`) | Selesai di backend |
 | Throttling login/ganti password/registrasi | Selesai (best effort) |
@@ -22,7 +22,7 @@ Folder ini berisi backend Google Sheets untuk TransAceh. `seed.gs` membuat datab
 | Uji CORS dari browser | **Belum** — perlu deploy dan probe |
 | Deploy Web App versi 1.3.0 | Belum — dilakukan pengguna |
 | Proxy database | **Tidak dipakai** |
-| Media/KYC base64 | Layak — dataUrl dipecah ke tab `agency_kyc_doc_blob` (chunk ≤ 45.000 karakter/sel) |
+| Media/KYC base64 | Layak — dataUrl dipecah ke tab `agency_kyc_doc_blob`, `driver_doc_blob`, dan `vehicle_doc_blob` (chunk ≤ 45.000 karakter/sel) |
 
 `code.gs` di repo ini sudah siap dipasang. Deployment yang ada saat catatan ini dibuat masih format lama; jangan menganggap kode lokal sudah aktif di produksi.
 
@@ -96,7 +96,7 @@ Jalankan **TransAceh → Validasi database** atau `validateDatabase()`. Hasil ya
 
 - `ok: true`
 - `users: 1`, `settings: 1`, `fees: 1`, `audit: 1`
-- 19 tab koleksi utama + 37 tab anak + `_meta` (jumlah tepat mengikuti `apiDescribeStore_()`)
+- 19 tab koleksi utama + 39 tab anak + `_meta` (jumlah tepat mengikuti `apiDescribeStore_()`)
 - tidak ada masalah header, ID duplikat, `ord` duplikat, baris anak tanpa `parent_id`, atau sel melebihi 45000 karakter
 
 ### 7. Deploy Web App
@@ -114,7 +114,7 @@ Untuk spreadsheet produksi yang sudah terisi data, **jangan** menjalankan `seedP
 
 1. Salin isi `code.gs` dan `seed.gs` versi terbaru ke project Apps Script (timpa yang lama).
 2. Jalankan `ensureSchema()` sekali — tab skema yang belum ada dibuat tanpa menyentuh data; tab `agency_kyc_docs` versi lama otomatis dimigrasi ke skema blob (`_meta.tableCount` ikut disesuaikan). Menu: **TransAceh → Perbaiki skema (tanpa reset)**.
-3. Jalankan `validateDatabase()` — hasil "Database valid. Total tab: **56**" (19 utama + 37 anak, ditambah `_meta`).
+3. Jalankan `validateDatabase()` — hasil "Database valid. Total tab: **58**" (19 utama + 39 anak, ditambah `_meta`).
 
 Jika ada tab yang headernya tidak sesuai skema dan tidak punya jalur migrasi otomatis, `ensureSchema()` berhenti dengan pesan header yang bermasalah — jangan paksa; periksa perubahan skema terlebih dahulu.
 
@@ -153,11 +153,11 @@ Catatan:
 node google-apps-script/local-tests/mock-harness.mjs
 ```
 
-Harness mem-mock `SpreadsheetApp`, `PropertiesService`, `LockService`, `Utilities`, `CacheService`, `ContentService`, dan `Logger`, serta memuat `seed.gs` ke sandbox yang sama. Saat ini **309 asersi** lulus.
+Harness mem-mock `SpreadsheetApp`, `PropertiesService`, `LockService`, `Utilities`, `CacheService`, `ContentService`, dan `Logger`, serta memuat `seed.gs` ke sandbox yang sama. Saat ini **320 asersi** lulus.
 
 ## Struktur tab
 
-Format penyimpanan **v2**: tidak ada JSON di dalam sel; satu kolom per field skalar, dan setiap array/object dipecah ke tab anak dengan `parent_id`. Tabel utama (19 koleksi): `users`, `agencies`, `routes`, `routeRequests`, `vehicles`, `drivers`, `schedules`, `maintenanceRequests`, `bookings`, `payments`, `ledger`, `vouchers`, `reviews`, `notifications`, `audit`, `banners`, `supportTickets`, `settings`, `fees` — ditambah 37 tab anak, antara lain `user_favorites`, `agency_kyc_docs`, `agency_kyc_doc_blob`, `driver_alamat`, `vehicle_layout`, `schedule_delay_history`, `booking_passengers`, `booking_fare`, `support_messages`, `notifications_meta`, dst., dan `_meta`. Daftar tab dan header lengkap ada di `API_MAIN_TABLES` (`code.gs`) dan bisa dicetak via `apiDescribeStore_()`; `seed.gs` membuat semua tab dari daftar itu.
+Format penyimpanan **v2**: tidak ada JSON di dalam sel; satu kolom per field skalar, dan setiap array/object dipecah ke tab anak dengan `parent_id`. Tabel utama (19 koleksi): `users`, `agencies`, `routes`, `routeRequests`, `vehicles`, `drivers`, `schedules`, `maintenanceRequests`, `bookings`, `payments`, `ledger`, `vouchers`, `reviews`, `notifications`, `audit`, `banners`, `supportTickets`, `settings`, `fees` — ditambah 39 tab anak, antara lain `user_favorites`, `agency_kyc_docs`, `agency_kyc_doc_blob`, `driver_alamat`, `driver_doc_blob`, `vehicle_layout`, `vehicle_doc_blob`, `schedule_delay_history`, `booking_passengers`, `booking_fare`, `support_messages`, `notifications_meta`, dst., dan `_meta`. Daftar tab dan header lengkap ada di `API_MAIN_TABLES` (`code.gs`) dan bisa dicetak via `apiDescribeStore_()`; `seed.gs` membuat semua tab dari daftar itu.
 
 ### Tab `_meta`
 
@@ -165,19 +165,26 @@ Kolom `key`, `value`. Isi awal: `schemaVersion` (`2`), `storage` (`columns-v2`),
 
 ### Tab koleksi utama
 
-Header = `id | ord | <kolom skema> | updated_at`. Semua nilai disimpan sebagai **teks** (format sel `'@'`); prefix nama kolom menentukan konversi saat dibaca: tanpa prefix = string, `n:` = number, `b:` = boolean. Sel kosong dibaca sebagai string `''` untuk kolom teks dan `null` untuk kolom angka/boolean. Satu baris = satu record; `key` untuk `settings`, `code` sebagai id untuk `vouchers`. Jangan mengganti nama tab/header atau mengedit `_meta` manual. Edit manual hanya untuk pemulihan darurat setelah backup.
+Header = `id | ord | <kolom skema> | updated_at`. Semua nilai disimpan sebagai **teks** (format sel `'@'`); prefix nama kolom menentukan konversi saat dibaca: tanpa prefix = string, `n:` = number, `b:` = boolean, `x:` = *kolom ghost* — sel utamanya selalu dikosongkan dan nilai aslinya disimpan di tab sblob (header tetap dipertahankan agar spreadsheet lama tetap rapi). Sel kosong dibaca sebagai string `''` untuk kolom teks dan `null` untuk kolom angka/boolean. Satu baris = satu record; `key` untuk `settings`, `code` sebagai id untuk `vouchers`. Jangan mengganti nama tab/header atau mengedit `_meta` manual. Edit manual hanya untuk pemulihan darurat setelah backup.
 
 ### Tab anak
 
 Header = `parent_id | slot | <kolom skema anak>` (`slot` = urutan untuk list, `key` untuk map). Array selalu dimaterialisasi menjadi array saat dibaca; map/object hanya muncul bila ada baris anaknya. Field di luar skema pada `notifications` dikumpulkan ke `notifications_meta` sebagai pasangan key–nilai; koleksi lain menolak field tak dikenal dengan `VALIDATION` agar tidak ada data yang hilang diam-diam.
 
-### Tab blob (`agency_kyc_doc_blob`)
+### Tab pecahan string besar (blob & sblob)
 
-Tab ber-kind `blob` menyimpan string yang lebih besar dari satu sel Sheets. `agency_kyc_doc_blob` menampung `kyc.docs.<tipe>.dataUrl` (base64 dokumen KYC); tab `agency_kyc_docs` tetap menyimpan metadatanya (`name`, `type`, `size`, `at`) dengan kolom `parent_id | key`. Isi besar dipecah otomatis menjadi baris `parent_id | key | i | chunk`, tiap sel ≤ `API_MAX_CELL_CHARS` (45.000 karakter); saat dibaca pecahan digabung kembali sesuai `i`. Tidak ada perubahan bentuk data di frontend — pecah dan gabung terjadi di engine.
+Tab yang menyimpan string lebih besar dari satu sel Sheets ada dua bentuk:
 
-- Dokumen dengan `dataUrl` harfiah ≤ 45.000 karakter tetap hanya satu baris chunk.
-- `ensureSchema()` (seed.gs) membuat tab blob yang belum ada tanpa menyentuh data dan memigrasikan kolom `dataUrl` milik versi sebelumnya ke baris chunk; `_meta.tableCount` ikut diperbarui.
-- Total ukuran dokumen tetap ditekan di sisi browser (budget `DOCS_BUDGET_BYTES`); blob hanya menyelesaikan batas teknis sel, bukan ajakan menaikkan ukuran berkas.
+- **kind `blob`** — tab `agency_kyc_doc_blob`: object `kyc.docs.<tipe>` dari `agencies` dengan kolom besar `dataUrl`; header `parent_id | key | i | chunk`. Metadatanya (`name`, `type`, `size`, `at`) tetap di tab `agency_kyc_docs` (`parent_id | key`).
+- **kind `sblob`** — tab `driver_doc_blob` (milik `drivers`) dan `vehicle_doc_blob` (milik `vehicles`): field string besar **langsung pada record** tanpa pembungkus object. Foto pengemudi (`photo`, `simPhoto`, `ktpPhoto`, `selfie`) dan foto/STNK/KTP pemilik kendaraan (`photo`, `stnkPhoto`, `ktpOwnerPhoto`) kini hidup di sini; header `parent_id | field | i | chunk`.
+
+Aturan keduanya sama:
+
+- Isi dipecah menjadi baris chunk ≤ `API_MAX_CELL_CHARS` (45.000 karakter) dan digabung kembali sesuai urutan `i` saat dibaca — pecah dan gabung terjadi di engine, bentuk data frontend tidak berubah.
+- Field/entri kosong tidak menulis baris apa pun.
+- Kompatibilitas data lama: record tanpa baris chunk tetap memakai nilai yang tertanam di sel utama. Kolom utama asalnya memakai prefix `x:` (kolom *ghost*): header dipertahankan agar spreadsheet lama tetap selaras, selnya selalu dikosongkan, dan nilai baru selalu lewat tab pecahan.
+- `ensureSchema()` (seed.gs) membuat tab pecahan yang belum ada tanpa menyentuh data dan memindahkan dataURL besar yang masih tertanam di kolom `drivers`/`vehicles` ke baris chunk (idempoten); `_meta.tableCount` ikut diperbarui.
+- Total ukuran media tetap ditekan di sisi browser: `UpBox` memampatkan foto (sisi terpanjang ≤ 1280px, JPEG kualitas 0,8), KYC punya budget `DOCS_BUDGET_BYTES`; tab pecahan menyelesaikan batas teknis sel, bukan ajakan menaikkan ukuran berkas.
 
 ## Data awal
 
@@ -340,7 +347,7 @@ Karena cache bersifat sementara, throttle bukan jaminan keamanan mutlak. Proxy d
 node google-apps-script/local-tests/mock-harness.mjs
 ```
 
-309 asersi mencakup:
+320 asersi mencakup:
 
 1. `setupBackend` + mode direct + `REQUIRE_PROXY_KEY`.
 2. Login via hash (`apiHashForUser_`); token tamper/expired; token lama dicabut setelah ganti/reset password.
@@ -351,11 +358,12 @@ node google-apps-script/local-tests/mock-harness.mjs
 7. `register` pelanggan/agen, validasi password/telepon/duplikat, agen pending.
 8. `adminCreateUser`/`adminSetPassword`, aturan agen/pengemudi, pencabutan token.
 9. `doGet`/`doPost`, body bukan JSON, `proxyKey` salah.
-10. Round-trip storage v2: semua koleksi ditulis ulang lewat engine dan hasil baca identik; sel di atas 45000 karakter di luar tab blob dan field di luar skema ditolak tanpa data loss.
+10. Round-trip storage v2: semua koleksi ditulis ulang lewat engine dan hasil baca identik; sel di atas 45000 karakter di luar tab blob/sblob dan field di luar skema ditolak tanpa data loss.
 11. Blob chunk dokumen KYC: dataUrl besar dipecah menjadi 4-ish chunk (per 45.000 karakter), dibaca ulang identik, ganti/hapus dokumen membersihkan chunk lama; `ensureSchema` memigrasi header + dataUrl versi lama dan menaikkan `_meta.tableCount`.
 12. Slot check `validateDatabase` sadar-skema: baris kind `one` boleh punya kolom data pertama kosong; baris list/map/blob tanpa slot/key tetap dilaporkan.
 13. Tidak ada secret/plaintext password di response, log, atau record akun.
 14. Alamat berjenjang pengemudi: tab anak `driver_alamat` (kind `one`: `jalan, rtRw, kelurahan, kecamatan, kota, provinsi, kodePos`) tersinkron oleh pengemudi sendiri via whitelist `alamat`, terbaca kembali identik, tetap menolak field di luar whitelist, dan `validateDatabase` menghitung tab baru dengan valid.
+15. Foto pengemudi & kendaraan di tab sblob: sync foto >45.000 karakter (dataURL asli, kasus bug produksi) diterima penuh lewat `driver_doc_blob` dan `vehicle_doc_blob`, kolom ghost di tab utama kosong, chunk utuh tersimpan per field, dataURL lama yang masih tertanam di sel utama ditandai `validateDatabase` lalu dipindahkan `ensureSchema` ke tab blob secara idempoten.
 
 ## Batasan dan risiko produksi
 
@@ -368,7 +376,7 @@ node google-apps-script/local-tests/mock-harness.mjs
 7. **Password 2000 iterasi** adalah kompromi batas CPU Apps Script. Jika pindah backend, naikkan parameter KDF.
 8. **Bank agensi tidak ada di proyeksi publik.** Instruksi transfer perlu aksi scoped yang hanya mengembalikan rekening tujuan untuk booking milik pelanggan.
 9. **Notifikasi lintas pengguna belum otomatis.** `sync` hanya mengizinkan notifikasi untuk diri sendiri; notifikasi ke agen/pengemudi/superadmin dari aksi transaksi belum dibuat server. Frontend saat ini mengandalkan data transaksi dan notifikasi lokal/self.
-10. **Media/KYC base64 tersimpan sekarang, tetap ada batas.** dataUrl dokumen KYC dipecah ke tab `agency_kyc_doc_blob` (tiap sel ≤ 45.000 karakter), sehingga sinkronisasi dokumen tidak lagi tertolak. Tetap: dokumen disimpan sebagai base64 di dalam Sheets — ukuran berkas ditekan di browser (kompres + `DOCS_BUDGET_BYTES`) dan untuk data nyata bervalues besar, Drive privat + endpoint media tetap jadi opsi jangka panjang.
+10. **Media/KYC base64 tersimpan sekarang, tetap ada batas.** dataUrl dokumen KYC, foto pengemudi, dan foto/STNK/KTP kendaraan dipecah ke tab `agency_kyc_doc_blob`, `driver_doc_blob`, dan `vehicle_doc_blob` (tiap sel ≤ 45.000 karakter), sehingga sinkronisasi media tidak lagi tertolak. Tetap: media disimpan sebagai base64 di dalam Sheets — foto ditekan di browser (`UpBox` memampatkan ke ≤1280px/JPEG 0,8 + `DOCS_BUDGET_BYTES` untuk KYC) dan untuk data nyata bervolume besar, Drive privat + endpoint media tetap jadi opsi jangka panjang.
 11. **Web App URL bersifat publik.** Siapa pun yang memilikinya bisa mencoba `register`/`login`. Lindungi dengan password kuat, throttle, dan pemantauan.
 12. **Pembayaran masih simulasi.** Jangan memproses uang nyata sebelum gateway dan rekonsiliasi ditambahkan.
 13. **Backup manual.** Buat salinan spreadsheet berkala; jangan mengandalkan undo/version history saja.
@@ -379,28 +387,28 @@ node google-apps-script/local-tests/mock-harness.mjs
 1. Deploy `code.gs` versi `1.3.0`, **reset spreadsheet + seed ulang** (skema kolom; format lama tidak dimigrasi), jalankan `setupBackend()` sebelum `seedProduction()`, lalu probe `health`, `login`, `bootstrap`, dan `sync` dari browser di origin produksi.
 2. Uji end-to-end mode Sheets untuk semua peran dengan data sintetis.
 3. Pindahkan lifecycle (hold, jadwal, maintenance) ke trigger Apps Script atau putuskan batasan resmi sebelum data nyata.
-4. Media/KYC sudah tersinkron via tab blob — uji kembali dengan dokumen nyata (kompresan browser) sebelum data nyata.
+4. Media/KYC sudah tersinkron via tab blob — uji kembali dengan foto/dokumen nyata (kompresan UpBox di browser) sebelum data nyata.
 5. Putuskan apakah notifikasi lintas pengguna akan dibuat server-side atau tetap self-only sebagai batasan resmi.
 6. Setelah lulus, ubah `VITE_DATA_MODE=sheets` dan deploy frontend. Jangan mencampur mode lokal dan Sheets.
 7. Buat backup dan pantau kuota Apps Script/Sheets.
 
 ## Sumber
 
-- `google-apps-script/seed.gs:75-232` — `ensureSchema()` (tambah tab tanpa reset + migrasi `agency_kyc_docs` lama ke blob).
-- `google-apps-script/seed.gs:234-360` — seed produksi v2.
-- `google-apps-script/seed.gs:362-419` — validateDatabase (total tab 56).
+- `google-apps-script/seed.gs:75-330` — `ensureSchema()` (tambah tab tanpa reset + migrasi `agency_kyc_docs` lama ke blob + `migratePhotoBlob_` memindahkan dataURL tertanam di `drivers`/`vehicles` ke tab blob, idempoten).
+- `google-apps-script/seed.gs:335-461` — seed produksi v2.
+- `google-apps-script/seed.gs:463-827` — validateDatabase (total tab 58).
 - `google-apps-script/code.gs:1-483` — versi API, daftar aksi/koleksi, proyeksi publik, field rahasia, config.
-- `google-apps-script/code.gs:484-538` — `apiSheet_` + `apiEnsureChildSheet_` (tab anak dibuat otomatis bila belum ada).
-- `google-apps-script/code.gs:539-812` — `API_MAIN_TABLES` (skema kolom v2; `agencies` memakai tab blob `agency_kyc_doc_blob`; `drivers` memakai anak `driver_alamat`).
-- `google-apps-script/code.gs:814-1010` — `apiTables_`, validasi skema, guard sel 45.000 karakter.
-- `google-apps-script/code.gs:1012-1296` — engine tulis/baca kolom: `apiBuildChildRows_` (cabang blob) dan `apiReadCollection_` (gabung chunk).
-- `google-apps-script/code.gs:1297-1601` — meta/rev, health, `doPost`, dispatch.
-- `google-apps-script/code.gs:1602-2243` — login, register, bootstrap dan filter per peran.
-- `google-apps-script/code.gs:2244-2518` — ganti password, admin user.
-- `google-apps-script/code.gs:2519-4531` — engine `sync` + validator per koleksi (agensi di ~3270, pengemudi di ~3377, booking/payment/ledger, voucher, notifikasi, tiket, route request, lintas koleksi).
-- `google-apps-script/code.gs:4532-akhir` — `apiCommit_`, penerapan koleksi, preservasi secret.
+- `google-apps-script/code.gs:484-544` — `apiSheet_` + `apiEnsureChildSheet_` (tab anak dibuat otomatis bila belum ada).
+- `google-apps-script/code.gs:545-809` — `API_MAIN_TABLES` (skema kolom v2; kolom ghost `x:`; `agencies` memakai tab blob `agency_kyc_doc_blob`; `drivers` pakai `driver_alamat` + `driver_doc_blob`; `vehicles` pakai `vehicle_doc_blob`).
+- `google-apps-script/code.gs:810-1031` — `apiColumnSpec_` (prefix `x:`), `apiTables_`, validasi skema, guard sel 45.000 karakter.
+- `google-apps-script/code.gs:1032-1355` — engine tulis/baca kolom: `apiBuildChildRows_` (cabang blob & sblob) dan `apiReadCollection_` (gabung chunk).
+- `google-apps-script/code.gs:1356-1696` — meta/rev, health, `doGet`/`doPost`, dispatch.
+- `google-apps-script/code.gs:1697-2302` — login, register, bootstrap dan filter per peran.
+- `google-apps-script/code.gs:2303-2577` — ganti password, admin user.
+- `google-apps-script/code.gs:2578-4590` — engine `sync` + validator per koleksi (agensi di ~3330, whitelist pengemudi di 3460, booking/payment/ledger, voucher, notifikasi, tiket, route request, lintas koleksi).
+- `google-apps-script/code.gs:4591-akhir` — `apiCommit_`, penerapan koleksi, preservasi secret.
 - `google-apps-script/appsscript.json` — manifest dan OAuth scope.
-- `google-apps-script/local-tests/mock-harness.mjs` — 309 asersi mock (termasuk round-trip v2, blob chunk, migrasi `ensureSchema`, cek slot sadar-skema, dan alamat berjenjang pengemudi).
+- `google-apps-script/local-tests/mock-harness.mjs` — 320 asersi mock (termasuk round-trip v2, blob chunk, migrasi `ensureSchema`, cek slot sadar-skema, alamat berjenjang pengemudi, dan foto pengemudi/kendaraan di tab sblob).
 - `transaceh-react/src/lib/db.js` — cache, diff, antrean sync, rollback.
 - `transaceh-react/src/lib/sheetsApi.js` — transport direct.
 - `transaceh-react/src/lib/remote.js` — bootstrap, login, logout, hydrate revisi.

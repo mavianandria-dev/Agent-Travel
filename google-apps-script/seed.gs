@@ -112,6 +112,11 @@ function ensureSchema_() {
       throw new Error('Header tab ' + table.name + ' tidak sesuai skema dan tidak ada jalur migrasi otomatis. /' + header);
     });
 
+    /* Foto pengemudi/kendaraan versi lama masih berupa dataURL langsung di
+       kolom utama; pindahkan ke tab blob (idempoten). */
+    var photoFix = migratePhotoBlob_(ss, described.tables);
+    if (photoFix) fixes.push(photoFix);
+
     var metaSheet = ss.getSheetByName(META_SHEET) || ss.insertSheet(META_SHEET);
     updateMetaTableCount_(metaSheet, described);
     SpreadsheetApp.flush();
@@ -225,6 +230,102 @@ function migrateDocsBlob_(ss, docsSheet, docsTable, tables) {
     appendRange.setValues(blobRows);
   }
   log_('[ensureSchema] migrasi docs: ' + docsRows.length + ' baris metadata, ' + blobRows.length + ' baris blob.');
+}
+
+/* Kolom foto utama yang pindah ke tab blob; kolom utamanya tetap ada sebagai
+   penjaga header (selalu dikosongkan). */
+var PHOTO_BLOB_TABLES_ = [
+  { main: 'drivers', blob: 'driver_doc_blob',
+    fields: ['photo', 'simPhoto', 'ktpPhoto', 'selfie'] },
+  { main: 'vehicles', blob: 'vehicle_doc_blob',
+    fields: ['photo', 'stnkPhoto', 'ktpOwnerPhoto'] }
+];
+
+/**
+ * Pindahkan dataURL besar yang masih tertanam di kolom utama drivers/
+ * vehicles ke baris chunk tab blob masing-masing, lalu kosongkan selnya.
+ * Idempoten: pasangan parent|field yang sudah punya baris blob tidak
+ * dipecah lagi (sel lama tetap dikosongkan agar bacaannya konsisten).
+ */
+function migratePhotoBlob_(ss, tables) {
+  var touched = 0;
+  var movedCells = 0;
+  PHOTO_BLOB_TABLES_.forEach(function (cfg) {
+    var mainDef = null;
+    var blobDef = null;
+    tables.forEach(function (t) {
+      if (t.name === cfg.main) mainDef = t;
+      if (t.name === cfg.blob) blobDef = t;
+    });
+    if (!mainDef || !blobDef) {
+      throw new Error('Skema foto blob tidak lengkap: ' + cfg.main + '/' + cfg.blob);
+    }
+    var sheet = ss.getSheetByName(cfg.main);
+    if (!sheet) return;
+    var lastRow = sheet.getLastRow();
+    var rows = lastRow > 1
+      ? sheet.getRange(2, 1, lastRow - 1, mainDef.headers.length).getValues()
+      : [];
+
+    var existing = {};
+    var blobSheet = ss.getSheetByName(cfg.blob);
+    if (blobSheet && blobSheet.getLastRow() > 1) {
+      var bvals = blobSheet.getRange(2, 1, blobSheet.getLastRow() - 1,
+        blobDef.headers.length).getValues();
+      bvals.forEach(function (r) {
+        var pid = String(r[0] == null ? '' : r[0]).trim();
+        var fkey = String(r[1] == null ? '' : r[1]).trim();
+        if (pid && fkey) existing[pid + '|' + fkey] = true;
+      });
+    }
+
+    var newBlobRows = [];
+    var dirtyRows = false;
+    rows.forEach(function (row) {
+      var id = String(row[0] == null ? '' : row[0]).trim();
+      var empty = row.every(function (cell) {
+        return String(cell == null ? '' : cell).trim() === '';
+      });
+      if (!id || empty) return;
+      cfg.fields.forEach(function (fName) {
+        var idx = mainDef.headers.indexOf(fName);
+        if (idx < 0) return;
+        var big = String(row[idx] == null ? '' : row[idx]).trim();
+        if (!big) return;
+        if (!existing[id + '|' + fName]) {
+          for (var off = 0; off < big.length; off += MAX_CELL_CHARS_) {
+            newBlobRows.push([id, fName, String(Math.floor(off / MAX_CELL_CHARS_) + 1),
+              big.slice(off, off + MAX_CELL_CHARS_)]);
+          }
+          movedCells += 1;
+        }
+        row[idx] = '';
+        dirtyRows = true;
+      });
+    });
+
+    if (dirtyRows) {
+      var writeRange = sheet.getRange(2, 1, rows.length, mainDef.headers.length);
+      writeRange.setNumberFormat('@');
+      writeRange.setValues(rows);
+      touched += 1;
+    }
+    if (newBlobRows.length) {
+      if (!blobSheet) {
+        blobSheet = ss.insertSheet(cfg.blob);
+        writeHeader_(blobSheet, blobDef.headers);
+        blobSheet.setColumnWidth(1, 180);
+        blobSheet.setColumnWidth(2, 110);
+      }
+      var aRange = blobSheet.getRange(blobSheet.getLastRow() + 1, 1,
+        newBlobRows.length, blobDef.headers.length);
+      aRange.setNumberFormat('@');
+      aRange.setValues(newBlobRows);
+    }
+  });
+  if (!touched) return null;
+  return 'foto ' + movedCells + ' sel drivers/vehicles dipindah ke tab blob ' +
+    '(sel utama dikosongkan)';
 }
 
 /**

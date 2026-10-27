@@ -530,11 +530,17 @@ function apiEnsureChildSheet_(ss, child) {
  *    Nilai dipecah menjadi beberapa baris chunk ≤ API_MAX_CELL_CHARS
  *    (kolom anak: parent_id | key | i | chunk) dan digabung kembali saat
  *    dibaca; kolom lain (metadata) tetap di tab `map` sesama path.
+ *  - kind 'sblob' → satu/lebih field string besar langsung pada record
+ *    (mis. foto pengemudi/kendaraan). Dipecah menjadi baris chunk ≤
+ *    API_MAX_CELL_CHARS (kolom anak: parent_id | field | i | chunk) dan
+ *    digabung kembali saat dibaca; field kosong tidak menulis baris.
  *  - path '*' (khusus notifications) → semua field record yang bukan kolom
  *    skema disimpan sebagai baris key→val di tab meta notifikasi.
  *
  * Unknown top-level field yang tidak tercakup skema DITOLAK saat tulis agar
- * tidak ada data yang hilang diam-diam.
+ * tidak ada data yang hilang diam-diam. Kolom utama berprefiks `x:` adalah
+ * kolom ghost: header tetap dipertahankan demi kompatibilitas spreadsheet
+ * lama, isinya selalu dikosongkan, dan nilai aslinya pindah ke tab `sblob`.
  */
 var API_MAIN_TABLES = {
   users: {
@@ -619,9 +625,10 @@ var API_MAIN_TABLES = {
     cols: [
       'agencyId', 'brand', 'model', 'n:year', 'color', 'plate', 'chassis',
       'engine', 'vtype', 'vtypeOther', 'baggage', 'tax', 'stnkExp', 'kir',
-      'condition', 'n:capacity', 'photo', 'status', 'ownerName', 'ownerBiz',
+      'condition', 'n:capacity', 'x:photo', 'status', 'ownerName', 'ownerBiz',
       'ownerNik', 'ownerAddr', 'ownerPhone', 'ownerEmail', 'ownership',
-      'coopDriverId', 'hasEmail', 'docOther', 'stnkPhoto', 'ktpOwnerPhoto',
+      'coopDriverId', 'hasEmail', 'docOther', 'x:stnkPhoto',
+      'x:ktpOwnerPhoto',
       'mainRoute', 'origin', 'dest', 'freq', 'freqOther', 'opSchedule',
       'n:coopTariff', 'coopSys', 'coopOther', 'n:fleetCount', 'hasDriver',
       'driverId', 'backDriverId', 'b:driverConflict', 'drvName', 'drvPhone',
@@ -639,13 +646,16 @@ var API_MAIN_TABLES = {
       { table: 'vehicle_inactive_seats', path: 'inactiveSeats', kind: 'list',
         scalar: true, cols: ['val'] },
       { table: 'vehicle_layout', path: 'layout', kind: 'list',
-        cols: ['sid', 'type'] }
+        cols: ['sid', 'type'] },
+      { table: 'vehicle_doc_blob', kind: 'sblob',
+        fields: ['photo', 'stnkPhoto', 'ktpOwnerPhoto'],
+        cols: ['n:i', 'chunk'] }
     ]
   },
   drivers: {
     cols: [
-      'agencyId', 'name', 'phone', 'wa', 'simType', 'simExp', 'simPhoto',
-      'ktpPhoto', 'selfie', 'photo', 'status', 'n:rating', 'n:trips',
+      'agencyId', 'name', 'phone', 'wa', 'simType', 'simExp', 'x:simPhoto',
+      'x:ktpPhoto', 'x:selfie', 'x:photo', 'status', 'n:rating', 'n:trips',
       'userEmail', 'birthPlace', 'birthDate', 'gender', 'address', 'nik',
       'marital', 'education', 'emName', 'emPhone', 'emRelation', 'simNumber',
       'bank', 'createdAt', 'updatedAt', 'pendingAt', 'profileVerifiedAt',
@@ -657,7 +667,10 @@ var API_MAIN_TABLES = {
       { table: 'driver_alamat', path: 'alamat', kind: 'one', cols: [
         'jalan', 'rtRw', 'kelurahan', 'kecamatan', 'kota', 'provinsi',
         'kodePos'
-      ] }
+      ] },
+      { table: 'driver_doc_blob', kind: 'sblob',
+        fields: ['photo', 'simPhoto', 'ktpPhoto', 'selfie'],
+        cols: ['n:i', 'chunk'] }
     ]
   },
   schedules: {
@@ -793,13 +806,15 @@ var API_MAIN_TABLES = {
 
 var API_TABLES_CACHE_ = null;
 
-/** "name" / "n:name" / "b:name" / "src>kolom" → {src,col,type}. */
+/** "name" / "n:name" / "b:name" / "x:name" (ghost) / "src>kolom" → spesifikasi. */
 function apiColumnSpec_(txt) {
   var raw = String(txt);
   var src = raw;
   var col = raw;
   var type = 's';
-  if (raw.indexOf('n:') === 0) { type = 'n'; src = raw.slice(2); col = src; }
+  var ghost = false;
+  if (raw.indexOf('x:') === 0) { ghost = true; src = raw.slice(2); col = src; }
+  else if (raw.indexOf('n:') === 0) { type = 'n'; src = raw.slice(2); col = src; }
   else if (raw.indexOf('b:') === 0) { type = 'b'; src = raw.slice(2); col = src; }
   var sep = src.indexOf('>');
   if (sep >= 0) {
@@ -807,7 +822,7 @@ function apiColumnSpec_(txt) {
     src = src.slice(0, sep);
   }
   if (!src || !col) throw new Error('Definisi kolom tidak valid: ' + raw);
-  return { src: src, col: col, type: type };
+  return { src: src, col: col, type: type, ghost: ghost };
 }
 
 /** Bangun (sekali) definisi tab utama + tab anak dari API_MAIN_TABLES. */
@@ -825,7 +840,10 @@ function apiTables_() {
     cols.forEach(function (c) { allowed[c.src] = true; });
     var children = [];
     (def.children || []).forEach(function (childDef) {
-      allowed[childDef.path] = true;
+      if (childDef.fields) {
+        childDef.fields.forEach(function (f) { allowed[f] = true; });
+      }
+      if (childDef.path) allowed[childDef.path] = true;
       var cols2 = (childDef.cols || []).map(apiColumnSpec_);
       if (childByName[childDef.table]) {
         throw new Error('Tab anak duplikat: ' + childDef.table);
@@ -833,7 +851,8 @@ function apiTables_() {
       var childHeaders = childDef.kind === 'one'
         ? ['parent_id'].concat(cols2.map(function (c) { return c.col; }))
         : ['parent_id',
-            (childDef.kind === 'map' || childDef.kind === 'blob') ? 'key' : 'slot']
+            childDef.kind === 'sblob' ? 'field'
+              : (childDef.kind === 'map' || childDef.kind === 'blob') ? 'key' : 'slot']
             .concat(cols2.map(function (c) { return c.col; }));
       var built = {
         table: childDef.table,
@@ -841,6 +860,7 @@ function apiTables_() {
         path: childDef.path,
         kind: childDef.kind,
         field: childDef.field || '',
+        fields: childDef.fields || [],
         scalar: !!childDef.scalar,
         headers: childHeaders,
         cols: cols2
@@ -1032,7 +1052,9 @@ function apiWriteCollection_(ss, key, records) {
     var row = [id, String(i + 1)];
     for (var c = 0; c < main.cols.length; c++) {
       var col = main.cols[c];
-      row.push(apiCellFor_(col.type, rec[col.src], key + '.' + id + '.' + col.col));
+      /* Kolom ghost (x:) hanyanya penjaga header spreadsheet lama; isinya
+         selalu kosong karena nilai aslinya kini di tab sblob. */
+      row.push(apiCellFor_(col.type, col.ghost ? '' : rec[col.src], key + '.' + id + '.' + col.col));
     }
     row.push(now);
     rows.push(row);
@@ -1058,8 +1080,25 @@ function apiWriteCollection_(ss, key, records) {
   return rows.length;
 }
 
-/** Susun baris tab anak dari satu record (array/map/object 1:1). */
+/** Susun baris tab anak dari satu record (array/map/object 1:1/sblob). */
 function apiBuildChildRows_(child, parentId, rec, key, sink) {
+  /* kind 'sblob': field string besar langsung pada record (mis. foto
+     pengemudi/kendaraan) dipecah menjadi baris chunk ≤ API_MAX_CELL_CHARS;
+     field kosong tidak menulis baris apa pun. */
+  if (child.kind === 'sblob') {
+    var sFields = child.fields || [];
+    for (var sf = 0; sf < sFields.length; sf++) {
+      var sText = String(rec[sFields[sf]] == null ? '' : rec[sFields[sf]]);
+      if (!sText) continue;
+      for (var so = 0; so < sText.length; so += API_MAX_CELL_CHARS) {
+        var si = Math.floor(so / API_MAX_CELL_CHARS) + 1;
+        sink.push([parentId, sFields[sf], String(si),
+          apiCellFor_('s', sText.slice(so, so + API_MAX_CELL_CHARS),
+            child.table + '/' + parentId + '.' + sFields[sf] + '#' + si)]);
+      }
+    }
+    return;
+  }
   if (child.path === '*') {
     /* notifications: field di luar skema dikumpulkan sebagai map meta. */
     var mainAllowed = apiTables_().mains[child.parent].allowed;
@@ -1225,6 +1264,17 @@ function apiReadCollection_(ss, key) {
       var crow = childRows[r];
       var pid = String(crow[0] == null ? '' : crow[0]).trim();
       if (!pid) continue;
+      if (child.kind === 'sblob') {
+        /* sblob: [field, i, chunk]; digabung saat attach. */
+        var sk = String(crow[1] == null ? '' : crow[1]).trim();
+        if (!sk) continue;
+        var sidx = Number(crow[2]) || 0;
+        var stext = crow[3] == null ? '' : String(crow[3]);
+        if (!grouped[pid]) grouped[pid] = {};
+        if (!grouped[pid][sk]) grouped[pid][sk] = [];
+        grouped[pid][sk].push([sidx, stext]);
+        continue;
+      }
       var val;
       var off = child.kind === 'one' ? 1 : 2;
       if (child.kind === 'blob') {
@@ -1285,6 +1335,15 @@ function apiReadCollection_(ss, key) {
           var blobDoc = holder[bk];
           if (!blobDoc || typeof blobDoc !== 'object') { blobDoc = {}; holder[bk] = blobDoc; }
           blobDoc[child.field || 'dataUrl'] = parts.join('');
+        });
+      } else if (child.kind === 'sblob' && grouped[sid] != null) {
+        /* sblob: gabungkan pecahan per field. Field tanpa baris chunk tetap
+           memakai nilai sel utama (kompatibel dengan data pra-migrasi). */
+        Object.keys(grouped[sid]).forEach(function (sfk) {
+          var parts = grouped[sid][sfk].slice()
+            .sort(function (x, y) { return x[0] - y[0]; })
+            .map(function (p) { return p[1]; });
+          rec[sfk] = parts.join('');
         });
       } else if (grouped[sid] != null) {
         apiPutPath_(rec, child.path, grouped[sid]);

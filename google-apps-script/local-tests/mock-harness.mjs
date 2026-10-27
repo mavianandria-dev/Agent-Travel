@@ -1995,6 +1995,89 @@ ok('validateDatabase: tab driver_alamat terbentuk & valid',
   vdDrv.counts.driver_alamat);
 
 /* ------------------------------------------------------------------ */
+/* 18) foto pengemudi & kendaraan → tab sblob (dupa chunk ≤45rb)       */
+/* ------------------------------------------------------------------ */
+
+console.log('\n== 18) foto pengemudi & kendaraan di tab sblob ==');
+
+/* dataURL "nyata" > 45rb karakter — persis kasus produksi yang dulu gagal
+   dengan VALIDATION "Isi sel ... melebihi 45000 karakter". */
+const BIG_PHOTO = 'data:image/jpeg;base64,' + 'A'.repeat(60000);
+const BIG_SIM = 'data:image/jpeg;base64,' + 'B'.repeat(50000);
+const BIG_STNK = 'data:image/png;base64,' + 'C'.repeat(55000);
+const BIG_LEGACY = 'data:image/jpeg;base64,' + 'D'.repeat(55000);
+
+/* Agen memperbarui foto pengemudi; sync harus diterima penuh. */
+res = sync({
+  drivers: {
+    baseRev: revOf('drivers'),
+    upserts: [Object.assign({}, readRec('drivers', 'd_1'), {
+      photo: BIG_PHOTO, simPhoto: BIG_SIM
+    })],
+    deletes: []
+  }
+}, agenToken);
+ok('sync foto besar pengemudi (sisi agen) diterima', res.ok === true, res);
+
+const d1Big = readRec('drivers', 'd_1');
+ok('foto pengemudi terbaca kembali identik (chunk digabung)',
+  schemaValueEqual(d1Big.photo, BIG_PHOTO) && schemaValueEqual(d1Big.simPhoto, BIG_SIM));
+
+/* Sel utama kolom ghost tidak menyimpan nilai besar. */
+const drvRowsRaw = spread.getSheetByName('drivers').rows;
+const drvHdr = drvRowsRaw[0];
+const d1RawRow = drvRowsRaw.find((r) => String(r[0]) === 'd_1');
+ok('kolom ghost photo/simPhoto kosong di tab utama',
+  String(d1RawRow[drvHdr.indexOf('photo')] || '') === '' &&
+  String(d1RawRow[drvHdr.indexOf('simPhoto')] || '') === '');
+
+const blobDrvRows = spread.getSheetByName('driver_doc_blob').rows.filter(
+  (r) => String(r[0]) === 'd_1');
+const chunksOf = (list, field) => list.filter((r) => String(r[1]) === field)
+  .map((r) => [Number(r[2]) || 0, String(r[3])])
+  .sort((x, y) => x[0] - y[0]).map((p) => p[1]).join('');
+ok('chunk foto pengemudi tersusun urut & tergabung utuh',
+  chunksOf(blobDrvRows, 'photo') === BIG_PHOTO &&
+  chunksOf(blobDrvRows, 'simPhoto') === BIG_SIM,
+  blobDrvRows.length);
+
+/* Foto/STNK kendaraan lewat jalur yang sama. */
+res = sync({
+  vehicles: {
+    baseRev: revOf('vehicles'),
+    upserts: [Object.assign({}, readRec('vehicles', 'v_1'), { stnkPhoto: BIG_STNK })],
+    deletes: []
+  }
+}, agenToken);
+ok('sync STNK besar kendaraan (sisi agen) diterima', res.ok === true, res);
+const v1Big = readRec('vehicles', 'v_1');
+ok('STNK kendaraan terbaca kembali identik', schemaValueEqual(v1Big.stnkPhoto, BIG_STNK));
+
+/* Data lama: nilai besar tertanam langsung di sel utama (pra-migrasi). */
+const d2RawRow = drvRowsRaw.find((r) => String(r[0]) === 'd_2');
+d2RawRow[drvHdr.indexOf('photo')] = BIG_LEGACY;
+const vdLegacy = S.validateDatabase();
+ok('validateDatabase menandai sel foto lama yang melebihi batas',
+  vdLegacy.ok === false &&
+  vdLegacy.problems.some((p) => p.indexOf('drivers') === 0 && p.indexOf('melebihi') >= 0));
+
+const ensure2 = S.ensureSchema_();
+ok('ensureSchema memindahkan foto lama ke tab blob',
+  ensure2.ok === true && (ensure2.fixes || []).join(' ').indexOf('dipindah') >= 0, ensure2);
+ok('foto lama terbaca identik setelah migrasi',
+  schemaValueEqual(readRec('drivers', 'd_2').photo, BIG_LEGACY));
+
+/* Migrasi idempoten: sel sudah kosong → tidak ada fix baru. */
+const ensure3 = S.ensureSchema_();
+ok('migrasi foto idempoten (tidak menulis ulang)',
+  ensure3.ok === true && (ensure3.fixes || []).every((f) => f.indexOf('dipindah') < 0), ensure3);
+
+const vdDrvBlob = S.validateDatabase();
+ok('validateDatabase hijau untuk seluruh tab foto blob',
+  vdDrvBlob.ok === true && vdDrvBlob.counts.driver_doc_blob >= 4 &&
+  vdDrvBlob.counts.vehicle_doc_blob >= 2, vdDrvBlob.problems);
+
+/* ------------------------------------------------------------------ */
 
 console.log('\n== Ringkasan ==');
 console.log('PASS: ' + passed + ', FAIL: ' + failed);
