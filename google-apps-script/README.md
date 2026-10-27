@@ -404,9 +404,9 @@ node google-apps-script/local-tests/mock-harness.mjs
 - `google-apps-script/code.gs:1032-1355` — engine tulis/baca kolom: `apiBuildChildRows_` (cabang blob & sblob) dan `apiReadCollection_` (gabung chunk).
 - `google-apps-script/code.gs:1356-1696` — meta/rev, health, `doGet`/`doPost`, dispatch.
 - `google-apps-script/code.gs:1697-2302` — login, register, bootstrap dan filter per peran.
-- `google-apps-script/code.gs:2303-2577` — ganti password, admin user.
-- `google-apps-script/code.gs:2578-4590` — engine `sync` + validator per koleksi (agensi di ~3330, whitelist pengemudi di 3460, booking/payment/ledger, voucher, notifikasi, tiket, route request, lintas koleksi).
-- `google-apps-script/code.gs:4591-akhir` — `apiCommit_`, penerapan koleksi, preservasi secret.
+- `google-apps-script/code.gs:2305-2579` — ganti password, admin user.
+- `google-apps-script/code.gs:2580-4592` — engine `sync` + validator per koleksi (agensi di ~3330, whitelist pengemudi di 3460, booking/payment/ledger, voucher, notifikasi, tiket, route request, lintas koleksi).
+- `google-apps-script/code.gs:4593-akhir` — `apiCommit_`, penerapan koleksi, preservasi secret.
 - `google-apps-script/appsscript.json` — manifest dan OAuth scope.
 - `google-apps-script/local-tests/mock-harness.mjs` — 320 asersi mock (termasuk round-trip v2, blob chunk, migrasi `ensureSchema`, cek slot sadar-skema, alamat berjenjang pengemudi, dan foto pengemudi/kendaraan di tab sblob).
 - `transaceh-react/src/lib/db.js` — cache, diff, antrean sync, rollback.

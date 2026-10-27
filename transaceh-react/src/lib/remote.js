@@ -23,6 +23,11 @@ export async function refreshSnapshot() {
 
 export async function signInRemote(email, password) {
   const data = await sheetsApi.login(email, password);
+  /* Antrean sel sesi lama harus keluar dulu dengan token LAMA, sebelum token
+     baru dipasang. Kalau tidak, flush yang tertunda bisa terkirim memakai
+     identitas akun baru dan ditolak server (mis. "Akun ini sudah punya data
+     pengemudi."). getToken() saat ini masih token lama. */
+  try { await DB.flush(); } catch { /* tulisan gagal ditangani sync error handler */ }
   setToken(data.token, data.expiresAt);
   try {
     const snap = await loadSnapshot(data.token);

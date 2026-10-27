@@ -2079,6 +2079,23 @@ ok('validateDatabase hijau untuk seluruh tab foto blob',
 
 /* ------------------------------------------------------------------ */
 
+/* Proyeksi pengemudi: baris sendiri tetap hadir meski belum punya jadwal.
+   Lepaskan d_1 dari semua jadwal (s_1 utama → d_2, s_2 cadangan → kosong). */
+const schedRawRows = spread.getSheetByName('schedules').rows;
+const sHdr = schedRawRows[0];
+const idxDrv = sHdr.indexOf('driverId');
+const idxDnm = sHdr.indexOf('driverName');
+const idxBd = sHdr.indexOf('backupDriverId');
+const idxBn = sHdr.indexOf('backupName');
+schedRawRows.forEach((r) => {
+  if (String(r[0]) === 's_1') { r[idxDrv] = 'd_2'; r[idxDnm] = 'Teuku Rizal'; }
+  if (String(r[0]) === 's_2') { r[idxBd] = ''; r[idxBn] = ''; }
+});
+res = dispatch(bodyOf({}, { action: 'bootstrap', token: driverToken }));
+ok('bootstrap pengemudi tanpa jadwal tetap memuat baris sendiri',
+  res.ok === true && (res.data.records.drivers || []).some((x) => String(x.id) === 'd_1'),
+  (res.data.records.drivers || []).map((x) => x.id));
+
 console.log('\n== Ringkasan ==');
 console.log('PASS: ' + passed + ', FAIL: ' + failed);
 process.exit(failed === 0 ? 0 : 1);

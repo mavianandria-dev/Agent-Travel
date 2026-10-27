@@ -2133,18 +2133,20 @@ function apiBootstrapData_(ss, meta, role, user) {
       if (s && s.driverId) assignedDriverIds[String(s.driverId)] = true;
       if (s && s.backupDriverId) assignedDriverIds[String(s.backupDriverId)] = true;
     });
+    // Baris milik akun SELALU ikut dalam proyeksi pengemudi — juga bila
+    // belum ditugaskan jadwal — karena halaman profil mandiri
+    // membutuhkannya; tanpa ini perubahan profil terkesan "membuat baru"
+    // dan ditolak server ("Akun ini sudah punya data pengemudi.").
     var driverRecords = [];
+    if (ownDriver) driverRecords.push(ownDriver);
     drivers.forEach(function (driverRec) {
       if (!driverRec) return;
+      if (ownDriver && String(driverRec.id || '') === String(ownDriver.id)) return;
       var recId = String(driverRec.id || '');
       if (!assignedDriverIds[recId]) return;
-      if (ownDriver && recId === String(ownDriver.id)) {
-        driverRecords.push(driverRec);
-      } else {
-        // Rekan pengemudi cukup nama/telepon untuk manifest; NIK, bank,
-        // SIM, dan foto dokumen tidak ikut.
-        driverRecords.push(apiPickFields_(driverRec, ['id', 'name', 'phone', 'photo', 'rating', 'status']));
-      }
+      // Rekan pengemudi cukup nama/telepon untuk manifest; NIK, bank,
+      // SIM, dan foto dokumen tidak ikut.
+      driverRecords.push(apiPickFields_(driverRec, ['id', 'name', 'phone', 'photo', 'rating', 'status']));
     });
 
     put('routes', read('routes'));
