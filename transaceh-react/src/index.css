@@ -17,6 +17,11 @@
 body { background: #f1f5f9; }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
+/* Scrollbar vertikal halaman (kanan layar) disembunyikan — halaman tetap
+   bisa digulir normal. Scrollbar bagian dalam (modal, chat, rail tab)
+   tetap memakai gaya 8px di atas. */
+html { scrollbar-width: none; }
+html::-webkit-scrollbar, body::-webkit-scrollbar { display: none; }
 
 @keyframes fadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 @keyframes pop { 0% { transform: scale(0.9); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }

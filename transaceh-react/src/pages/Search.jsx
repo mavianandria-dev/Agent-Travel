@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
 import { schedById, schedReady, takenSeats, seatsLeft, routeById, vehicleById, driverById, vehLayout, schedSeatCap, audit, notify, vehName, splitFare, createLedger, routeBookable, isRouteSuspended, canPayBooking, scheduleIsPast, ensureHoldExpiry, agencyById, routeGroupKey, groupRoutes, routesInRouteGroup, scheduleMaintenance, maintenancePeriodLabel } from '@/lib/domain.js';
@@ -19,14 +19,26 @@ const validCoords = (s) => {
 const STEP_LABELS = ['Rute', 'Tanggal', 'Armada', 'Kursi', 'Bayar'];
 
 function WizardSteps({ step }) {
+  /* Baris chip bisa lebih lebar dari layar ponsel — tiap perubahan tahap,
+     geser sekali dengan halus agar chip tahap aktif tampak di tengah.
+     scrollTo hanya pada baris ini (bukan halaman); di desktop tanpa
+     overflow tidak terjadi apa-apa. */
+  const railRef = useRef(null);
+  const actRef = useRef(null);
+  useEffect(() => {
+    const rail = railRef.current, act = actRef.current;
+    if (!rail || !act) return;
+    const left = act.getBoundingClientRect().left - rail.getBoundingClientRect().left + rail.scrollLeft - (rail.clientWidth - act.offsetWidth) / 2;
+    rail.scrollTo({ left: Math.max(0, left), behavior: 'smooth' });
+  }, [step]);
   return (
     <>
-      <div className="flex items-center gap-1 md:gap-2 overflow-x-auto pb-1">{STEP_LABELS.map((l, i) => {
+      <div ref={railRef} className="flex items-center gap-1 md:gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">{STEP_LABELS.map((l, i) => {
         const n = i + 1;
         const act = step === n;
         const done = step > n;
         return (
-          <div key={l} className="flex items-center gap-2 shrink-0">
+          <div key={l} ref={act ? actRef : undefined} className="flex items-center gap-2 shrink-0">
             <div className={'step-dot ' + (act ? 'bg-sky-600 text-white shadow-lg' : done ? 'bg-green-500 text-white' : 'bg-slate-100 text-slate-400')}>{done ? <Icon name="check" className="w-4 h-4" /> : n}</div>
             <div className={'text-[12px] font-extrabold ' + (act ? 'text-sky-700' : 'text-slate-400')}>{l}</div>
             {n < 5 ? <div className={'w-4 md:w-8 h-0.5 rounded mx-1 ' + (done ? 'bg-green-400' : 'bg-slate-200')}></div> : null}
@@ -219,6 +231,16 @@ export default function Search() {
     </div>
   );
 
+  /* Pegangan blok Data Penumpang + cek "sudah tampak di layar?" untuk
+     gulir otomatis sekali saat kursi PERTAMA dipilih (hanya ponsel). */
+  const paxRef = useRef(null);
+  const paxShown = () => {
+    const el = paxRef.current;
+    if (!el) return true;
+    const rc = el.getBoundingClientRect();
+    return rc.top < window.innerHeight && rc.bottom > 0;
+  };
+
   const toggleSeat = (st) => {
     if (bw.seats.includes(st)) {
       setBw({ ...bw, seats: bw.seats.filter((x) => x !== st), passengers: bw.passengers.filter((p) => p.seat !== st) });
@@ -228,6 +250,10 @@ export default function Search() {
       const passengers = [...bw.passengers];
       if (!passengers.find((p) => p.seat === st)) passengers.push({ seat: st, name: '', phone: '' });
       setBw({ ...bw, seats: [...bw.seats, st], passengers });
+      /* Ponsel: gulir SEKALI saja — tepat saat kursi pertama dipilih (dari
+         0 kursi). Pilihan berikutnya tidak pernah menggulir; di desktop
+         form sudah tampak di samping. */
+      if (bw.seats.length === 0 && !window.matchMedia('(min-width: 768px)').matches && paxRef.current && !paxShown()) paxRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
       toast('Kursi ' + st + ' dipilih', 'info');
     }
   };
@@ -448,7 +474,7 @@ export default function Search() {
           </div>
           <CabinGrid layout={layout} paid={tk.paid} hold={tk.hold} inactive={tk.inactive} selected={bw.seats} onPick={toggleSeat} interactive plate={v.plate} vehName={vehName(v)} legend={false} />
         </div>
-        <div><h3 className="font-extrabold text-[16px]">Data Penumpang <span className="badge bg-sky-100 text-sky-700">{bw.seats.length} kursi</span></h3>
+        <div ref={paxRef} className="scroll-mt-20"><h3 className="font-extrabold text-[16px]">Data Penumpang <span className="badge bg-sky-100 text-sky-700">{bw.seats.length} kursi</span></h3>
           {bw.seats.length === 0 ? (
             <div className="mt-3 bg-amber-50 border border-amber-200 rounded-2xl p-4 text-[13px] font-semibold text-amber-800 flex gap-2"><Icon name="mouse-pointer-click" className="w-5 h-5 shrink-0" />Klik kursi hijau pada layout armada untuk memilih. 1 akun bisa pesan beberapa kursi sekaligus.</div>
           ) : (
