@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { agencyOf, vehicleById, driverById, driverForVehicle, backupDriverForVehicle, sameDriver, driverOptionLabel, vehLayout, drvBlocks, seatBookedFuture, bookingsOf, schedSeatCap, audit, notify } from '@/lib/domain.js';
+import { agencyOf, vehicleById, driverById, driverForVehicle, backupDriverForVehicle, sameDriver, driverOptionLabel, vehLayoutRaw, drvBlocks, seatBookedFuture, bookingsOf, schedSeatCap, audit, notify } from '@/lib/domain.js';
 import { todayStr, uid, SEAT_LABELS, V_OWN, V_TYPES, V_FAC, V_SERVICES, VTOOLS, VCELLCLS, VCELLICON, inC } from '@/lib/utils.js';
 import { Icon, Sec, PillRadios, CheckPills, UpBox } from '@/components/ui.jsx';
 
@@ -102,7 +102,7 @@ function VehFormInner({ agId, oldV, vid }) {
   const [seatWarn, setSeatWarn] = useState('');
   const [VTOOL, setVTOOL] = useState('seat');
   const [VLAY, setVLAY] = useState(() => {
-    if (vid) return vehLayout(vehicleById(vid)).map((c) => ({ sid: c.sid, type: c.type }));
+    if (vid) return vehLayoutRaw(vehicleById(vid)).map((c) => ({ sid: c.sid, type: c.type }));
     return defaultVLAY();
   });
   const [VSEQ, setVSEQ] = useState(() => (oldV?.seatSeq) || VLAY.reduce((a, c) => { const m = c.sid && /^A(\d+)$/.exec(c.sid); return m ? Math.max(a, +m[1]) : a; }, 6));
@@ -348,6 +348,9 @@ function VehFormInner({ agId, oldV, vid }) {
 
   const isCoop = ownership === 'Milik Pengemudi';
 
+  /* Petunjuk pola gabung baris-1: tepat satu dari r1c1/r1c2 kursi, pasangannya kosong. */
+  const benchHint = (VLAY[0].type === 'seat' && VLAY[1].type === 'empty') || (VLAY[0].type === 'empty' && VLAY[1].type === 'seat');
+
   let seatCells = [];
   {
     let skip = false;
@@ -427,6 +430,7 @@ function VehFormInner({ agId, oldV, vid }) {
         <p className="text-[11.5px] text-slate-500 font-medium mt-1">Pilih alat lalu klik petak. Pengemudi selalu blok gabungan kolom 3–4 (setir kanan). Nomor kursi otomatis berurutan (A1, A2, …) dari kiri ke kanan, atas ke bawah. Kapasitas tempat duduk mengikuti jumlah bangku aktif ini.</p>
         <div className="mt-2.5"><div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">{VTOOLS.map((x) => <button key={x[0]} type="button" onClick={() => setVTOOL(x[0])} className={'rounded-xl border-2 ' + (VTOOL === x[0] ? 'border-sky-500 bg-sky-600 text-white shadow' : 'border-slate-200 bg-white text-slate-500') + ' py-2 flex flex-col items-center gap-0.5 text-[9px] font-extrabold active:scale-95'}><Icon name={x[1]} className="w-4 h-4 pointer-events-none" /><span className="pointer-events-none">{x[2]}</span></button>)}</div></div>
         <div className="mt-2.5"><div className="grid grid-cols-4 gap-1.5 sm:gap-2">{seatCells}</div></div>
+        {benchHint ? <p className="mt-2 text-[11px] font-bold text-sky-700 bg-sky-50 border border-sky-200 rounded-xl px-3 py-2 flex items-center gap-1.5"><Icon name="info" className="w-3.5 h-3.5 shrink-0" />R1C1 + R1C2 akan otomatis menjadi 1 bangku lebar "A1" saat disimpan</p> : null}
         {seatWarn ? <div className="mt-2.5 bg-red-50 border border-red-200 rounded-xl p-2.5 text-[12px] font-bold text-red-700 whitespace-pre-line">{seatWarn}</div> : null}
       </div>
       <div className="grid grid-cols-2 gap-2.5 mt-5"><button onClick={vehBack} className="bg-slate-100 hover:bg-slate-200 active:scale-95 transition font-extrabold text-[14px] py-3 rounded-2xl cursor-pointer">Batal</button><button onClick={saveVeh} className="bg-sky-600 hover:bg-sky-500 active:scale-[.99] text-white font-extrabold text-[14px] py-3 rounded-2xl">Simpan</button></div>

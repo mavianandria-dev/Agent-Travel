@@ -684,7 +684,26 @@ export function seatsLeft(schedId){
   return Math.max(0, schedSeatCap(schedId) - used.size);
 }
 
-export function vehLayout(v){
+/** Bangku lebar baris-1 (r1c1 + r1c2): bila TEPAT SATU dari pasangan itu
+ *  kursi dan pasangannya kosong, gabungkan menjadi satu bangku span-2 —
+ *  tipe 'seatw' hanya tanda ekor di memori, TIDAK PERNAH disimpan: selalu
+ *  diturunkan saat dibaca (vehLayout) dan dilepas saat menyimpan, sehingga
+ *  data tetap format lama (seat/off/driver/empty) dan valid untuk semua. */
+export function normalizeFrontBench(L){
+  if(!L||L.length<2) return L;
+  const a=L[0], b=L[1];
+  /* Ekor yatim (kepalanya bukan kursi) dibersihkan dulu. */
+  if(a.type==='seatw'){ a.type='empty'; a.sid=null; }
+  if(a.type==='seat'&&b.type==='seatw') return L; /* sudah tergabung */
+  if(a.type==='seat'&&b.type==='empty'){ b.type='seatw'; b.sid=null; return L; }
+  if(b.type==='seat'&&a.type==='empty'){ a.type='seat'; a.sid=b.sid; b.type='seatw'; b.sid=null; return L; }
+  return L;
+}
+
+/** Bentuk mentah layout persis sesuai tersimpan — TANPA normalisasi bangku
+ *  lebar. Dipakai editor konfigurasi armada (VehForm) agar menyusun sel
+ *  bebas; keputusan gabung dievaluasi hanya saat dibaca (vehLayout). */
+export function vehLayoutRaw(v){
   if(v&&Array.isArray(v.layout)&&v.layout.length===28) return v.layout.map(c=>({sid:c.sid||null,type:c.type||'empty'}));
   const L=Array.from({length:28},()=>({sid:null,type:'empty'}));
   const put=(i,type,sid)=>{L[i]={sid:sid||null,type};};
@@ -694,6 +713,8 @@ export function vehLayout(v){
   [24,25,26,27].forEach(i=>put(i,'luggage',null));
   return L;
 }
+
+export function vehLayout(v){ return normalizeFrontBench(vehLayoutRaw(v)); }
 
 export function vehSeatCount(v){ return vehLayout(v).filter(c=>c.type==='seat').length; }
 

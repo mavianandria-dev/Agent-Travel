@@ -217,6 +217,35 @@ export function CabinGrid({ layout, paid = [], hold = [], inactive = [], blocked
       skip = true;
       return;
     }
+    if (c.type === 'seat' && layout[i + 1] && layout[i + 1].type === 'seatw' && i % 4 === 0) {
+      /* Bangku lebar baris-1 (hasil merge r1c1+r1c2): satu kursi span 2 petak. */
+      const st = c.sid;
+      const isOff = inactive.includes(st);
+      const isBlocked = blocked.includes(st);
+      const cls = isOff || paid.includes(st) ? 'filled' : hold.includes(st) ? 'held' : isBlocked ? 'blocked' : selected.includes(st) ? 'selected' : 'avail';
+      const dis = isBlocked ? false : (cls !== 'avail' && cls !== 'selected');
+      const icon = isOff ? 'ban' : cls === 'filled' ? 'x' : cls === 'held' ? 'timer' : cls === 'blocked' ? 'ban' : 'armchair';
+      const inner = (
+        <>
+          <Icon name={icon} className="w-4 h-4" />
+          <span className="text-[11px]">{st}</span>
+          {isOff ? <span className="text-[8px] font-extrabold">OFF</span> : null}
+          {cls === 'blocked' ? <span className="text-[8px] font-extrabold">TUTUP</span> : null}
+        </>
+      );
+      cells.push(interactive ? (
+        <button key={i} disabled={dis} onClick={() => onPick(st)} aria-label={`Kursi ${st} (bangku lebar)`} title={isOff ? 'Nonaktif oleh agen' : isBlocked ? 'Diblokir — klik untuk buka lagi' : undefined} className={`seat ${cls} rounded-xl h-[58px] min-h-[54px] flex flex-col items-center justify-center font-extrabold text-[14px] active:scale-95`} style={{ gridColumn: 'span 2' }}>
+          {inner}
+        </button>
+      ) : (
+        <div key={i} className={`seat ${cls} rounded-xl h-[58px] flex flex-col items-center justify-center font-extrabold text-[14px]`} style={{ gridColumn: 'span 2', cursor: 'default', textDecoration: 'none' }} title={isOff ? 'Nonaktif' : undefined}>
+          {inner}
+        </div>
+      ));
+      skip = true;
+      return;
+    }
+    if (c.type === 'seatw') { /* ekor yatim tanpa kepala — tampil kosong */ cells.push(<div key={i} aria-hidden="true" />); return; }
     if (c.type === 'seat' || c.type === 'off') {
       const st = c.sid;
       const isOff = c.type === 'off' || inactive.includes(st);
