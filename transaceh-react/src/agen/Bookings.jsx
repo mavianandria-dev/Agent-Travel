@@ -129,7 +129,7 @@ export default function Bookings({ ag }) {
           <option value="">Semua status</option><option value="pending">Menunggu Bayar</option><option value="paid">Lunas</option><option value="done">Selesai</option><option value="cancelled">Dibatalkan</option>
         </select>
         <button onClick={exportCSV} className="bg-green-500 text-white text-[12px] font-extrabold px-4 py-2.5 rounded-xl flex items-center gap-1.5"><Icon name="file-spreadsheet" className="w-4 h-4" />Excel</button></div>
-      <div className="table-wrap mt-3">
+      <div className="table-wrap mt-4">
         <table className="data w-full min-w-[760px]"><thead><tr><th>Kode</th><th>Penumpang</th><th>Jadwal</th><th>Total</th><th>Status</th><th>Aksi</th></tr></thead><tbody>
           {list.map((b) => {
             const s = schedById(b.scheduleId);

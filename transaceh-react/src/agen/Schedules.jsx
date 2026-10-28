@@ -52,7 +52,7 @@ export default function Schedules({ ag }) {
         <button onClick={() => setTab('history')} className={`text-[12px] font-extrabold px-3.5 py-2 rounded-xl ${tab === 'history' ? 'bg-[#0b2447] text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>Riwayat ({history.length})</button>
       </div>
 
-      <div className="table-wrap mt-3"><table className="data w-full min-w-[720px]"><thead><tr><th>Tanggal / Jam</th><th>Rute</th><th>Armada / Pengemudi &amp; Pengganti</th><th>Harga</th><th>Terisi</th><th>Aksi</th></tr></thead><tbody>
+      <div className="table-wrap mt-4"><table className="data w-full min-w-[720px]"><thead><tr><th>Tanggal / Jam</th><th>Rute</th><th>Armada / Pengemudi &amp; Pengganti</th><th>Harga</th><th>Terisi</th><th>Aksi</th></tr></thead><tbody>
         {list.map((s) => {
           const r = routeById(s.routeId);
           const v = vehicleById(s.vehicleId);
