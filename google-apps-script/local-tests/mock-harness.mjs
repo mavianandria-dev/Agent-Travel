@@ -2184,6 +2184,45 @@ ok('migrasi selfie idempoten (tidak menulis ulang)',
   ensureIdemSelfie.ok === true &&
   (ensureIdemSelfie.fixes || []).every((f) => f.indexOf('selfie') < 0 && f.indexOf('swafoto') < 0), ensureIdemSelfie.fixes);
 
+/* ------------------------------------------------------------------ */
+/* 17) Armada tautan pengemudi ikut bootstrap meski belum ada jadwal   */
+
+console.log('\n== 17) armada tautan pengemudi pada bootstrap ==');
+
+/* Agen menautkan tiga kendaraan baru tanpa jadwal apa pun: utama d_1,
+   cadangan d_1, dan utama d_2 (pemisah untuk uji negatif). */
+res = sync({
+  vehicles: { baseRev: revOf('vehicles'), upserts: [
+    { id: 'v_taut_1', agencyId: 'ag_1', plate: 'BL 1010 TA', brand: 'Uji', model: 'Taut', status: 'aktif', capacity: 6, inactiveSeats: [], driverId: 'd_1' },
+    { id: 'v_taut_2', agencyId: 'ag_1', plate: 'BL 2020 TB', brand: 'Uji', model: 'Cad', status: 'aktif', capacity: 6, inactiveSeats: [], backDriverId: 'd_1' },
+    { id: 'v_taut_3', agencyId: 'ag_1', plate: 'BL 3030 TC', brand: 'Uji', model: 'Lain', status: 'aktif', capacity: 6, inactiveSeats: [], driverId: 'd_2' }
+  ], deletes: [] }
+}, agenToken);
+ok('sync tiga kendaraan tautan diterima', res.ok === true, res);
+
+res = dispatch(bodyOf({}, { action: 'bootstrap', token: driverToken }));
+const tautVeh = res.data.records.vehicles || [];
+const tautIds = idsOf(tautVeh);
+ok('bootstrap pengemudi memuat kendaraan tautan utama + cadangan',
+  res.ok === true && tautIds.includes('v_taut_1') && tautIds.includes('v_taut_2'), tautIds);
+ok('bootstrap pengemudi tidak memuat kendaraan tautan pengemudi lain', !tautIds.includes('v_taut_3'), tautIds);
+/* d_1 sudah dilepas dari semua jadwal (seksi proyeksi baris sendiri),
+   jadi hadirnya kendaraan ini murni karena tautan driverId, bukan jadwal. */
+ok('kendaraan tautan hadir karena tautan, bukan jadwal',
+  !tautIds.includes('v_1') && !tautIds.includes('v_2'), tautIds);
+const taut1 = tautVeh.find((x) => String(x.id) === 'v_taut_1') || {};
+ok('baris kendaraan pengemudi membawa driverId & plate',
+  taut1.driverId === 'd_1' && taut1.plate === 'BL 1010 TA', taut1);
+ok('data pemilik/dokumen tetap tidak ikut pada kendaraan tautan',
+  !Object.prototype.hasOwnProperty.call(taut1, 'ownerNik') &&
+  !Object.prototype.hasOwnProperty.call(taut1, 'stnkPhoto'), taut1);
+
+/* Proyeksi publik tetap tanpa tautan pengemudi (jaga kebocoran). */
+const pubRec2 = (dispatch(bodyOf({}, { action: 'bootstrap' })).data.records || {});
+const pubVeh2 = (pubRec2.vehicles || []).find((x) => String(x.id) === 'v_taut_1') || {};
+ok('proyeksi publik kendaraan tidak memuat driverId',
+  pubVeh2.id === 'v_taut_1' && !Object.prototype.hasOwnProperty.call(pubVeh2, 'driverId'), pubVeh2);
+
 console.log('\n== Ringkasan ==');
 console.log('PASS: ' + passed + ', FAIL: ' + failed);
 process.exit(failed === 0 ? 0 : 1);

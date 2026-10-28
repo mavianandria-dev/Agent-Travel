@@ -153,7 +153,7 @@ Catatan:
 node google-apps-script/local-tests/mock-harness.mjs
 ```
 
-Harness mem-mock `SpreadsheetApp`, `PropertiesService`, `LockService`, `Utilities`, `CacheService`, `ContentService`, dan `Logger`, serta memuat `seed.gs` ke sandbox yang sama. Saat ini **333 asersi** lulus.
+Harness mem-mock `SpreadsheetApp`, `PropertiesService`, `LockService`, `Utilities`, `CacheService`, `ContentService`, dan `Logger`, serta memuat `seed.gs` ke sandbox yang sama. Saat ini **340 asersi** lulus.
 
 ## Struktur tab
 
@@ -351,7 +351,7 @@ node google-apps-script/local-tests/mock-harness.mjs
 
 1. `setupBackend` + mode direct + `REQUIRE_PROXY_KEY`.
 2. Login via hash (`apiHashForUser_`); token tamper/expired; token lama dicabut setelah ganti/reset password.
-3. `bootstrap` superadmin/publik/agen/pengemudi/pelanggan; proyeksi tanpa KYC/NIK/rekening; filter baris; `takenSeats`; agensi pending; pengemudi/pelanggan menerima data yang diperlukan.
+3. `bootstrap` superadmin/publik/agen/pengemudi/pelanggan; proyeksi tanpa KYC/NIK/rekening; filter baris; `takenSeats`; agensi pending; pengemudi/pelanggan menerima data yang diperlukan; armada tautan pengemudi (utama/cadangan) ikut bootstrap meski belum dipakai jadwal, dengan proyeksi publik tetap tanpa tautan.
 4. `commit`: upsert/delete/konflik/role/ID duplikat/field rahasia/self-delete; hash password bertahan saat commit profil.
 5. `sync`: kepemilikan, revisi, kursi ganda, booking/payment/ledger palsu, nominal, voucher, refund, transisi status, larangan delete, rute/armada/jadwal/pengemudi, tiket support, notifikasi, serta whitelist field untuk menutup injeksi refund/maintenance/`paidOutAt` dan penyalahgunaan data pengemudi. Hold booking baru ditentukan server (15 menit) dan tidak boleh diperpanjang; pembayaran tidak boleh lunas saat booking masih pending.
 6. `changePassword` dan throttle login/ganti password.
@@ -405,12 +405,12 @@ node google-apps-script/local-tests/mock-harness.mjs
 - `google-apps-script/code.gs:810-1031` — `apiColumnSpec_` (prefix `x:`), `apiTables_`, validasi skema, guard sel 45.000 karakter.
 - `google-apps-script/code.gs:1032-1355` — engine tulis/baca kolom: `apiBuildChildRows_` (cabang blob & sblob) dan `apiReadCollection_` (gabung chunk).
 - `google-apps-script/code.gs:1356-1696` — meta/rev, health, `doGet`/`doPost`, dispatch.
-- `google-apps-script/code.gs:1697-2302` — login, register, bootstrap dan filter per peran.
-- `google-apps-script/code.gs:2305-2579` — ganti password, admin user.
-- `google-apps-script/code.gs:2580-4592` — engine `sync` + validator per koleksi (agensi di ~3330, whitelist pengemudi di 3460, booking/payment/ledger, voucher, notifikasi, tiket, route request, lintas koleksi).
-- `google-apps-script/code.gs:4593-akhir` — `apiCommit_`, penerapan koleksi, preservasi secret.
+- `google-apps-script/code.gs:1697-2310` — login, register, bootstrap dan filter per peran.
+- `google-apps-script/code.gs:2313-2587` — ganti password, admin user.
+- `google-apps-script/code.gs:2588-4600` — engine `sync` + validator per koleksi (agensi di ~3339, whitelist pengemudi di 3446, booking/payment/ledger, voucher, notifikasi, tiket, route request, lintas koleksi).
+- `google-apps-script/code.gs:4601-akhir` — `apiCommit_`, penerapan koleksi, preservasi secret.
 - `google-apps-script/appsscript.json` — manifest dan OAuth scope.
-- `google-apps-script/local-tests/mock-harness.mjs` — 333 asersi mock (termasuk round-trip v2, blob chunk, migrasi `ensureSchema` + penghapusan kolom selfie, cek slot sadar-skema, alamat berjenjang pengemudi, foto pengemudi/kendaraan di tab sblob, dan upload KTP besar lewat jalur agen).
+- `google-apps-script/local-tests/mock-harness.mjs` — 340 asersi mock (termasuk round-trip v2, blob chunk, migrasi `ensureSchema` + penghapusan kolom selfie, cek slot sadar-skema, alamat berjenjang pengemudi, foto pengemudi/kendaraan di tab sblob, upload KTP besar lewat jalur agen, dan armada tautan pengemudi pada bootstrap).
 - `transaceh-react/src/lib/db.js` — cache, diff, antrean sync, rollback.
 - `transaceh-react/src/lib/sheetsApi.js` — transport direct.
 - `transaceh-react/src/lib/remote.js` — bootstrap, login, logout, hydrate revisi.

@@ -2178,11 +2178,19 @@ function apiBootstrapData_(ss, meta, role, user) {
         driverBookingIds[String((entry && entry.bookingId) || '')];
     }));
     put('vouchers', read('vouchers'));
+    // Kendaraan tempat pengemudi ditugaskan (utama/cadangan/kerjasama) ikut
+    // walau belum dipakai jadwal — dipakai kartu ID pengemudi (nomor pol) dan
+    // halaman armada pengemudi. Proyeksi: field publik + tautan pengemudi agar
+    // klien bisa mencocokkan; proyeksi publik/pelanggan tidak berubah.
+    var driverVehicleFields = API_PUBLIC_FIELDS.vehicles.concat(['driverId', 'backDriverId', 'coopDriverId']);
     put('vehicles', vehicles.filter(function (v) {
       var vid = String((v && v.id) || '');
-      return driverVehicleIds[vid] || (driverId && String(v.coopDriverId || '') === driverId);
+      var own = driverId && (String(v.driverId || '') === driverId ||
+        String(v.backDriverId || '') === driverId ||
+        String(v.coopDriverId || '') === driverId);
+      return driverVehicleIds[vid] || own;
     }).map(function (v) {
-      return apiPickFields_(v, API_PUBLIC_FIELDS.vehicles);
+      return apiPickFields_(v, driverVehicleFields);
     }));
     put('maintenanceRequests', read('maintenanceRequests').filter(function (m) {
       return driverId && String((m && m.driverId) || '') === driverId;
