@@ -168,9 +168,6 @@ export function openPayment(bid, openModal) {
 export default function Search() {
   const { bw, setBw, user, go, toast, refresh, tick, payMethod, setPayMethod, openModal } = useApp();
   void tick;
-  /* Bulan yang ditampilkan kalender langkah 2 ('YYYY-MM'); null = mengikuti
-     tanggal terpilih / bulan berjalan. Hanya konteks tampilan — tidak menyentuh bw. */
-  const [calMonth, setCalMonth] = useState(null);
 
   const allRoutes = DB.load('routes', []);
   const routes = allRoutes.filter(routeBookable);
@@ -341,45 +338,15 @@ export default function Search() {
         mo: dt.toLocaleDateString('id-ID', { month: 'short' }),
       });
     }
-    /* Tata letak kalender: satu bulan per pandangan, tanggal sejajar kolom hari
-       (Senin pertama). Panah bulan terkunci pada rentang hari ini + 30 hari.
-       Kartu tanggal & hitungan "N tersedia" persis desain semula — hanya
-       posisinya disusun ulang; tanggal di luar rentang jadi sel kosong. */
-    const byDate = new Map(days.map((x) => [x.d, x]));
-    const startKey = todayStr(0), endKey = todayStr(30);
-    const ymOf = (s) => Number(s.slice(0, 4)) * 12 + (Number(s.slice(5, 7)) - 1);
-    const viewKey = calMonth || (bw.date ? bw.date.slice(0, 7) : startKey.slice(0, 7));
-    const vYm = ymOf(viewKey);
-    const vy = Math.floor(vYm / 12), vm = vYm % 12;
-    const moveMonth = (dir) => {
-      const nv = new Date(vy, vm + dir, 1);
-      setCalMonth(nv.getFullYear() + '-' + String(nv.getMonth() + 1).padStart(2, '0'));
-    };
-    const lead = (new Date(vy, vm, 1).getDay() + 6) % 7;
-    const dim = new Date(vy, vm + 1, 0).getDate();
-    const monthLabel = new Date(vy, vm, 1).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
     return (
       <>
         <h3 className="font-extrabold text-[16px]">Pilih Tanggal Keberangkatan</h3><p className="text-[12px] text-slate-500 font-medium">Hijau = ada armada tersedia • Merah = 0 tersedia</p>
-        <div className="flex items-center justify-center gap-3 mt-3">
-          <button disabled={vYm <= ymOf(startKey)} onClick={() => moveMonth(-1)} aria-label="Bulan sebelumnya" className="w-9 h-9 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-200 active:scale-95 transition"><Icon name="arrow-left" className="w-4 h-4" /></button>
-          <div className="font-extrabold text-[15px] min-w-[150px] text-center">{monthLabel}</div>
-          <button disabled={vYm >= ymOf(endKey)} onClick={() => moveMonth(1)} aria-label="Bulan berikutnya" className="w-9 h-9 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-200 active:scale-95 transition"><Icon name="arrow-right" className="w-4 h-4" /></button>
-        </div>
-        <div className="grid grid-cols-7 gap-1 sm:gap-2 mt-3">
-          {Array.from({ length: lead }).map((_, i) => <div key={'lead' + i}></div>)}
-          {Array.from({ length: dim }).map((_, i) => {
-            const key = viewKey + '-' + String(i + 1).padStart(2, '0');
-            const x = byDate.get(key);
-            if (!x) return <div key={key}></div>;
-            return (
-              <button key={x.d} onClick={() => setBw({ ...bw, date: x.d, scheduleId: null, seats: [], passengers: [], pickup: '', pickupAddr: '', pickupCoords: '', voucher: '', discount: 0 })} className={'rounded-2xl border-2 p-1.5 sm:p-2.5 text-center transition ' + (bw.date === x.d ? 'border-sky-500 bg-sky-600 text-white shadow-lg' : x.avail > 0 ? 'border-green-200 bg-green-50 hover:border-green-400' : 'border-red-100 bg-red-50 opacity-70')}>
-                <div className={'text-[10px] font-extrabold uppercase ' + (bw.date === x.d ? 'text-sky-200' : '')}>{x.wd}</div><div className="font-extrabold text-[16px] sm:text-[18px] leading-none my-0.5">{x.dn}</div><div className="text-[10px] font-bold">{x.mo}</div>
-                <div className={'badge mt-1.5 mx-auto !text-[10px] ' + (x.avail > 0 ? 'bg-green-500 text-white' : 'bg-red-500 text-white')}>{x.avail}<span className="hidden sm:inline"> tersedia</span></div>
-              </button>
-            );
-          })}
-        </div>
+        <div className="grid grid-cols-4 sm:grid-cols-7 gap-2 mt-3">{days.map((x) => (
+          <button key={x.d} onClick={() => setBw({ ...bw, date: x.d, scheduleId: null, seats: [], passengers: [], pickup: '', pickupAddr: '', pickupCoords: '', voucher: '', discount: 0 })} className={'rounded-2xl border-2 p-2.5 text-center transition ' + (bw.date === x.d ? 'border-sky-500 bg-sky-600 text-white shadow-lg' : x.avail > 0 ? 'border-green-200 bg-green-50 hover:border-green-400' : 'border-red-100 bg-red-50 opacity-70')}>
+            <div className={'text-[10px] font-extrabold uppercase ' + (bw.date === x.d ? 'text-sky-200' : '')}>{x.wd}</div><div className="font-extrabold text-[18px] leading-none my-0.5">{x.dn}</div><div className="text-[10px] font-bold">{x.mo}</div>
+            <div className={'badge mt-1.5 mx-auto !text-[10px] ' + (x.avail > 0 ? 'bg-green-500 text-white' : 'bg-red-500 text-white')}>{x.avail} tersedia</div>
+          </button>
+        ))}</div>
         {wizNav(true, true)}
       </>
     );
