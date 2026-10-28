@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { agencyPending } from '@/lib/domain.js';
+import { agencyPending, driverForUser } from '@/lib/domain.js';
 import { Icon } from '@/components/ui.jsx';
 import NotifModal from '@/pages/Notif.jsx';
 
@@ -23,6 +23,9 @@ export default function Header() {
   const { user, go, t, lang, setLang, openModal, logout, setAgenTab } = useApp();
   const clock = useClock();
   const unread = user ? DB.load('notifications', []).filter((n) => n.to === user.email && !n.read).length : 0;
+  /* Logo profil pengemudi di header memakai foto profil driver (drivers.photo);
+     peran lain tetap memakai inisial nama. */
+  const drvPhoto = user && user.role === 'pengemudi' ? ((driverForUser(user) || {}).photo || '') : '';
 
   const avatarDest = () => {
     if (!user) return;
@@ -60,8 +63,8 @@ export default function Header() {
                 <div className="text-[13px] font-bold">{user.name}</div>
                 <div className="text-[10px] uppercase tracking-wider font-extrabold text-sky-300">{user.role}</div>
               </div>
-              <button onClick={avatarDest} aria-label={user.role === 'pengemudi' ? 'Profil Driver' : 'Profil'} className="w-10 h-10 rounded-full bg-gradient-to-br from-sky-400 to-blue-600 flex items-center justify-center font-extrabold text-sm border-2 border-white/30 active:scale-95">
-                {(user.name[0] || '?').toUpperCase()}
+              <button onClick={avatarDest} aria-label={user.role === 'pengemudi' ? 'Profil Driver' : 'Profil'} className="w-10 h-10 rounded-full bg-gradient-to-br from-sky-400 to-blue-600 flex items-center justify-center font-extrabold text-sm border-2 border-white/30 active:scale-95 overflow-hidden">
+                {drvPhoto ? <img src={drvPhoto} alt={user.name} className="w-full h-full object-cover" /> : (user.name[0] || '?').toUpperCase()}
               </button>
               <button onClick={logout} title={t('logout')} aria-label={t('logout')} className="w-10 h-10 rounded-full bg-white/10 hover:bg-red-500 active:scale-95 flex items-center justify-center transition">
                 <Icon name="log-out" className="w-4 h-4" />

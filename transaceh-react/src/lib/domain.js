@@ -506,6 +506,14 @@ export function backupDriverForVehicle(v) {
   return driverBySnapshot(v.agencyId, { name: v.backName, phone: v.backPhone, sim: v.backSim });
 }
 
+/** Kendaraan yang dikawal seorang pengemudi: posisi utama dulu, lalu pengganti.
+ *  Dipakai mis. untuk nomor polisi pada kartu ID pengemudi. */
+export function vehicleForDriver(d) {
+  if (!d || !d.id) return null;
+  const vs = DB.load('vehicles', []);
+  return vs.find((v) => v.driverId === d.id) || vs.find((v) => v.backDriverId === d.id) || null;
+}
+
 /* ---------- Profil driver: isi sendiri + verifikasi agen ----------
    Field yang langsung berlaku: kontak, alamat, rekening, foto profil.
    Field identitas/dokumen: disimpan sebagai usulan, berlaku setelah disetujui agen. */

@@ -87,6 +87,22 @@ input, select, textarea { font-size: 16px !important; }
   .no-print { display: none !important; }
   .print-only { display: block !important; }
   body { background: #fff; }
+  /* Cetak kartu ID pengemudi: hanya kartu yang tampil, ukuran fisik
+     ISO ID-1 potrait (54 x 85,6 mm). Kelas body dipasang sementara oleh
+     tombol "Cetak Kartu" di halaman profil pengemudi. */
+  body.idcard-printing * { visibility: hidden !important; }
+  body.idcard-printing .idcard-print, body.idcard-printing .idcard-print * { visibility: visible !important; }
+  body.idcard-printing .idcard-print {
+    position: fixed !important;
+    top: 12mm;
+    width: 54mm !important; height: 85.6mm !important;
+    max-width: none !important; margin: 0 !important;
+    box-shadow: none !important;
+  }
+  /* Muka depan kiri + muka belakang kanan, berpasangan di tengah halaman
+     dengan jarak potong 2 mm di antaranya. */
+  body.idcard-printing .idcard-front { left: calc(50% - 55mm); }
+  body.idcard-printing .idcard-back { left: calc(50% + 1mm); }
 }
 .print-only { display: none; }
 .toast-in { animation: pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
