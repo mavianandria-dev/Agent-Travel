@@ -168,6 +168,11 @@ export function openPayment(bid, openModal) {
 export default function Search() {
   const { bw, setBw, user, go, toast, refresh, tick, payMethod, setPayMethod, openModal } = useApp();
   void tick;
+  /* Bulan yang dipandang pada langkah "Pilih Tanggal" (kunci y*12+m).
+     null = turunkan dari tanggal yang sudah terpilih supaya kartu yang
+     aktif langsung terlihat saat langkah dibuka. */
+  const [calMonth, setCalMonth] = useState(null);
+  useEffect(() => { if (bw.step <= 1) setCalMonth(null); }, [bw.step]);
 
   const allRoutes = DB.load('routes', []);
   const routes = allRoutes.filter(routeBookable);
@@ -323,25 +328,47 @@ export default function Search() {
   );
 
   const renderStep2 = () => {
-    const days = [];
+    /* Perpindah bulan pada pilihan tanggal: hari ini s.d. 30 hari ke depan
+       dipandang per bulan dengan panah yang terkunci di batas rentang.
+       Tanpa scroll dan tanpa penyejajaran kolom hari — ponsel 4 kolom,
+       desktop 7 kolom; kartu tanggal tetap desain lama. */
     const allSchedules = DB.load('schedules', []);
-    /* Tampilkan hari ini sampai 30 hari ke depan agar seluruh jadwal seed bisa dipilih. */
+    const dayMap = {};
     for (let i = 0; i <= 30; i++) {
       const d = todayStr(i);
       const list = allSchedules.filter((x) => selectedRouteIds.has(x.routeId) && x.date === d && routeBookable(routeById(x.routeId)) && !isRouteSuspended(routeById(x.routeId), x.agencyId));
       const avail = list.filter((s) => schedReady(s) && seatsLeft(s.id) > 0).length;
       const dt = new Date(d);
-      days.push({
+      dayMap[d] = {
         d, avail,
         wd: dt.toLocaleDateString('id-ID', { weekday: 'short' }),
         dn: dt.getDate(),
         mo: dt.toLocaleDateString('id-ID', { month: 'short' }),
-      });
+      };
+    }
+    const rs = todayStr(0), re = todayStr(30);
+    const minKey = Number(rs.slice(0, 4)) * 12 + Number(rs.slice(5, 7)) - 1;
+    const maxKey = Number(re.slice(0, 4)) * 12 + Number(re.slice(5, 7)) - 1;
+    const viewKey = calMonth || (bw.date && bw.date >= rs && bw.date <= re ? Number(bw.date.slice(0, 4)) * 12 + Number(bw.date.slice(5, 7)) - 1 : minKey);
+    const viewY = Math.floor(viewKey / 12), viewM = viewKey % 12;
+    const monthLabel = new Date(viewY, viewM, 1).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+    const dim = new Date(viewY, viewM + 1, 0).getDate();
+    const cells = [];
+    for (let day = 1; day <= dim; day++) {
+      const ds = viewY + '-' + String(viewM + 1).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+      if (ds > re) break; /* melewati batas rentang — sisa bulan tidak digambar */
+      if (ds < rs) continue; /* sebelum rentang: lewati */
+      cells.push(dayMap[ds]);
     }
     return (
       <>
         <h3 className="font-extrabold text-[16px]">Pilih Tanggal Keberangkatan</h3><p className="text-[12px] text-slate-500 font-medium">Hijau = ada armada tersedia • Merah = 0 tersedia</p>
-        <div className="grid grid-cols-4 sm:grid-cols-7 gap-2 mt-3">{days.map((x) => (
+        <div className="flex items-center justify-center gap-2 mt-3">
+          <button disabled={viewKey <= minKey} onClick={() => setCalMonth(viewKey - 1)} aria-label="Bulan sebelumnya" className="w-9 h-9 rounded-xl bg-slate-100 text-slate-600 font-extrabold flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-200 active:scale-95 transition"><Icon name="arrow-left" className="w-4 h-4" /></button>
+          <div className="font-extrabold text-[14px] w-40 text-center">{monthLabel}</div>
+          <button disabled={viewKey >= maxKey} onClick={() => setCalMonth(viewKey + 1)} aria-label="Bulan berikutnya" className="w-9 h-9 rounded-xl bg-slate-100 text-slate-600 font-extrabold flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-200 active:scale-95 transition"><Icon name="arrow-right" className="w-4 h-4" /></button>
+        </div>
+        <div className="grid grid-cols-4 sm:grid-cols-7 gap-2 mt-3">{cells.map((x) => (
           <button key={x.d} onClick={() => setBw({ ...bw, date: x.d, scheduleId: null, seats: [], passengers: [], pickup: '', pickupAddr: '', pickupCoords: '', voucher: '', discount: 0 })} className={'rounded-2xl border-2 p-2.5 text-center transition ' + (bw.date === x.d ? 'border-sky-500 bg-sky-600 text-white shadow-lg' : x.avail > 0 ? 'border-green-200 bg-green-50 hover:border-green-400' : 'border-red-100 bg-red-50 opacity-70')}>
             <div className={'text-[10px] font-extrabold uppercase ' + (bw.date === x.d ? 'text-sky-200' : '')}>{x.wd}</div><div className="font-extrabold text-[18px] leading-none my-0.5">{x.dn}</div><div className="text-[10px] font-bold">{x.mo}</div>
             <div className={'badge mt-1.5 mx-auto !text-[10px] ' + (x.avail > 0 ? 'bg-green-500 text-white' : 'bg-red-500 text-white')}>{x.avail} tersedia</div>
