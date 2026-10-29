@@ -276,6 +276,7 @@ function DriverBookingModal({ sid }) {
   const [payMethod, setPayMethod] = useState('QRIS');
   const [step, setStep] = useState(1);
   const [made, setMade] = useState(null);
+  const [paying, setPaying] = useState(false);
   const rows = [...pax].sort((a, b) => seatOrder.indexOf(a.seat) - seatOrder.indexOf(b.seat));
   if (!s) return <div className="p-6 font-bold text-slate-500">Jadwal tidak ditemukan</div>;
 
@@ -322,9 +323,17 @@ function DriverBookingModal({ sid }) {
     refresh();
   };
 
-  const pay = () => {
+  const pay = async () => {
+    if (paying) return;
     const res = confirmDriverBookingPayment(made.id);
     if (!res.ok) { toast(res.msg, 'err'); return; }
+    /* Mode Sheets menulis optimistis: toast sukses menunggu konfirmasi
+       server — bila ditolak, cache di-rollback dan handler sync sudah
+       menampilkan toast merah dengan alasannya. */
+    setPaying(true);
+    const fl = await DB.flush();
+    setPaying(false);
+    if (fl && fl.ok === false) { closeModal(); refresh(); return; }
     toast('Pembayaran berhasil. Tiket ' + res.booking.code, 'ok');
     closeModal();
     refresh();
@@ -351,7 +360,7 @@ function DriverBookingModal({ sid }) {
           <div className="flex justify-between font-extrabold"><span>Untuk pengemudi</span><span className="text-sky-700">{fmtRp(fare.ticket)}</span></div>
         </div>
         <div className="text-[11px] text-slate-400 font-semibold mt-2">Kode booking: <b className="font-mono">{made.code}</b> • Kursi {made.seats.join(', ')}</div>
-        <button onClick={pay} className="mt-4 w-full bg-green-500 hover:bg-green-600 text-white font-extrabold py-3.5 rounded-2xl transition flex items-center justify-center gap-2"><Icon name="circle-check-big" className="w-5 h-5" />Pembayaran Berhasil</button>
+        <button onClick={pay} disabled={paying} className="mt-4 w-full bg-green-500 hover:bg-green-600 text-white font-extrabold py-3.5 rounded-2xl transition flex items-center justify-center gap-2 disabled:opacity-60 disabled:hover:bg-green-500"><Icon name="circle-check-big" className="w-5 h-5" />{paying ? 'Menyimpan pembayaran…' : 'Pembayaran Berhasil'}</button>
       </div>
     );
   }

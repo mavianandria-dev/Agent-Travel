@@ -67,6 +67,7 @@ function calcDiscount(voucher, scheduleId, seatCount) {
 export function PaymentModal({ booking, onDone }) {
   const { closeModal, go, toast, setBw, refresh } = useApp();
   const [now, setNow] = useState(Date.now());
+  const [paying, setPaying] = useState(false);
 
   useEffect(() => {
     const iv = setInterval(() => {
@@ -110,7 +111,8 @@ export function PaymentModal({ booking, onDone }) {
   const _ps = schedById(booking.scheduleId);
   const _fare = splitFare(_ps, (booking.seats || []).length, booking.discount || 0);
 
-  const simulatePay = () => {
+  const simulatePay = async () => {
+    if (paying) return;
     const arr = DB.load('bookings', []);
     const b = arr.find((x) => x.id === booking.id);
     if (!b) return;
@@ -122,6 +124,12 @@ export function PaymentModal({ booking, onDone }) {
       go('tickets');
       return;
     }
+    /* Mode Sheets menulis secara optimistis: cache berubah dulu, server
+       dipanggil belakangan. Toast sukses ditunda sampai server mengonfirmasi
+       — bila ditolak (hold kedaluwarsa menurut jam server, revisi koleksi
+       berubah, atau sesi habis), cache di-rollback dan handler sync sudah
+       menampilkan toast merah dengan alasan persisnya. */
+    setPaying(true);
     b.status = 'paid';
     b.paidAt = new Date().toISOString();
     b.fare = splitFare(s, (b.seats || []).length, b.discount || 0);
@@ -135,6 +143,14 @@ export function PaymentModal({ booking, onDone }) {
     audit('payment_paid', b.code + ' • ' + fmtRp(b.total));
     notify(b.userEmail, 'Pembayaran berhasil — ' + b.code, 'E-tiket QR terbit. Tunjukkan ke pengemudi saat boarding.', 'WA+Email');
     refresh();
+    const res = await DB.flush();
+    setPaying(false);
+    if (res && res.ok === false) {
+      closeModal();
+      refresh();
+      go('tickets');
+      return;
+    }
     closeModal();
     toast('Pembayaran sukses! E-tiket terbit.', 'ok');
     clearCheckoutDraft();
@@ -162,7 +178,7 @@ export function PaymentModal({ booking, onDone }) {
       <div className="mt-4 space-y-1 text-[13px] font-semibold"><div className="flex justify-between"><span>Tiket (sopir)</span><span>{fmtRp(_fare.ticket)}</span></div><div className="flex justify-between"><span>Jasa agen</span><span>{fmtRp(_fare.service)}</span></div><div className="flex justify-between"><span>Fee platform</span><span>{fmtRp(_fare.fee)}</span></div></div>
       <div className="flex justify-between font-extrabold text-[15px] mt-2"><span>Total</span><span className="text-sky-700">{fmtRp(booking.total)}</span></div>
       <div className="text-[11px] text-slate-400 font-semibold">Kode booking: <b className="font-mono">{booking.code}</b></div>
-      <button onClick={simulatePay} className="w-full mt-4 bg-green-500 hover:bg-green-600 text-white font-extrabold py-3.5 rounded-2xl transition flex items-center justify-center gap-2"><Icon name="circle-check-big" className="w-5 h-5" />Simulasi: Saya Sudah Bayar</button>
+      <button onClick={simulatePay} disabled={paying} className="w-full mt-4 bg-green-500 hover:bg-green-600 text-white font-extrabold py-3.5 rounded-2xl transition flex items-center justify-center gap-2 disabled:opacity-60 disabled:hover:bg-green-500"><Icon name="circle-check-big" className="w-5 h-5" />{paying ? 'Menyimpan pembayaran…' : 'Simulasi: Saya Sudah Bayar'}</button>
       <button onClick={() => { closeModal(); go('tickets'); }} className="w-full mt-2 bg-slate-100 font-bold text-[13px] py-2.5 rounded-2xl">Bayar Nanti (lihat tiket)</button>
       <p className="text-[11px] text-slate-400 text-center mt-2 font-medium">Terintegrasi Midtrans / Xendit (mode simulasi)</p>
     </div>

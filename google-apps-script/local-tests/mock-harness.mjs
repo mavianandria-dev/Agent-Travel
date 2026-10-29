@@ -1096,6 +1096,12 @@ const syncBooking = {
 };
 res = sync({ bookings: { baseRev: bookingBase, upserts: [syncBooking], deletes: [] } }, custToken);
 ok('sync pelanggan membuat booking di kursi kosong sukses', res.ok === true && res.data.revisions.bookings === bookingBase + 1, res);
+ok('respons sync booking membawa catatan pengemudi jadwal (s_1 → d_1 Bang Jamil)',
+  res.data && res.data.scheduleNotes && res.data.scheduleNotes.s_1 &&
+  res.data.scheduleNotes.s_1.driverId === 'd_1' &&
+  res.data.scheduleNotes.s_1.driverName === 'Bang Jamil' &&
+  res.data.scheduleNotes.s_1.driverPhone === '0812000003',
+  res.data && res.data.scheduleNotes);
 const holdRec = readRec('bookings', 'b_sync_1');
 const holdMs = holdRec ? Date.parse(holdRec.holdExpiry) : NaN;
 ok('server menimpa holdExpiry booking baru menjadi 15 menit',
@@ -1350,10 +1356,13 @@ const syncPayment = {
 };
 const syncLedger = {
   id: 'l_sync_1', agencyId: 'ag_1', bookingId: 'b_sync_1',
-  scheduleId: 's_1', driverId: 'd_1', userEmail: 'cust1@test.local',
+  scheduleId: 's_1', userEmail: 'cust1@test.local',
   seats: ['A4'], ticket: 128889, service: 10000, fee: 11111, total: 150000,
   status: 'ditahan', createdAt: '2026-10-24T05:20:00.000Z'
 };
+/* Sengaja TANPA driverId: itulah payload nyata pelanggan — proyeksi jadwal
+   publik/pelanggan menyembunyikan pengemudi, dan cache jadwal bisa basi
+   saat bayar segera setelah checkout. Server harus mengisinya sendiri. */
 res = sync({ payments: { baseRev: payBase, upserts: [syncPayment], deletes: [] } }, custToken);
 ok('sync pelanggan membuat pembayaran booking sendiri',
   res.ok === true && res.data.revisions.payments === payBase + 1, res);
@@ -1372,6 +1381,9 @@ ok('sync pelanggan menyelesaikan pembayaran+ledger booking sendiri',
   res.ok === true &&
   res.data.revisions.payments === payBase + 2 &&
   res.data.revisions.ledger === ledgerBase + 1, res);
+ok('server mengisi driverId ledger dari jadwal (klien pelanggan tidak selalu tahu)',
+  String(readRec('ledger', 'l_sync_1').driverId || '') === 'd_1',
+  readRec('ledger', 'l_sync_1'));
 const pSyncPaid = readRec('payments', 'p_sync_1');
 res = sync({ payments: { baseRev: revOf('payments'), upserts: [Object.assign({}, syncPayment, {
   id: 'p_sync_2', bookingId: 'b_4'

@@ -2692,13 +2692,17 @@ function apiSync_(req, cfg) {
     }
     apiSyncCrossValidate_(ctx);
 
+    /* Catatan pengemudi tumpangan respons — dibangun sebelum penerapan
+       (ctx.current masih prapenerapan, touchedSchedules sudah lengkap). */
+    var scheduleNotes = apiSyncScheduleNotes_(ctx);
+
     var revisions = {};
     for (var a = 0; a < keys.length; a++) {
       revisions[keys[a]] = apiApplyCollection_(ss, keys[a], changes[keys[a]], meta);
     }
     apiUpdateMeta_(ss, meta);
     SpreadsheetApp.flush();
-    return { ok: true, data: { touched: keys, revisions: revisions } };
+    return { ok: true, data: { touched: keys, revisions: revisions, scheduleNotes: scheduleNotes } };
   } finally {
     lock.releaseLock();
   }
@@ -2864,6 +2868,44 @@ function apiSyncMergeList_(ctx, key) {
   var deletes = (ctx.changes[key] && ctx.changes[key].deletes) || [];
   for (var d = 0; d < deletes.length; d++) delete map[String(deletes[d])];
   return Object.keys(map).map(function (k) { return map[k]; });
+}
+
+/**
+ * Ringkasan pengemudi pada jadwal yang tersentuh transaksi sync (checkout,
+ * pembayaran, transisi trip, dst.). Menumpang respons sync supaya tampilan
+ * tiket pelanggan langsung memuat nama/telepon pengemudi tanpa memuat ulang
+ * data. Isinya sama dengan yang proyeksi bootstrap berikan untuk jadwal
+ * booking milik pengguna itu sendiri — tidak ada data baru yang bocor.
+ * Method ini harus dipanggil SEBELUM loop penerapan: bila pembangunannya
+ * gagal, seluruh request jadi error bersih tanpa setengah-tulisan di sheet.
+ */
+function apiSyncScheduleNotes_(ctx) {
+  var touchedKeys = Object.keys((ctx && ctx.touchedSchedules) || {});
+  if (!touchedKeys.length) return null;
+  var scheduleMap = apiIndexById_(apiSyncMergeList_(ctx, 'schedules'));
+  var driverMap = apiIndexById_(apiSyncMergeList_(ctx, 'drivers'));
+  function driverInfo(id, fallbackName) {
+    var idStr = String(id || '');
+    if (!idStr) return { id: '', name: String(fallbackName || ''), phone: '' };
+    var rec = driverMap[idStr];
+    return {
+      id: idStr,
+      name: rec && rec.name ? String(rec.name) : String(fallbackName || ''),
+      phone: rec && rec.phone ? String(rec.phone) : ''
+    };
+  }
+  var notes = {};
+  for (var i = 0; i < touchedKeys.length; i++) {
+    var schedule = scheduleMap[touchedKeys[i]];
+    if (!schedule) continue;
+    var main = driverInfo(schedule.driverId, schedule.driverName);
+    var backup = driverInfo(schedule.backupDriverId, schedule.backupName);
+    notes[touchedKeys[i]] = {
+      driverId: main.id, driverName: main.name, driverPhone: main.phone,
+      backupDriverId: backup.id, backupName: backup.name, backupPhone: backup.phone
+    };
+  }
+  return Object.keys(notes).length ? notes : null;
 }
 
 function apiSyncNumber_(value, fallback) {
@@ -4158,9 +4200,10 @@ function apiSyncValidateLedger_(ctx, target) {
           String(entry.agencyId || '') !== String(schedule.agencyId || '')) {
         throw apiError_('VALIDATION', 'Jadwal/agensi ledger tidak sesuai booking.');
       }
-      if (String(entry.driverId || '') !== String(schedule.driverId || '')) {
-        throw apiError_('VALIDATION', 'Pengemudi ledger tidak sesuai jadwal.');
-      }
+      /* driverId tidak selalu dikirim klien: proyeksi jadwal publik/pelanggan
+         menyembunyikan pengemudi, dan cache jadwal bisa basi saat ledger
+         dibuat segera setelah checkout. Server yang mengisi dari jadwal. */
+      entry.driverId = String(schedule.driverId || '');
       if (apiNormalizeEmail_(entry.userEmail) !== apiNormalizeEmail_(booking.userEmail)) {
         throw apiError_('VALIDATION', 'Email ledger tidak sesuai booking.');
       }
@@ -4206,10 +4249,11 @@ function apiSyncValidateLedger_(ctx, target) {
       }
       var targetSchedule = apiSyncFind_(ctx, 'schedules', entry.scheduleId);
       if (!targetSchedule ||
-          String(entry.agencyId || '') !== String(targetSchedule.agencyId || '') ||
-          String(entry.driverId || '') !== String(targetSchedule.driverId || '')) {
-        throw apiError_('VALIDATION', 'Jadwal/agensi/pengemudi ledger tidak sesuai.');
+          String(entry.agencyId || '') !== String(targetSchedule.agencyId || '')) {
+        throw apiError_('VALIDATION', 'Jadwal/agensi ledger tidak sesuai.');
       }
+      /* Alasan sama dengan ledger baru: server yang mengisi driverId. */
+      entry.driverId = String(targetSchedule.driverId || '');
       if (JSON.stringify(entry.seats || []) !== JSON.stringify(booking.seats || [])) {
         throw apiError_('VALIDATION', 'Kursi ledger tidak sesuai booking.');
       }

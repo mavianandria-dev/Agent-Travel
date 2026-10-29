@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
 import { agencyOf, routeById, vehicleById, vehName, vehLayout, driverById, schedById, bookingsOf, agencyById, audit, splitFare, createLedger, canCancelBooking, canPayBooking, cancelBooking as cancelBookingDomain, refundRuleFor, refundPolicyText, bookedPassengers } from '@/lib/domain.js';
@@ -68,6 +69,7 @@ function CancelModal({ bid }) {
 export default function Bookings({ ag }) {
   const { user, filter, setFilter, toast, openModal, closeModal, refresh, tick } = useApp();
   void tick;
+  const [verifying, setVerifying] = useState(false);
   void todayStr;
   const agency = ag || agencyOf(user);
   if (!agency) return <div className="bg-white rounded-3xl shadow-card p-5 text-center font-bold text-slate-400">Data travel tidak ditemukan</div>;
@@ -81,7 +83,8 @@ export default function Bookings({ ag }) {
     return true;
   });
 
-  const verifyPay = (bid) => {
+  const verifyPay = async (bid) => {
+    if (verifying) return;
     const arr = DB.load('bookings', []);
     const b = arr.find((x) => x.id === bid);
     if (!b) return;
@@ -91,6 +94,10 @@ export default function Bookings({ ag }) {
       refresh();
       return;
     }
+    /* Mode Sheets menulis optimistis: toast sukses menunggu konfirmasi
+       server — bila ditolak, cache di-rollback dan handler sync sudah
+       menampilkan toast merah dengan alasannya. */
+    setVerifying(true);
     b.status = 'paid';
     b.paidAt = new Date().toISOString();
     b.fare = splitFare(s, (b.seats || []).length, b.discount || 0);
@@ -101,6 +108,9 @@ export default function Bookings({ ag }) {
     if (p) { p.status = 'paid'; p.fee = b.fare.fee; DB.save('payments', pays); }
     refresh();
     audit('verify_manual', b.code);
+    const res = await DB.flush();
+    setVerifying(false);
+    if (res && res.ok === false) { refresh(); return; }
     toast('Pembayaran ' + b.code + ' diverifikasi manual (transfer)');
     refresh();
   };
@@ -140,7 +150,7 @@ export default function Bookings({ ag }) {
               <tr key={b.id}><td className="font-mono font-extrabold">{b.code}</td><td className="font-semibold">{pax[0]?.name || '-'} {pax.length > 1 ? <span className="text-slate-400">+{pax.length - 1}</span> : null}<br /><span className="text-[12px] text-slate-400">{(b.seats || []).join(', ')}</span></td>
                 <td className="font-medium">{r.from}→{r.to}<br /><span className="text-slate-400 text-[12px]">{fmtDate(s.date)} {s.time}</span></td><td className="font-extrabold">{fmtRp(b.total)}</td><td><div className="flex items-center gap-1.5 flex-wrap"><BadgeStatus st={b.status} />{b.source === 'driver' ? <span className="badge bg-sky-100 text-sky-700">Pengemudi</span> : null}{b.tripStatus === 'missed' && b.status !== 'cancelled' ? <BadgeStatus st="missed" /> : null}</div></td>
                 <td className="whitespace-nowrap"><div className="flex gap-1.5">
-                  {b.status === 'pending' ? <button onClick={() => verifyPay(b.id)} title="Verifikasi manual" className="bg-green-100 text-green-700 p-2 rounded-lg"><Icon name="check-check" className="w-4 h-4" /></button> : null}
+                  {b.status === 'pending' ? <button onClick={() => verifyPay(b.id)} disabled={verifying} title="Verifikasi manual" className="bg-green-100 text-green-700 p-2 rounded-lg disabled:opacity-60"><Icon name="check-check" className="w-4 h-4" /></button> : null}
                   <button onClick={() => manifest(s.id)} title="Manifest" className="bg-sky-100 text-sky-700 p-2 rounded-lg"><Icon name="printer" className="w-4 h-4" /></button>
                   {canCancelBooking(b, s) ? <button onClick={() => cancelBooking(b.id)} className="bg-red-50 text-red-500 p-2 rounded-lg"><Icon name="x" className="w-4 h-4" /></button> : null}
                 </div></td></tr>

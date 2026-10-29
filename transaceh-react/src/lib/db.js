@@ -4,7 +4,11 @@
      lang, checkout draft, dan tiket support guest yang tetap di localStorage.
    - Tulisan optimistis: cache berubah dulu, lalu dikirim sebagai diff per
      koleksi dengan baseRev. Bila server menolak, cache di-rollback dan
-     pemanggil menerima notifikasi lewat setSyncErrorHandler(). */
+     pemanggil menerima notifikasi lewat setSyncErrorHandler().
+   - flush() selalu selesai dengan { ok, err? }: ok:false berarti batch
+     ditolak server (rollback sudah terjadi, handler sync sudah diberi tahu).
+     Alur yang butuh kepastian, mis. pembayaran, menunggu hasil ini sebelum
+     menampilkan toast sukses. */
 
 import { IS_SHEETS } from './runtime.js';
 import { sheetsApi, getToken } from './sheetsApi.js';
@@ -107,18 +111,80 @@ function buildChanges() {
   return Object.keys(changes).length ? { changes, snapshots } : null;
 }
 
+/** Tempel pasangan {field: nilai} pada baris ber-id sama di buffer cache
+    DAN snapshot server sekaligus, tanpa menandai kotor. Nilainya berasal
+    dari server (bukan suntingan lokal) dan server melarang klien pelanggan
+    menulis schedules/drivers — jadi tidak boleh berubah jadi diff tulis. */
+function patchStoredFields_(key, id, patch) {
+  const keys = Object.prototype.hasOwnProperty.call(serverSnapshot, key)
+    ? [serverSnapshot, cache]
+    : [cache];
+  keys.forEach((store) => {
+    const list = store[key];
+    if (!Array.isArray(list)) return;
+    const rec = list.find((r) => r && recordKey(r) === id);
+    if (!rec) return;
+    Object.keys(patch).forEach((field) => { rec[field] = patch[field]; });
+  });
+}
+
+/** Terima catatan pengemudi tumpangan respons sync (scheduleNotes per jadwal
+    tersentuh): tampalkan id/nama pengemudi pada baris jadwal + pastikan baris
+    mini pengemudi {id, name, phone} tersedia, sehingga tiket pelanggan
+    menampilkan nama/telepon pengemudi segera tanpa muat ulang. Tanpa menandai
+    kotor — nilainya berasal dari server. */
+function mergeScheduleNotes_(notes) {
+  if (!notes || typeof notes !== 'object') return 0;
+  let count = 0;
+  Object.keys(notes).forEach((sid) => {
+    const n = notes[sid];
+    if (!n || typeof n !== 'object') return;
+    const id = String(sid || '');
+    if (!id) return;
+    patchStoredFields_('schedules', id, {
+      driverId: String(n.driverId || ''),
+      driverName: String(n.driverName || ''),
+      backupDriverId: String(n.backupDriverId || ''),
+      backupName: String(n.backupName || '')
+    });
+    count += 1;
+    const roles = [
+      { idField: 'driverId', nameField: 'driverName', phoneField: 'driverPhone' },
+      { idField: 'backupDriverId', nameField: 'backupName', phoneField: 'backupPhone' }
+    ];
+    roles.forEach((role) => {
+      const did = String(n[role.idField] || '');
+      if (!did) return;
+      const name = typeof n[role.nameField] === 'string' ? n[role.nameField] : '';
+      const phone = typeof n[role.phoneField] === 'string' ? n[role.phoneField] : '';
+      [serverSnapshot, cache].forEach((store) => {
+        const list = store.drivers;
+        if (!Array.isArray(list)) return;
+        const rec = list.find((d) => d && String(d.id || '') === did);
+        if (rec) {
+          if (name) rec.name = name;
+          if (phone) rec.phone = phone;
+        } else {
+          list.push({ id: did, name, phone });
+        }
+      });
+    });
+  });
+  return count;
+}
+
 async function flush() {
   if (!IS_SHEETS || inFlight || !dirty.size) {
     if (inFlightPromise) return inFlightPromise;
-    return undefined;
+    return { ok: true };
   }
   const built = buildChanges();
-  if (!built) return undefined;
+  if (!built) return { ok: true };
 
   const token = getToken();
   if (!token) {
     /* Jangan kirim tulis tanpa sesi. Cache akan diganti saat login/bootstrap. */
-    return undefined;
+    return { ok: true };
   }
 
   const gen = generation;
@@ -127,7 +193,7 @@ async function flush() {
   inFlightPromise = (async () => {
     try {
       const data = await sheetsApi.sync(token, built.changes);
-      if (gen !== generation) return;
+      if (gen !== generation) return { ok: true };
       sentKeys.forEach((key) => {
         revisions[key] = Number((data && data.revisions && data.revisions[key]) || 0) || 0;
         if (key === 'users') {
@@ -147,6 +213,10 @@ async function flush() {
         if (JSON.stringify(cache[key]) !== JSON.stringify(built.snapshots[key])) dirty.add(key);
         else dirty.delete(key);
       });
+      /* Nama/telepon pengemudi tumpangan respons — ditempel ke cache + snapshot
+         supaya tiket lunas langsung menampilkan pengemudi tanpa muat ulang. */
+      const notesCount = mergeScheduleNotes_(data && data.scheduleNotes);
+      return { ok: true, notes: notesCount };
     } catch (err) {
       if (gen === generation) {
         sentKeys.forEach((key) => {
@@ -160,7 +230,10 @@ async function flush() {
         if (syncErrorHandler) {
           Promise.resolve(syncErrorHandler(err)).catch(() => {});
         }
+        return { ok: false, err };
       }
+      /* Batch basi karena sesi berganti (login/logout) — dianggap netral. */
+      return { ok: true };
     } finally {
       inFlight = false;
       inFlightPromise = null;
