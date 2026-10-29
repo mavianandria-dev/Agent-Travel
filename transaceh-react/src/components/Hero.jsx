@@ -9,9 +9,10 @@ export default function Hero() {
   const { view, user, bw, setBw, go, t } = useApp();
   const allRoutes = DB.load('routes', []).filter(routeBookable);
   const routeGroups = groupRoutes(allRoutes);
-  const currentRoute = allRoutes.find((r) => r.id === bw.routeId);
-  const [from, setFrom] = useState(currentRoute?.from || routeGroups[0]?.from || '');
-  const [to, setTo] = useState(currentRoute?.to || routeGroups[0]?.to || '');
+  /* Dari/Ke/Tanggal lahir 0 (belum memilih apa-apa) — di Beranda pengunjung
+     maupun pelanggan, pencarian hanya dianggap lengkap setelah dipilih. */
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
 
   if (view !== 'home') return null;
   if (user && ['agen', 'pengemudi', 'superadmin'].includes(user.role)) return null;
@@ -19,16 +20,19 @@ export default function Hero() {
   const banners = DB.load('banners', []).filter((b) => b.active);
   const schedCount = DB.load('schedules', []).filter((s) => s.date >= todayStr(0)).length;
   const fromOptions = [...new Set(routeGroups.map((g) => g.from))];
-  const activeFrom = fromOptions.includes(from) ? from : (fromOptions[0] || '');
-  const toOptions = [...new Set(routeGroups.filter((g) => g.from === activeFrom).map((g) => g.to))];
-  const activeTo = toOptions.includes(to) ? to : (toOptions[0] || '');
+  /* Default 0: tidak ada kota prapilihan — select menampillkan placeholder,
+     bukan jatuh ke kota pertama. */
+  const activeFrom = fromOptions.includes(from) ? from : '';
+  const toOptions = activeFrom ? [...new Set(routeGroups.filter((g) => g.from === activeFrom).map((g) => g.to))] : [];
+  const activeTo = toOptions.includes(to) ? to : '';
   const selectedGroup = routeGroups.find((g) => g.from === activeFrom && g.to === activeTo);
 
   const resetBw = (routeId) => setBw({ ...bw, routeId: routeId || '', step: 1, scheduleId: null, seats: [], passengers: [], pickup: '', pickupAddr: '', pickupCoords: '', voucher: '', discount: 0 });
 
   const changeFrom = (nextFrom) => {
     const nextToOptions = routeGroups.filter((g) => g.from === nextFrom).map((g) => g.to);
-    const nextTo = nextToOptions.includes(to) ? to : (nextToOptions[0] || '');
+    /* "Ke" ikut kembali 0 — bukan fallback ke kota pertama. */
+    const nextTo = nextToOptions.includes(to) ? to : '';
     setFrom(nextFrom);
     setTo(nextTo);
     const g = routeGroups.find((x) => x.from === nextFrom && x.to === nextTo);
@@ -43,7 +47,9 @@ export default function Hero() {
 
   const heroSearch = () => {
     if (!selectedGroup) return;
-    setBw({ ...bw, routeId: selectedGroup.routeId, step: 3, scheduleId: null, seats: [], passengers: [], pickup: '', pickupAddr: '', pickupCoords: '', voucher: '', discount: 0 });
+    /* Tanggal masih 0 → dibuka di langkah Pilih Tanggal; tanggal sudah
+       dipilih → langsung ke daftar armada (perilaku lama). */
+    setBw({ ...bw, routeId: selectedGroup.routeId, step: bw.date ? 3 : 2, scheduleId: null, seats: [], passengers: [], pickup: '', pickupAddr: '', pickupCoords: '', voucher: '', discount: 0 });
     go('search');
   };
 
@@ -65,6 +71,7 @@ export default function Hero() {
             <div className="min-w-0 flex-1">
               <div className="text-[9px] font-extrabold uppercase tracking-wider text-slate-400">Dari</div>
               <select aria-label="Dari" value={activeFrom} onChange={(e) => changeFrom(e.target.value)} className="bg-transparent font-bold w-full focus-ring rounded-lg py-1">
+                <option value="" disabled>Pilih kota…</option>
                 {fromOptions.map((x) => (<option key={x} value={x}>{x}</option>))}
               </select>
             </div>
@@ -74,14 +81,15 @@ export default function Hero() {
             <div className="min-w-0 flex-1">
               <div className="text-[9px] font-extrabold uppercase tracking-wider text-slate-400">Ke</div>
               <select aria-label="Ke" value={activeTo} onChange={(e) => changeTo(e.target.value)} className="bg-transparent font-bold w-full focus-ring rounded-lg py-1">
+                <option value="" disabled>Pilih kota…</option>
                 {toOptions.map((x) => (<option key={x} value={x}>{x}</option>))}
               </select>
             </div>
           </div>
           <div className="flex-1 flex items-center gap-2 px-3 py-1 bg-slate-50 rounded-2xl md:rounded-full min-h-[52px]"><Icon name="calendar" className="w-5 h-5 text-sky-600 shrink-0" />
-            <input type="date" value={bw.date} min={todayStr(0)} max={todayStr(30)} onChange={(e) => setBw({ ...bw, date: e.target.value || todayStr(1) })} className="bg-transparent font-bold w-full py-2" />
+            <input type="date" value={bw.date} min={todayStr(0)} max={todayStr(30)} onChange={(e) => setBw({ ...bw, date: e.target.value || '' })} className="bg-transparent font-bold w-full py-2" />
           </div>
-          <button onClick={heroSearch} disabled={!selectedGroup} className={'btn-touch bg-[#0b2447] hover:bg-sky-600 active:scale-[.98] transition text-white font-extrabold text-[15px] px-7 py-3.5 rounded-2xl md:rounded-full flex items-center justify-center gap-2 min-h-[52px] ' + (!selectedGroup ? 'opacity-50 cursor-not-allowed' : '')}><Icon name="search" className="w-4 h-4" />{t('search')}</button>
+          <button onClick={heroSearch} disabled={!selectedGroup} title={selectedGroup ? '' : 'Pilih Dari dan Ke dulu'} className={'btn-touch bg-[#0b2447] hover:bg-sky-600 active:scale-[.98] transition text-white font-extrabold text-[15px] px-7 py-3.5 rounded-2xl md:rounded-full flex items-center justify-center gap-2 min-h-[52px] ' + (!selectedGroup ? 'opacity-50 cursor-not-allowed' : '')}><Icon name="search" className="w-4 h-4" />{t('search')}</button>
         </div>
         <div className="anim anim-4 flex flex-wrap gap-2 mt-4">{banners.map((b) => (
           <span key={b.id || b.title} className="text-[12px] font-bold bg-gradient-to-r from-amber-400 to-orange-400 text-[#0b2447] px-3.5 py-1.5 rounded-full flex items-center gap-1.5"><Icon name="badge-percent" className="w-3.5 h-3.5" />{b.title}</span>

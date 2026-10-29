@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useApp } from '@/store/AppContext.jsx';
+import { useApp, freshBW } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
 import { schedById, schedReady, takenSeats, seatsLeft, routeById, vehicleById, driverById, vehLayout, schedSeatCap, audit, notify, vehName, splitFare, createLedger, routeBookable, isRouteSuspended, canPayBooking, scheduleIsPast, ensureHoldExpiry, agencyById, routeGroupKey, groupRoutes, routesInRouteGroup, scheduleMaintenance, maintenancePeriodLabel } from '@/lib/domain.js';
 import { fmtRp, todayStr, uid, fmtClock } from '@/lib/utils.js';
@@ -154,7 +154,7 @@ export function PaymentModal({ booking, onDone }) {
     closeModal();
     toast('Pembayaran sukses! E-tiket terbit.', 'ok');
     clearCheckoutDraft();
-    setBw({ step: 1, routeId: 'R1', date: todayStr(1), scheduleId: null, seats: [], passengers: [], pickup: '', pickupAddr: '', pickupCoords: '', voucher: '', discount: 0 });
+    setBw(freshBW());
     if (onDone) onDone(b.id);
     else go('ticket-detail:' + b.id);
   };
@@ -217,6 +217,7 @@ export default function Search() {
 
   const wizNext = () => {
     if (bw.step === 1 && !selectedGroup) return toast('Pilih rute dulu', 'warn');
+    if (bw.step === 2 && !bw.date) return toast('Pilih tanggal dulu', 'warn');
     if (bw.step === 3 && !bw.scheduleId) return toast('Pilih armada / jadwal dulu', 'warn');
     if (bw.step === 3 && bw.scheduleId && (!selectedRouteIds.has(schedById(bw.scheduleId)?.routeId) || !schedReady(schedById(bw.scheduleId)))) {
       setBw({ ...bw, scheduleId: null });

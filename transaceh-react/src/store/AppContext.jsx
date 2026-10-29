@@ -11,7 +11,10 @@ import { clearToken, getToken } from '@/lib/sheetsApi.js';
 const AppCtx = createContext(null);
 export const useApp = () => useContext(AppCtx);
 
-export const freshBW = () => ({ step: 1, routeId: 'R1', date: todayStr(1), scheduleId: null, seats: [], passengers: [], pickup: '', pickupAddr: '', pickupCoords: '', voucher: '', discount: 0 });
+/* Pemesanan lahir tanpa prapilihan RUTE (0), tetapi TANGGAL default hari
+   ini — selaras di pintu mana pun: menu Cari maupun Beranda pengunjung/
+   pelanggan. Dari/Ke wajib dipilih sendiri di wizard. */
+export const freshBW = () => ({ step: 1, routeId: '', date: todayStr(0), scheduleId: null, seats: [], passengers: [], pickup: '', pickupAddr: '', pickupCoords: '', voucher: '', discount: 0 });
 
 const CUSTOMER_VIEWS = ['home', 'search', 'tickets', 'history', 'profile', 'help'];
 export { CUSTOMER_VIEWS };

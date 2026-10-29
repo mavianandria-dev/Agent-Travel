@@ -1,22 +1,24 @@
-import { useApp } from '@/store/AppContext.jsx';
+import { useApp, freshBW } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
 import { setSession, audit, routeBookable, groupRoutes } from '@/lib/domain.js';
-import { todayStr } from '@/lib/utils.js';
 import { Icon } from '@/components/ui.jsx';
 import { clearCheckoutDraft } from '@/lib/checkoutDraft.js';
 import { IS_SHEETS } from '@/lib/runtime.js';
 
 export default function Home() {
-  const { go, toast, refresh, setBw, bw, tick } = useApp();
+  const { go, toast, refresh, setBw, tick } = useApp();
   void tick;
 
   const routeGroups = groupRoutes(DB.load('routes', []).filter(routeBookable));
   const reviews = DB.load('reviews', []);
   const ags = DB.load('agencies', []).filter((a) => a.status === 'active');
 
-  const quickBook = (routeId) => {
+  /* Semua pintu Cari dari Beranda (chip rute, "Lihat semua", "Pakai Sekarang")
+     membuka wizard yang benar-benar kosong: dari, ke, dan tanggal dipilih
+     ulang di Cari — tidak ada prapilihan (default 0). */
+  const openSearch = () => {
     clearCheckoutDraft();
-    setBw({ ...bw, step: 1, routeId, date: todayStr(1), scheduleId: null, seats: [], passengers: [], pickup: '', pickupAddr: '', pickupCoords: '', voucher: '', discount: 0 });
+    setBw(freshBW());
     go('search');
   };
 
@@ -46,10 +48,10 @@ export default function Home() {
       <div className="lg:col-span-2 space-y-4">
         <div className="anim bg-white rounded-3xl shadow-card p-5">
           <div className="flex items-center justify-between"><h2 className="font-extrabold text-[17px] flex items-center gap-2"><Icon name="route" className="w-5 h-5 text-sky-600" />Rute Populer</h2>
-            <button onClick={() => go('search')} className="text-[12px] font-bold text-sky-600 hover:underline">Lihat semua</button></div>
+            <button onClick={openSearch} className="text-[12px] font-bold text-sky-600 hover:underline">Lihat semua</button></div>
           <div className="grid sm:grid-cols-2 gap-3 mt-3">
             {routeGroups.map((g) => (
-              <div key={g.key} data-route-group={g.key} onClick={() => quickBook(g.routeId)} className="card-hover border-2 border-slate-100 bg-white rounded-2xl p-4 cursor-pointer">
+              <div key={g.key} data-route-group={g.key} onClick={openSearch} className="card-hover border-2 border-slate-100 bg-white rounded-2xl p-4 cursor-pointer">
                 <div className="font-extrabold text-[15px]">{g.from} <span className="text-sky-500">→</span> {g.to}</div>
               </div>
             ))}
@@ -86,7 +88,7 @@ export default function Home() {
         <div className="anim anim-3 bg-gradient-to-br from-sky-500 to-blue-700 text-white rounded-3xl p-5 shadow-card">
           <div className="font-extrabold text-[15px] flex items-center gap-2"><Icon name="badge-percent" className="w-5 h-5" />Punya kode promo?</div>
           <div className="text-[12.5px] opacity-90 font-medium mt-1">HEMAT20 — diskon 20% • CALANG50 — potong Rp15rb</div>
-          <button onClick={() => go('search')} className="mt-3 w-full bg-white text-sky-700 font-extrabold text-[13px] py-2.5 rounded-xl hover:bg-sky-50 transition">Pakai Sekarang</button>
+          <button onClick={openSearch} className="mt-3 w-full bg-white text-sky-700 font-extrabold text-[13px] py-2.5 rounded-xl hover:bg-sky-50 transition">Pakai Sekarang</button>
         </div>
       </div>
     </div>
