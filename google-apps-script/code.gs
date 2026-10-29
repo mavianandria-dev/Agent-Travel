@@ -64,6 +64,9 @@ var API_RATE_WINDOW_SECONDS = 15 * 60;
 var API_RATE_BLOCK_SECONDS = 15 * 60;
 var API_REGISTER_MAX_PER_HOUR = 30;
 
+/** Jangka waktu klien harus menyelesaikan pembayaran (hold kursi). */
+var API_HOLD_MS = 5 * 60 * 1000;
+
 /** Kunci koleksi harus sama persis dengan seed.gs. */
 var API_COLLECTION_KEYS = [
   'users', 'agencies', 'routes', 'routeRequests', 'vehicles', 'drivers',
@@ -1540,6 +1543,15 @@ function apiTakenSeatsMap_(bookings, vehiclesById, schedules) {
   (Array.isArray(bookings) ? bookings : []).forEach(function (booking) {
     var status = String((booking && booking.status) || '');
     if (status !== 'paid' && status !== 'done' && status !== 'pending') return;
+    /* Hold kursi = booking pending yang MASIH bisa dibayar. Pending dengan
+       hold kedaluwarsa lepas: tanpa ini checkout terbengkalai menahan kursi
+       selamanya dan tanggal tampil "0 tersedia" padahal jadwalnya belum
+       berangkat (selaras dengan aturan `canPayBooking` di klien). Tanpa
+       holdExpiry = hold tanpa batas (data lama) — tetap memegang kursi. */
+    if (status === 'pending') {
+      var hm = Date.parse((booking && booking.holdExpiry) || '');
+      if (isFinite(hm) && hm <= Date.now()) return;
+    }
     var sid = String((booking && booking.scheduleId) || '');
     if (!sid) return;
     var set = bySchedule[sid] || (bySchedule[sid] = {});
@@ -3833,7 +3845,7 @@ function apiSyncValidateBookings_(ctx, target) {
       rec.tripStatus = 'scheduled';
       /* Hold selalu ditentukan server: klien tidak boleh mengunci kursi
          dengan holdExpiry jauh di masa depan. */
-      rec.holdExpiry = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+      rec.holdExpiry = new Date(Date.now() + API_HOLD_MS).toISOString();
       if (ctx.role === 'agen') {
         throw apiError_('FORBIDDEN', 'Agen tidak boleh membuat booking baru.');
       }
@@ -4609,6 +4621,13 @@ function apiSyncCrossValidate_(ctx) {
   bookings.forEach(function (b) {
     var status = String((b && b.status) || '');
     if (['pending', 'paid', 'done'].indexOf(status) < 0) return;
+    /* Pending dengan hold kedaluwarsa tidak memegang kursi — checkout
+       terbengkalai tidak boleh memblokir pembeli lain selamanya. Aturan
+       sama dengan hitungan proyeksi (apiTakenSeatsMap_) dan klien. */
+    if (status === 'pending') {
+      var hm = Date.parse((b && b.holdExpiry) || '');
+      if (isFinite(hm) && hm <= Date.now()) return;
+    }
     var sid = String((b && b.scheduleId) || '');
     if (!sid) return;
     if (!bySchedule[sid]) bySchedule[sid] = [];

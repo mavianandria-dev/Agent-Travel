@@ -10,9 +10,13 @@ export const fmtClock = (v) => {
 };
 
 export const todayStr = (off = 0) => {
+  /* Tanggal kalender LOKAL (WIB), bukan UTC — versi lama (toISOString)
+     memundurkan "hari ini" satu hari pada rentang jam 00.00–06.59 WIB dan
+     menggeser rentang kalender/jadwal di layar. */
   const d = new Date();
   d.setDate(d.getDate() + off);
-  return d.toISOString().slice(0, 10);
+  const p = (n) => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
 };
 
 export const uid = (p) => (p || 'ID') + '-' + Math.random().toString(36).slice(2, 7).toUpperCase();

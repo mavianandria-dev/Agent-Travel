@@ -323,7 +323,7 @@ export default function Search() {
       pickupCoords: isHome ? bw.pickupCoords.trim() : '',
       seats: [...bw.seats], subtotal: sub, discount, total, status: 'pending', payMethod,
       voucher: bw.voucher ? String(bw.voucher).toUpperCase() : '',
-      createdAt: new Date().toISOString(), paidAt: null, holdExpiry: new Date(Date.now() + 15 * 60 * 1000).toISOString(), tripStatus: 'scheduled',
+      createdAt: new Date().toISOString(), paidAt: null, holdExpiry: new Date(Date.now() + 5 * 60 * 1000).toISOString(), tripStatus: 'scheduled',
     };
     const arr = DB.load('bookings', []);
     arr.unshift(booking);
@@ -337,7 +337,7 @@ export default function Search() {
     const v = vs.find((x) => x.code === String(bw.voucher || '').toUpperCase() && x.active);
     if (v && discount > 0) { v.used = (v.used || 0) + 1; DB.save('vouchers', vs); refresh(); }
     audit('booking_create', code + ' • ' + user.email + ' • ' + bw.seats.join(','));
-    notify(user.email, 'Booking dibuat — ' + code, 'Segera bayar ' + fmtRp(total) + ' sebelum hold 15 menit habis.', 'WA');
+    notify(user.email, 'Booking dibuat — ' + code, 'Segera bayar ' + fmtRp(total) + ' sebelum hold 5 menit habis.', 'WA');
     refresh();
     openModal(<PaymentModal booking={booking} />);
   };
@@ -380,7 +380,7 @@ export default function Search() {
       const d = todayStr(i);
       const list = allSchedules.filter((x) => selectedRouteIds.has(x.routeId) && x.date === d && routeBookable(routeById(x.routeId)) && !isRouteSuspended(routeById(x.routeId), x.agencyId));
       const avail = list.filter((s) => schedReady(s) && seatsLeft(s.id) > 0).length;
-      const dt = new Date(d);
+      const dt = new Date(d + 'T12:00'); /* label tengah-hari: hari/bulan kapak tidak bergeser di zona waktu mana pun */
       dayMap[d] = {
         d, avail,
         wd: dt.toLocaleDateString('id-ID', { weekday: 'short' }),
@@ -483,7 +483,7 @@ export default function Search() {
       <div className="grid md:grid-cols-2 gap-5">
         <div><h3 className="font-extrabold text-[16px]">Pilih Kursi <span className="text-[12px] font-semibold text-slate-400">— {layout.filter((c) => c.type === 'seat').length} penumpang</span></h3>
           <div className="flex gap-3 mt-2 text-[11px] font-bold flex-wrap">
-            {[['#dcfce7,#22c55e', 'Kosong'], ['#0f7ae5,#0b63c4', 'Pilihanmu'], ['#e2e8f0,#cbd5e1', 'Terisi'], ['#fef3c7,#f59e0b', 'Hold 15 mnt']].map((l) => (
+            {[['#dcfce7,#22c55e', 'Kosong'], ['#0f7ae5,#0b63c4', 'Pilihanmu'], ['#e2e8f0,#cbd5e1', 'Terisi'], ['#fef3c7,#f59e0b', 'Hold 5 mnt']].map((l) => (
               <span key={l[1]} className="flex items-center gap-1.5"><span className="w-4 h-4 rounded-md border-2" style={{ background: l[0].split(',')[0], borderColor: l[0].split(',')[1] }}></span>{l[1]}</span>
             ))}
             {(tk.inactive || []).length ? <span className="flex items-center gap-1.5 text-slate-500"><Icon name="ban" className="w-3.5 h-3.5" />Nonaktif ({tk.inactive.join(', ')})</span> : null}
@@ -563,7 +563,7 @@ export default function Search() {
                 <button key={m[0]} onClick={() => setPayMethod(m[0])} className={'paybtn rounded-2xl border-2 p-3 text-center transition ' + (payMethod === m[0] ? 'border-sky-500 bg-sky-50' : 'border-slate-200')}><Icon name={m[1]} className={'w-6 h-6 mx-auto ' + (payMethod === m[0] ? 'text-sky-600' : 'text-slate-400')} /><div className="font-extrabold text-[12px] mt-1">{m[0]}</div><div className="text-[10px] text-slate-400 font-semibold">{m[2]}</div></button>
               ))}
             </div>
-            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 mt-3 text-[12.5px] font-semibold text-amber-900 flex gap-2"><Icon name="timer" className="w-5 h-5 shrink-0" /><span>Kursi di-hold <b>15 menit</b> setelah klik Bayar. 1 kursi hanya untuk 1 orang — lock real-time aktif.</span></div>
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 mt-3 text-[12.5px] font-semibold text-amber-900 flex gap-2"><Icon name="timer" className="w-5 h-5 shrink-0" /><span>Kursi di-hold <b>5 menit</b> setelah klik Bayar. 1 kursi hanya untuk 1 orang — lock real-time aktif.</span></div>
             <button onClick={doCheckout} className="w-full mt-3 bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 text-white font-extrabold text-[15px] py-3.5 rounded-2xl shadow-lg transition flex items-center justify-center gap-2"><Icon name="shield-check" className="w-5 h-5" />Bayar {fmtRp(total)}</button>
           </div>
         </div>

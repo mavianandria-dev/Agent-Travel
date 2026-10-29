@@ -153,7 +153,7 @@ Catatan:
 node google-apps-script/local-tests/mock-harness.mjs
 ```
 
-Harness mem-mock `SpreadsheetApp`, `PropertiesService`, `LockService`, `Utilities`, `CacheService`, `ContentService`, dan `Logger`, serta memuat `seed.gs` ke sandbox yang sama. Saat ini **342 asersi** lulus.
+Harness mem-mock `SpreadsheetApp`, `PropertiesService`, `LockService`, `Utilities`, `CacheService`, `ContentService`, dan `Logger`, serta memuat `seed.gs` ke sandbox yang sama. Saat ini **344 asersi** lulus.
 
 ## Struktur tab
 
@@ -353,7 +353,7 @@ node google-apps-script/local-tests/mock-harness.mjs
 2. Login via hash (`apiHashForUser_`); token tamper/expired; token lama dicabut setelah ganti/reset password.
 3. `bootstrap` superadmin/publik/agen/pengemudi/pelanggan; proyeksi tanpa KYC/NIK/rekening; filter baris; `takenSeats`; agensi pending; pengemudi/pelanggan menerima data yang diperlukan; armada tautan pengemudi (utama/cadangan) ikut bootstrap meski belum dipakai jadwal, dengan proyeksi publik tetap tanpa tautan.
 4. `commit`: upsert/delete/konflik/role/ID duplikat/field rahasia/self-delete; hash password bertahan saat commit profil.
-5. `sync`: kepemilikan, revisi, kursi ganda, booking/payment/ledger palsu, nominal, voucher, refund, transisi status, larangan delete, rute/armada/jadwal/pengemudi, tiket support, notifikasi, serta whitelist field untuk menutup injeksi refund/maintenance/`paidOutAt` dan penyalahgunaan data pengemudi. Hold booking baru ditentukan server (15 menit) dan tidak boleh diperpanjang; pembayaran tidak boleh lunas saat booking masih pending. Respons sync juga melampirkan `scheduleNotes` — ringkasan pengemudi (id/nama/telepon, utama & cadangan) per jadwal tersentuh — sebatas data yang proyeksi bootstrap sudah berikan pada pemiliknya, agar tiket pelanggan menampilkan pengemudi langsung tanpa muat ulang.
+5. `sync`: kepemilikan, revisi, kursi ganda, booking/payment/ledger palsu, nominal, voucher, refund, transisi status, larangan delete, rute/armada/jadwal/pengemudi, tiket support, notifikasi, serta whitelist field untuk menutup injeksi refund/maintenance/`paidOutAt` dan penyalahgunaan data pengemudi. Hold booking baru ditentukan server (5 menit via `API_HOLD_MS`) dan tidak boleh diperpanjang; pending dengan hold kedaluwarsa tidak lagi memegang kursi (`apiTakenSeatsMap_` & cek kursi ganda melewatkannya; pembayaran booking-nya sendiri tetap ditolak — "Hold booking sudah kedaluwarsa"); pembayaran tidak boleh lunas saat booking masih pending. Respons sync juga melampirkan `scheduleNotes` — ringkasan pengemudi (id/nama/telepon, utama & cadangan) per jadwal tersentuh — sebatas data yang proyeksi bootstrap sudah berikan pada pemiliknya, agar tiket pelanggan menampilkan pengemudi langsung tanpa muat ulang.
 6. `changePassword` dan throttle login/ganti password.
 7. `register` pelanggan/agen, validasi password/telepon/duplikat, agen pending.
 8. `adminCreateUser`/`adminSetPassword`, aturan agen/pengemudi, pencabutan token.
@@ -410,7 +410,7 @@ node google-apps-script/local-tests/mock-harness.mjs
 - `google-apps-script/code.gs:2588-4600` — engine `sync` + validator per koleksi (agensi di ~3339, whitelist pengemudi di 3446, booking/payment/ledger, voucher, notifikasi, tiket, route request, lintas koleksi).
 - `google-apps-script/code.gs:4601-akhir` — `apiCommit_`, penerapan koleksi, preservasi secret.
 - `google-apps-script/appsscript.json` — manifest dan OAuth scope.
-- `google-apps-script/local-tests/mock-harness.mjs` — 342 asersi mock (termasuk round-trip v2, blob chunk, migrasi `ensureSchema` + penghapusan kolom selfie, cek slot sadar-skema, alamat berjenjang pengemudi, foto pengemudi/kendaraan di tab sblob, upload KTP besar lewat jalur agen, armada tautan pengemudi pada bootstrap, pengisian server-side `driverId` pada ledger pelanggan, dan respons sync yang melampirkan catatan pengemudi jadwal tersentuh).
+- `google-apps-script/local-tests/mock-harness.mjs` — 344 asersi mock (termasuk round-trip v2, blob chunk, migrasi `ensureSchema` + penghapusan kolom selfie, cek slot sadar-skema, alamat berjenjang pengemudi, foto pengemudi/kendaraan di tab sblob, upload KTP besar lewat jalur agen, armada tautan pengemudi pada bootstrap, pengisian server-side `driverId` pada ledger pelanggan, respons sync yang melampirkan catatan pengemudi jadwal tersentuh, dan pelepasan kursi pada booking pending hold kedaluwarsa).
 - `transaceh-react/src/lib/db.js` — cache, diff, antrean sync, rollback.
 - `transaceh-react/src/lib/sheetsApi.js` — transport direct.
 - `transaceh-react/src/lib/remote.js` — bootstrap, login, logout, hydrate revisi.

@@ -668,7 +668,11 @@ export function takenSeats(schedId){
     const all=Array.from(new Set(sch.takenSeats.map(String)));
     out.paid=all.slice(); out.booked=all.slice();
   } else {
-    bookingsOf(schedId).forEach(b=>{ (b.seats||[]).forEach(s=>{ if(b.status==='paid'||b.status==='done'){ out.booked.push(s); out.paid.push(s); } else if(b.status==='pending') out.hold.push(s); }); });
+    /* Hold = booking pending yang masih bisa dibayar; pending dengan hold
+       kedaluwarsa lepas — checkout terbengkalai tidak boleh memblokir kursi
+       selamanya (selaras dengan apiTakenSeatsMap_ di server). */
+    const now = Date.now();
+    bookingsOf(schedId).forEach(b=>{ (b.seats||[]).forEach(s=>{ if(b.status==='paid'||b.status==='done'){ out.booked.push(s); out.paid.push(s); } else if(b.status==='pending'){ const hm=b.holdExpiry?new Date(b.holdExpiry).getTime():NaN; if(!(Number.isFinite(hm)&&hm<=now)) out.hold.push(s); } }); });
   }
   (sch?.blockedSeats||[]).forEach(s=>{ if(!out.blocked.includes(s)) out.blocked.push(s); if(!out.paid.includes(s)) out.paid.push(s); });
   const veh=sch?vehicleById(sch.vehicleId):null;
@@ -1778,7 +1782,7 @@ export function cleanupHolds(){
     b.refundScope='ticket';
     b.refundStatus='none';
     b.refundPaidAt=null;
-    b.cancelReason='Hold kedaluwarsa (15 mnt)';
+    b.cancelReason='Hold kedaluwarsa (5 mnt)';
     b.cancelledBy='sistem';
     b.cancelledAt=nowIso;
     restoreVoucher(b);
@@ -1984,7 +1988,7 @@ function updatePaymentRefund(pays, b, { refund, pct, scope, status }) {
  *  Hold yang sudah ada TIDAK diperpanjang saat modal pembayaran dibuka. */
 export function ensureHoldExpiry(b) {
   if (!b || b.status !== 'pending' || b.holdExpiry) return b;
-  return { ...b, holdExpiry: new Date(Date.now() + 15 * 60 * 1000).toISOString() };
+  return { ...b, holdExpiry: new Date(Date.now() + 5 * 60 * 1000).toISOString() };
 }
 
 /** Booking pending masih bisa dibayar: hold aktif, jadwal masih terbuka dan belum berangkat. */
@@ -2237,9 +2241,11 @@ export function cancelScheduleByOperator(sid, reason, by = 'pengemudi') {
   return { ok: true, count, pending, total };
 }
 
-/** Pembuatan tiket oleh pengemudi untuk penumpang yang tidak pakai aplikasi.
- *  Disimpan sebagai booking 'pending' (15 menit hold) dan harus dibayar online
- *  terlebih dahulu. Ledger baru dibuat setelah pembayaran berhasil. */
+/**
+ * Pembuatan tiket oleh pengemudi untuk penumpang yang tidak pakai aplikasi.
+ * Disimpan sebagai booking 'pending' (hold 5 menit) yang harus dibayar online
+ * terlebih dahulu. Ledger baru dibuat setelah pembayaran berhasil.
+ */
 export function createDriverBooking(sid, { passengers = [], seats = [], driverId = '', payMethod = 'QRIS', discount = 0, pickup = '' } = {}) {
   const s = schedById(sid);
   if (!s) return { ok: false, msg: 'Jadwal tidak ditemukan' };
@@ -2290,7 +2296,7 @@ export function createDriverBooking(sid, { passengers = [], seats = [], driverId
     createdBy: driverId || null,
     createdAt: now,
     paidAt: null,
-    holdExpiry: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+    holdExpiry: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
     tripStatus: 'scheduled',
     boarded: false,
   };

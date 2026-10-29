@@ -510,7 +510,11 @@ seedCollection('bookings', [
   { id: 'b_1', code: 'TA-1', scheduleId: 's_1', userEmail: 'cust1@test.local', seats: ['A1'], status: 'paid', total: 150000, createdAt: '2026-10-20T01:00:00.000Z' },
   { id: 'b_2', code: 'TA-2', scheduleId: 's_1', userEmail: 'cust2@test.local', seats: ['A3'], status: 'pending', total: 150000, createdAt: '2026-10-20T02:00:00.000Z' },
   { id: 'b_3', code: 'TA-3', scheduleId: 's_2', userEmail: 'cust1@test.local', seats: ['B1'], status: 'done', total: 150000, createdAt: '2026-10-20T03:00:00.000Z' },
-  { id: 'b_4', code: 'TA-4', scheduleId: 's_3', userEmail: 'cust2@test.local', seats: ['A4'], status: 'paid', total: 260000, createdAt: '2026-10-20T04:00:00.000Z' }
+  { id: 'b_4', code: 'TA-4', scheduleId: 's_3', userEmail: 'cust2@test.local', seats: ['A4'], status: 'paid', total: 260000, createdAt: '2026-10-20T04:00:00.000Z' },
+  /* Ghost hold: checkout terbengkalai, 5 menitnya lewat jauh — kursi A2
+     pada s_2 harus LEPAS (tidak dihitung proyeksi, tidak memblokir booking
+     baru), meski barisnya masih 'pending' di sheet. */
+  { id: 'b_ghost', code: 'TA-GR', scheduleId: 's_2', userEmail: 'cust2@test.local', seats: ['A2'], status: 'pending', holdExpiry: '2020-01-01T00:00:00.000Z', total: 150000, createdAt: '2026-10-20T05:00:00.000Z' }
 ]);
 
 seedCollection('payments', [
@@ -793,7 +797,7 @@ ok('agen melihat armada sendiri penuh, armada lain terproyeksi',
   !Object.prototype.hasOwnProperty.call((agenRecords.vehicles || []).find((v) => v.id === 'v_4'), 'ownerNik'));
 ok('agen tidak melihat armada/jadwal agensi pending', !idsOf(agenRecords.vehicles).includes('v_pending') && !idsOf(agenRecords.schedules).includes('s_pending'));
 ok('agen melihat ulasan publik yang sah', idsOf(agenRecords.reviews).join(',') === 'rv_1,rv_2', idsOf(agenRecords.reviews));
-ok('agen hanya melihat booking jadwalnya', idsOf(agenRecords.bookings).join(',') === 'b_1,b_2,b_3', idsOf(agenRecords.bookings));
+ok('agen hanya melihat booking jadwalnya', idsOf(agenRecords.bookings).join(',') === 'b_1,b_2,b_3,b_ghost', idsOf(agenRecords.bookings));
 ok('agen hanya melihat payment booking-nya', idsOf(agenRecords.payments).join(',') === 'p_1,p_2,p_3', idsOf(agenRecords.payments));
 ok('agen hanya melihat ledger agensinya', idsOf(agenRecords.ledger).join(',') === 'l_1', idsOf(agenRecords.ledger));
 ok('agen hanya melihat route request agensinya', idsOf(agenRecords.routeRequests).join(',') === 'rr_1', idsOf(agenRecords.routeRequests));
@@ -814,7 +818,7 @@ ok('data rekan pengemudi tidak memuat NIK/bank/SIM', (() => {
     !Object.prototype.hasOwnProperty.call(mate, 'simPhoto');
 })());
 ok('pengemudi hanya melihat jadwal yang ditugaskan', idsOf(driverRecords.schedules).join(',') === 's_1,s_2', idsOf(driverRecords.schedules));
-ok('pengemudi melihat booking jadwalnya saja', idsOf(driverRecords.bookings).join(',') === 'b_1,b_2,b_3', idsOf(driverRecords.bookings));
+ok('pengemudi melihat booking jadwalnya saja', idsOf(driverRecords.bookings).join(',') === 'b_1,b_2,b_3,b_ghost', idsOf(driverRecords.bookings));
 ok('pengemudi melihat kendaraan jadwalnya saja', idsOf(driverRecords.vehicles).join(',') === 'v_1,v_2', idsOf(driverRecords.vehicles));
 ok('pengemudi melihat maintenance dirinya', idsOf(driverRecords.maintenanceRequests).join(',') === 'm_1', idsOf(driverRecords.maintenanceRequests));
 ok('pengemudi melihat notifikasi miliknya', idsOf(driverRecords.notifications).join(',') === 'n_4,n_all', idsOf(driverRecords.notifications));
@@ -1104,8 +1108,8 @@ ok('respons sync booking membawa catatan pengemudi jadwal (s_1 → d_1 Bang Jami
   res.data && res.data.scheduleNotes);
 const holdRec = readRec('bookings', 'b_sync_1');
 const holdMs = holdRec ? Date.parse(holdRec.holdExpiry) : NaN;
-ok('server menimpa holdExpiry booking baru menjadi 15 menit',
-  Number.isFinite(holdMs) && holdMs > Date.now() && holdMs <= Date.now() + 20 * 60 * 1000, holdRec);
+ok('server menimpa holdExpiry booking baru menjadi 5 menit',
+  Number.isFinite(holdMs) && holdMs > Date.now() && holdMs <= Date.now() + 8 * 60 * 1000, holdRec);
 
 res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, syncBooking, {
   id: 'b_sync_maint_inject', code: 'TA-MI', seats: ['A6'],
@@ -1120,6 +1124,21 @@ res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({},
   passengers: [{ name: 'Uji Sync', seat: 'A1' }]
 })], deletes: [] } }, custToken);
 ok('sync menolak kursi yang sudah dipakai booking lain', res.ok === false && res.error.code === 'SEAT_CONFLICT', res);
+
+/* Hold kedaluwarsa lepas: proyeksi publik tidak menghitung kursi ghost, dan
+   booking baru justru diterima pada kursi itu tanpa SEAT_CONFLICT. */
+const pubGhost = (dispatch(bodyOf({}, { action: 'bootstrap' })).data.records || {});
+const ghostSched = (pubGhost.schedules || []).find((x) => String(x.id) === 's_2') || {};
+ok('proyeksi publik hanya menghitung hold yang masih valid (ghost A2 lepas, done B1 tetap)',
+  Array.isArray(ghostSched.takenSeats) && ghostSched.takenSeats.includes('B1') && !ghostSched.takenSeats.includes('A2'),
+  ghostSched.takenSeats);
+const ghostRev = revOf('bookings');
+res = sync({ bookings: { baseRev: ghostRev, upserts: [Object.assign({}, syncBooking, {
+  id: 'b_sync_ghostseat', code: 'TA-GS', scheduleId: 's_2', seats: ['A2'],
+  passengers: [{ name: 'Uji Hold Lepas', seat: 'A2' }]
+})], deletes: [] } }, custToken);
+ok('booking baru menerima kursi yang tadi digantung hold kedaluwarsa',
+  res.ok === true && res.data.revisions.bookings === ghostRev + 1, res);
 
 res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, syncBooking, { id: 'b_sync_3', code: 'TA-S3', userEmail: 'cust2@test.local' })], deletes: [] } }, custToken);
 ok('sync pelanggan tidak boleh membuat booking atas nama orang lain', res.ok === false && res.error.code === 'FORBIDDEN', res);

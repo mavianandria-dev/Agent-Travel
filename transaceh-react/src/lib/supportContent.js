@@ -18,12 +18,12 @@ export const FAQ_CATEGORIES = [
       {
         id: 'cara-pesan-tiket',
         q: 'Bagaimana cara memesan tiket?',
-        a: '1. Buka menu Cari Travel, lalu pilih rute dan tanggal keberangkatan.\n2. Pilih jadwal yang tersedia dan tentukan kursi.\n3. Isi data penumpang serta titik jemput.\n4. Lanjutkan ke pembayaran. Kursi ditahan 15 menit sampai pembayaran selesai.\n5. E-tiket otomatis muncul di menu Tiket Saya setelah pembayaran berhasil.',
+        a: '1. Buka menu Cari Travel, lalu pilih rute dan tanggal keberangkatan.\n2. Pilih jadwal yang tersedia dan tentukan kursi.\n3. Isi data penumpang serta titik jemput.\n4. Lanjutkan ke pembayaran. Kursi ditahan 5 menit sampai pembayaran selesai.\n5. E-tiket otomatis muncul di menu Tiket Saya setelah pembayaran berhasil.',
       },
       {
         id: 'pilih-kursi',
         q: 'Apakah saya bisa memilih kursi sendiri?',
-        a: 'Bisa. Kursi dipilih langsung dari denah kendaraan saat memesan. Kursi hijau masih tersedia, abu-abu sudah terisi, dan kuning sedang ditahan penumpang lain. Kursi yang kamu pilih akan ditahan selama 15 menit untuk diselesaikan pembayarannya.',
+        a: 'Bisa. Kursi dipilih langsung dari denah kendaraan saat memesan. Kursi hijau masih tersedia, abu-abu sudah terisi, dan kuning sedang ditahan penumpang lain. Kursi yang kamu pilih akan ditahan selama 5 menit untuk diselesaikan pembayarannya.',
       },
       {
         id: 'pesan-orang-lain',
@@ -53,12 +53,12 @@ export const FAQ_CATEGORIES = [
       {
         id: 'batas-bayar',
         q: 'Berapa lama batas waktu pembayaran?',
-        a: 'Kursi ditahan selama 15 menit sejak pesanan dibuat. Jika pembayaran belum selesai sampai batas waktu habis, kursi akan dilepas kembali dan booking berstatus dibatalkan otomatis. Kamu bisa memesan ulang selama kursi masih tersedia.',
+        a: 'Kursi ditahan selama 5 menit sejak pesanan dibuat. Jika pembayaran belum selesai sampai batas waktu habis, kursi akan dilepas kembali dan booking berstatus dibatalkan otomatis. Kamu bisa memesan ulang selama kursi masih tersedia.',
       },
       {
         id: 'bayar-gagal',
         q: 'Bagaimana jika pembayaran gagal atau terputus?',
-        a: 'Buka menu Tiket Saya, pilih pesanan yang masih berstatus Menunggu Bayar, lalu tekan Bayar untuk mencoba kembali. Sistem akan memberi waktu tambahan 15 menit. Jika saldo sudah terpotong tetapi status belum berubah, hubungi CS dengan menyertakan kode booking dan bukti pembayaran.',
+        a: 'Buka menu Tiket Saya, pilih pesanan yang masih berstatus Menunggu Bayar, lalu tekan Bayar untuk mencoba kembali. Sistem akan memberi waktu tambahan 5 menit. Jika saldo sudah terpotong tetapi status belum berubah, hubungi CS dengan menyertakan kode booking dan bukti pembayaran.',
       },
       {
         id: 'kode-promo',
@@ -182,7 +182,7 @@ export const GUIDES = [
       'Pilih jadwal yang sesuai, lalu tentukan kursi pada denah kendaraan.',
       'Isi data penumpang dan titik jemput. Kamu bisa memilih penumpang favorit.',
       'Periksa ringkasan harga, gunakan kode promo bila ada, lalu lanjut ke pembayaran.',
-      'Selesaikan pembayaran dalam 15 menit dan temukan e-tiket di menu Tiket Saya.',
+      'Selesaikan pembayaran dalam 5 menit dan temukan e-tiket di menu Tiket Saya.',
     ],
   },
   {
