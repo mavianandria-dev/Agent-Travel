@@ -260,6 +260,19 @@ function futureDate(days) {
   return new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
 }
 
+/* Jadwal dekat untuk uji jendela penjualan tiket pengemudi (12 jam sebelum
+   keberangkatan): tanggal + jam LOKAL `hours` jam dari sekarang — dinamis
+   agar tes tetap masuk jendela tidak peduli kapan harness dijalankan. */
+function nearDate(hours) {
+  const d = new Date(Date.now() + hours * 3600000);
+  const p = (n) => String(n).padStart(2, '0');
+  return {
+    date: d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()),
+    time: p(d.getHours()) + ':' + p(d.getMinutes())
+  };
+}
+const NEAR_DEPARTURE = nearDate(10);
+
 /* Semua tab (utama + anak) dibuat dari skema backend supaya bentuk kolom
    identik dengan spreadsheet produksi yang di-seed lewat setup. */
 const storeSchema = S.apiDescribeStore_();
@@ -503,7 +516,11 @@ seedCollection('schedules', [
   { id: 's_1', agencyId: 'ag_1', routeId: 'rt_1', vehicleId: 'v_1', driverId: 'd_1', driverName: 'Bang Jamil', backupDriverId: '', backupName: '', date: futureDate(1), time: '08:00', price: 150000, status: 'open', tripStatus: 'scheduled', blockedSeats: ['A2'], createdAt: '2026-10-20T00:00:00.000Z' },
   { id: 's_2', agencyId: 'ag_1', routeId: 'rt_1', vehicleId: 'v_2', driverId: 'd_2', driverName: 'Teuku Rizal', backupDriverId: 'd_1', backupName: 'Bang Jamil', date: futureDate(2), time: '14:00', price: 150000, status: 'open', tripStatus: 'scheduled', blockedSeats: [], createdAt: '2026-10-20T00:00:00.000Z' },
   { id: 's_3', agencyId: 'ag_2', routeId: 'rt_2', vehicleId: 'v_4', driverId: 'd_3', driverName: 'Bang Hendra', backupDriverId: '', backupName: '', date: futureDate(1), time: '09:00', price: 260000, status: 'open', tripStatus: 'scheduled', blockedSeats: [], createdAt: '2026-10-20T00:00:00.000Z' },
-  { id: 's_pending', agencyId: 'ag_4', routeId: 'rt_2', vehicleId: 'v_pending', driverId: 'd_3', driverName: 'Bang Hendra', backupDriverId: '', backupName: '', date: futureDate(1), time: '11:00', price: 270000, status: 'open', tripStatus: 'scheduled', blockedSeats: [], createdAt: '2026-10-20T00:00:00.000Z' }
+  { id: 's_pending', agencyId: 'ag_4', routeId: 'rt_2', vehicleId: 'v_pending', driverId: 'd_3', driverName: 'Bang Hendra', backupDriverId: '', backupName: '', date: futureDate(1), time: '11:00', price: 270000, status: 'open', tripStatus: 'scheduled', blockedSeats: [], createdAt: '2026-10-20T00:00:00.000Z' },
+  /* Jadwal dekat: berangkat ~10 jam dari sekarang — masuk jendela penjualan
+     pengemudi (12 jam). Ditugaskan ke d_1 dan berharg 150000 supaya angka
+     fare tes booking driver tetap sama. */
+  { id: 's_dekat', agencyId: 'ag_1', routeId: 'rt_1', vehicleId: 'v_1', driverId: 'd_1', driverName: 'Bang Jamil', backupDriverId: '', backupName: '', date: NEAR_DEPARTURE.date, time: NEAR_DEPARTURE.time, price: 150000, status: 'open', tripStatus: 'scheduled', blockedSeats: [], createdAt: '2026-10-20T00:00:00.000Z' }
 ]);
 
 seedCollection('bookings', [
@@ -788,7 +805,7 @@ ok('bootstrap agen sukses', res.ok === true && res.data.role === 'agen', res);
 ok('agen melihat agensinya penuh (kyc ada)', !!record(agenRecords, 'agencies', 'ag_1') && !!record(agenRecords, 'agencies', 'ag_1').kyc);
 ok('agen tidak melihat kyc agensi lain', !!record(agenRecords, 'agencies', 'ag_2') && !record(agenRecords, 'agencies', 'ag_2').kyc);
 ok('agen hanya melihat jadwal agensinya + jadwal publik',
-  idsOf(agenRecords.schedules).join(',') === 's_1,s_2,s_3' &&
+  idsOf(agenRecords.schedules).join(',') === 's_1,s_2,s_3,s_dekat' &&
   !!record(agenRecords, 'schedules', 's_1').driverId &&
   !Object.prototype.hasOwnProperty.call(record(agenRecords, 'schedules', 's_3'), 'driverId'),
   agenRecords.schedules);
@@ -817,7 +834,7 @@ ok('data rekan pengemudi tidak memuat NIK/bank/SIM', (() => {
     !Object.prototype.hasOwnProperty.call(mate, 'bank') &&
     !Object.prototype.hasOwnProperty.call(mate, 'simPhoto');
 })());
-ok('pengemudi hanya melihat jadwal yang ditugaskan', idsOf(driverRecords.schedules).join(',') === 's_1,s_2', idsOf(driverRecords.schedules));
+ok('pengemudi hanya melihat jadwal yang ditugaskan', idsOf(driverRecords.schedules).join(',') === 's_1,s_2,s_dekat', idsOf(driverRecords.schedules));
 ok('pengemudi melihat booking jadwalnya saja', idsOf(driverRecords.bookings).join(',') === 'b_1,b_2,b_3,b_ghost', idsOf(driverRecords.bookings));
 ok('pengemudi melihat kendaraan jadwalnya saja', idsOf(driverRecords.vehicles).join(',') === 'v_1,v_2', idsOf(driverRecords.vehicles));
 ok('pengemudi melihat maintenance dirinya', idsOf(driverRecords.maintenanceRequests).join(',') === 'm_1', idsOf(driverRecords.maintenanceRequests));
@@ -1509,12 +1526,20 @@ ok('sync menolak agen membuat pembayaran baru',
   res.ok === false && res.error.code === 'FORBIDDEN', res);
 
 const driverBooking = {
-  id: 'b_driver_sync', code: 'TA-DRV', scheduleId: 's_2', userEmail: null, userPhone: null,
+  id: 'b_driver_sync', code: 'TA-DRV', scheduleId: 's_dekat', userEmail: null, userPhone: null,
   passengers: [{ name: 'Penumpang Driver', seat: 'A6' }], seats: ['A6'],
   subtotal: 150000, discount: 0, total: 150000, status: 'pending', payMethod: 'cash',
   voucher: '', source: 'driver', createdBy: 'd_1', createdAt: '2026-10-24T05:40:00.000Z',
   paidAt: null, holdExpiry: '2026-10-24T05:55:00.000Z', tripStatus: 'scheduled', boarded: false
 };
+/* Jendela penjualan: s_2 berangkat ~2 hari lagi (di luar 12 jam) → ditolak. */
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, driverBooking, {
+  id: 'b_driver_far', code: 'TA-DRVF', scheduleId: 's_2',
+  passengers: [{ name: 'Penumpang Jauh', seat: 'A6' }]
+})], deletes: [] } }, driverToken);
+ok('sync menolak booking pengemudi di luar jendela 12 jam',
+  res.ok === false && res.error.code === 'VALIDATION', res);
+/* s_dekat berangkat ~10 jam dari sekarang (dalam jendela, dipegang d_1) → diterima. */
 res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [driverBooking], deletes: [] } }, driverToken);
 ok('sync pengemudi membuat booking driver di jadwalnya',
   res.ok === true, res);
@@ -1540,8 +1565,8 @@ res = sync({
     status: 'paid'
   })], deletes: [] },
   ledger: { baseRev: revOf('ledger'), upserts: [{
-    id: 'l_driver_sync', bookingId: 'b_driver_sync', scheduleId: 's_2', agencyId: 'ag_1',
-    driverId: 'd_2', userEmail: null, seats: ['A6'], ticket: 138889, service: 0,
+    id: 'l_driver_sync', bookingId: 'b_driver_sync', scheduleId: 's_dekat', agencyId: 'ag_1',
+    driverId: 'd_1', userEmail: null, seats: ['A6'], ticket: 138889, service: 0,
     fee: 11111, total: 150000, status: 'ditahan', createdAt: '2026-10-24T05:42:00.000Z'
   }], deletes: [] }
 }, driverToken);
@@ -2127,7 +2152,8 @@ ok('validateDatabase hijau untuk seluruh tab foto blob',
 /* ------------------------------------------------------------------ */
 
 /* Proyeksi pengemudi: baris sendiri tetap hadir meski belum punya jadwal.
-   Lepaskan d_1 dari semua jadwal (s_1 utama → d_2, s_2 cadangan → kosong). */
+   Lepaskan d_1 dari semua jadwal (s_1 utama → d_2, s_2 cadangan → kosong,
+   s_dekat utama → d_2). */
 const schedRawRows = spread.getSheetByName('schedules').rows;
 const sHdr = schedRawRows[0];
 const idxDrv = sHdr.indexOf('driverId');
@@ -2137,6 +2163,7 @@ const idxBn = sHdr.indexOf('backupName');
 schedRawRows.forEach((r) => {
   if (String(r[0]) === 's_1') { r[idxDrv] = 'd_2'; r[idxDnm] = 'Teuku Rizal'; }
   if (String(r[0]) === 's_2') { r[idxBd] = ''; r[idxBn] = ''; }
+  if (String(r[0]) === 's_dekat') { r[idxDrv] = 'd_2'; r[idxDnm] = 'Teuku Rizal'; }
 });
 res = dispatch(bodyOf({}, { action: 'bootstrap', token: driverToken }));
 ok('bootstrap pengemudi tanpa jadwal tetap memuat baris sendiri',

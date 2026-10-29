@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { routeById, vehicleById, bookingsOf, vehName, vehLayout, schedSeatCap, takenSeats, seatsLeft, audit, setScheduleTripStatus, scheduleNeedsReview, scheduleInHistory, schedById, setScheduleDelay, reportTripDelay, createDriverBooking, confirmDriverBookingPayment, splitFare, tripProgress, bookedPassengers, departureTiming, scheduleIsPast, scheduleMaintenance, maintenancePeriodLabel } from '@/lib/domain.js';
+import { routeById, vehicleById, bookingsOf, vehName, vehLayout, schedSeatCap, takenSeats, seatsLeft, audit, setScheduleTripStatus, scheduleNeedsReview, scheduleInHistory, schedById, setScheduleDelay, reportTripDelay, createDriverBooking, confirmDriverBookingPayment, splitFare, tripProgress, bookedPassengers, departureTiming, scheduleIsPast, scheduleMaintenance, maintenancePeriodLabel, scheduleEffectiveDepartureMs, DRIVER_SALE_WINDOW_HOURS } from '@/lib/domain.js';
 import { fmtClock, fmtRp } from '@/lib/utils.js';
 import { Icon, Empty, BadgeStatus, fmtDate, CabinGrid } from '@/components/ui.jsx';
 import { pickupArea, pickupOptions, pickupOf } from '@/lib/pickups.js';
@@ -453,6 +453,34 @@ function DriverBookingModal({ sid }) {
   );
 }
 
+/** Peringatan jendela penjualan: tombol "Pesan Tiket" memang tetap tampil di
+ *  luar jendela 12 jam, tapi kliknya tak membuka layar pesan — ini yang tampil. */
+function DriverSaleWindowModal({ sid }) {
+  const { closeModal } = useApp();
+  const s = schedById(sid);
+  if (!s) return <div className="p-6 font-bold text-slate-500">Jadwal tidak ditemukan</div>;
+  const r = routeById(s.routeId);
+  const dep = scheduleEffectiveDepartureMs(s);
+  const openTs = Number.isFinite(dep) ? dep - DRIVER_SALE_WINDOW_HOURS * 3600000 : NaN;
+  const depLabel = Number.isFinite(dep) ? new Date(dep).toLocaleString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : '-';
+  const openLabel = Number.isFinite(openTs) ? new Date(openTs).toLocaleString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : '-';
+  return (
+    <div className="p-6">
+      <div className="flex items-center justify-between">
+        <h3 className="font-extrabold text-[17px] flex items-center gap-2"><Icon name="clock" className="w-5 h-5 text-amber-500" />Penjualan Belum Dibuka</h3>
+        <button onClick={closeModal} className="text-slate-400"><Icon name="x" className="w-5 h-5" /></button>
+      </div>
+      <p className="text-[12.5px] text-slate-500 font-medium mt-1">Jadwal ini {(r?.from)} → {(r?.to)}</p>
+      <div className="mt-4 rounded-2xl border p-3 text-[12.5px] font-semibold bg-amber-50 border-amber-200 text-amber-900">
+        Tiket langsung di aplikasi pengemudi baru bisa dijual <b>{DRIVER_SALE_WINDOW_HOURS} jam sebelum keberangkatan</b>.
+        <div className="mt-2">Keberangkatan: {depLabel}</div>
+        <div className="mt-1">Penjualan dibuka: {openLabel}</div>
+      </div>
+      <button onClick={closeModal} className={'w-full mt-4 text-white font-extrabold text-[13px] py-2.5 rounded-xl bg-[#0b2447]'}>Mengerti</button>
+    </div>
+  );
+}
+
 export default function Tasks() {
   const { go, user, toast, refresh, openModal } = useApp();
   const me = drvOfUser(user);
@@ -551,7 +579,13 @@ export default function Tasks() {
           {!late && !mtActive && (s.tripStatus === 'scheduled' || !s.tripStatus) && bk.length ? <button onClick={() => openModal(<CancelTripModal sid={s.id} by="pengemudi" />)} className="badge bg-red-100 text-red-600 cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="calendar-x" className="w-3.5 h-3.5" /> Batalkan</button> : null}
           {!late && s.tripStatus === 'ontrip' ? <button onClick={finish} className="badge bg-blue-600 text-white cursor-pointer !text-[12px] py-1.5 active:scale-95 transition">Tiba di Tujuan</button> : null}
           {s.tripStatus === 'ontrip' && s.status !== 'cancelled' ? <button onClick={() => openModal(<DelayModal sid={s.id} mode="ontrip" />)} className="badge bg-sky-100 text-sky-700 cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="clock" className="w-3.5 h-3.5" /> Info Delay</button> : null}
-          {!late && !mtActive && (s.status === 'open' || !s.status) && (s.tripStatus === 'scheduled' || !s.tripStatus) && left > 0 ? <button onClick={() => openModal(<DriverBookingModal sid={s.id} />)} className="badge bg-violet-100 text-violet-700 cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="user-plus" className="w-3.5 h-3.5" /> Pesan Tiket</button> : null}
+          {!late && !mtActive && (s.status === 'open' || !s.status) && (s.tripStatus === 'scheduled' || !s.tripStatus) && left > 0 ? <button onClick={() => {
+            /* Tombol tetap tampil walau belum masuk jendela 12 jam — kliknya
+               yang diperiksa: di luar jendela → modal peringatan. */
+            const dep = scheduleEffectiveDepartureMs(s);
+            if (Number.isFinite(dep) && dep - Date.now() > DRIVER_SALE_WINDOW_HOURS * 3600000) openModal(<DriverSaleWindowModal sid={s.id} />);
+            else openModal(<DriverBookingModal sid={s.id} />);
+          }} className="badge bg-violet-100 text-violet-700 cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="user-plus" className="w-3.5 h-3.5" /> Pesan Tiket</button> : null}
           {!mtActive && s.tripStatus !== 'missed' && s.status !== 'cancelled' ? <button onClick={() => openModal(<ScanModal sid={s.id} />)} className="badge bg-[#0b2447] text-white cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="scan-line" className="w-3.5 h-3.5" /> Scan QR</button> : null}
         </div>
       </div>

@@ -1354,6 +1354,10 @@ export function drvBlocks(L){ let n=0; for(let r=0;r<7;r++){ const a=L[r*4+2],b=
 /* ---------- Siklus hidup jadwal ---------- */
 export const SCHEDULE_GRACE_HOURS = 3;
 export const MAX_DEPARTURE_DELAY_MINUTES = 180;
+/** Jendela penjualan tiket langsung pengemudi: dibuka 12 jam sebelum keberangkatan
+ *  efektif (jadwal asli atau estimasi delay). Tombol tetap tampil; klik di luar
+ *  jendela memunculkan peringatan — dan server menegakkan aturan yang sama. */
+export const DRIVER_SALE_WINDOW_HOURS = 12;
 
 /** Waktu keberangkatan jadwal dalam milidetik (zona waktu lokal). */
 export function scheduleDepartureMs(s) {
@@ -2253,6 +2257,14 @@ export function createDriverBooking(sid, { passengers = [], seats = [], driverId
   if (scheduleMaintenance(s)) return { ok: false, msg: 'Jadwal maintenance — penjualan tiket ditutup' };
   if (['ontrip', 'arrived', 'missed', 'cancelled'].includes(s.tripStatus)) return { ok: false, msg: 'Jadwal sudah berjalan/selesai — penjualan tiket ditutup' };
   if (scheduleIsPast(s, 0)) return { ok: false, msg: 'Jadwal sudah lewat' };
+  /* Jendela penjualan: tiket langsung pengemudi dibuka 12 jam sebelum
+     keberangkatan efektif. UI memperingatkan; di sini saja jalur lain
+     (UI basi, import, dsb.) tetap terjaga. */
+  const dep = scheduleEffectiveDepartureMs(s);
+  if (Number.isFinite(dep) && dep - Date.now() > DRIVER_SALE_WINDOW_HOURS * 3600000) {
+    const openAt = new Date(dep - DRIVER_SALE_WINDOW_HOURS * 3600000).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    return { ok: false, msg: 'Penjualan tiket pengemudi dibuka ' + DRIVER_SALE_WINDOW_HOURS + ' jam sebelum keberangkatan — jadwal ini baru bisa dijual ' + openAt + ' WIB.' };
+  }
 
   const tk = takenSeats(s.id);
   const taken = new Set([...tk.paid, ...tk.hold, ...(s.blockedSeats || []), ...tk.inactive]);

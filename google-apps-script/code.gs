@@ -67,6 +67,9 @@ var API_REGISTER_MAX_PER_HOUR = 30;
 /** Jangka waktu klien harus menyelesaikan pembayaran (hold kursi). */
 var API_HOLD_MS = 5 * 60 * 1000;
 
+/** Jendela penjualan tiket langsung pengemudi: dibuka 12 jam sebelum keberangkatan. */
+var API_DRIVER_SALE_WINDOW_MS = 12 * 60 * 60 * 1000;
+
 /** Kunci koleksi harus sama persis dengan seed.gs. */
 var API_COLLECTION_KEYS = [
   'users', 'agencies', 'routes', 'routeRequests', 'vehicles', 'drivers',
@@ -3868,6 +3871,12 @@ function apiSyncValidateBookings_(ctx, target) {
         }
         if (String(rec.createdBy || '') !== String(ctx.ownDriverId || '')) {
           throw apiError_('FORBIDDEN', 'Booking harus dibuat oleh pengemudi sendiri.');
+        }
+        /* Jendela penjualan: tiket langsung pengemudi baru dibuka 12 jam
+           sebelum keberangkatan (basis waktu = keberangkatan efektif). */
+        var saleDepMs = apiSyncScheduleDepartureMs_(schedule);
+        if (isFinite(saleDepMs) && saleDepMs - Date.now() > API_DRIVER_SALE_WINDOW_MS) {
+          throw apiError_('VALIDATION', 'Penjualan tiket pengemudi dibuka 12 jam sebelum keberangkatan.');
         }
       }
       if (status !== 'pending') {
