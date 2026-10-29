@@ -6,7 +6,9 @@ export default function NotifModal() {
   const { user, closeModal, refresh, tick, go, setAgenTab } = useApp();
   void tick;
 
-  const list = DB.load('notifications', []).filter((n) => !user || n.to === user.email || n.to === 'all').slice(0, 20);
+  /* Hanya pengguna yang masuk; tamu tidak pernah melihat notifikasi —
+     modal kini hanya terbuka dari lonceng header yang tampil setelah login. */
+  const list = DB.load('notifications', []).filter((n) => user && (n.to === user.email || n.to === 'all')).slice(0, 20);
 
   const markRead = () => {
     const n = DB.load('notifications', []);

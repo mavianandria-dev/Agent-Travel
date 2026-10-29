@@ -52,10 +52,13 @@ export default function Header() {
         <button onClick={() => { setLang(lang === 'id' ? 'en' : 'id'); }} aria-label="Ganti bahasa" className="text-[12px] font-extrabold bg-white/10 hover:bg-white/20 active:scale-95 rounded-full px-3 py-2 flex items-center gap-1.5 transition min-h-[40px]">
           <Icon name="languages" className="w-3.5 h-3.5" /><span>{lang.toUpperCase()}</span>
         </button>
-        <button onClick={() => openModal(<NotifModal />)} aria-label="Notifikasi" className="relative w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 active:scale-95 flex items-center justify-center transition">
-          <Icon name="bell" className="w-5 h-5" />
-          {unread > 0 ? <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-[#0b2447]"></span> : null}
-        </button>
+        {/* Lonceng hanya untuk yang sudah login — tamu tidak melihat notifikasi. */}
+        {user ? (
+          <button onClick={() => openModal(<NotifModal />)} aria-label="Notifikasi" className="relative w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 active:scale-95 flex items-center justify-center transition">
+            <Icon name="bell" className="w-5 h-5" />
+            {unread > 0 ? <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-[#0b2447]"></span> : null}
+          </button>
+        ) : null}
         <div>
           {user ? (
             <div className="flex items-center gap-1.5 sm:gap-2">
