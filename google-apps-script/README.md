@@ -153,7 +153,7 @@ Catatan:
 node google-apps-script/local-tests/mock-harness.mjs
 ```
 
-Harness mem-mock `SpreadsheetApp`, `PropertiesService`, `LockService`, `Utilities`, `CacheService`, `ContentService`, dan `Logger`, serta memuat `seed.gs` ke sandbox yang sama. Saat ini **345 asersi** lulus.
+Harness mem-mock `SpreadsheetApp`, `PropertiesService`, `LockService`, `Utilities`, `CacheService`, `ContentService`, dan `Logger`, serta memuat `seed.gs` ke sandbox yang sama. Saat ini **348 asersi** lulus (termasuk aksi baca `seatinfo`: aturan hold yang sama dengan proyeksi publik, payload murni array kursi, dan `live:false` untuk jadwal basi/tak dikenal).
 
 ## Struktur tab
 
@@ -404,13 +404,15 @@ node google-apps-script/local-tests/mock-harness.mjs
 - `google-apps-script/code.gs:545-809` — `API_MAIN_TABLES` (skema kolom v2; kolom ghost `x:`; `agencies` memakai tab blob `agency_kyc_doc_blob`; `drivers` pakai `driver_alamat` + `driver_doc_blob`; `vehicles` pakai `vehicle_doc_blob`).
 - `google-apps-script/code.gs:810-1031` — `apiColumnSpec_` (prefix `x:`), `apiTables_`, validasi skema, guard sel 45.000 karakter.
 - `google-apps-script/code.gs:1032-1355` — engine tulis/baca kolom: `apiBuildChildRows_` (cabang blob & sblob) dan `apiReadCollection_` (gabung chunk).
-- `google-apps-script/code.gs:1356-1696` — meta/rev, health, `doGet`/`doPost`, dispatch.
-- `google-apps-script/code.gs:1697-2310` — login, register, bootstrap dan filter per peran.
-- `google-apps-script/code.gs:2313-2587` — ganti password, admin user.
-- `google-apps-script/code.gs:2588-4600` — engine `sync` + validator per koleksi (agensi di ~3339, whitelist pengemudi di 3446, booking/payment/ledger, voucher, notifikasi, tiket, route request, lintas koleksi).
-- `google-apps-script/code.gs:4601-akhir` — `apiCommit_`, penerapan koleksi, preservasi secret.
+- `google-apps-script/code.gs:1356-1587` — meta/rev, health, `doGet`/`doPost`.
+- `google-apps-script/code.gs:1588-1695` — aksi baca `seatinfo`: throttle kasar per jadwal, filter visibilitas publik (agensi aktif, rute tampil, `apiSyncScheduleBookable_` delay-aware), aturan kursi seragam (ghost hold kedaluwarsa lepas).
+- `google-apps-script/code.gs:1696-1825` — helper peran + `apiDispatch_` + router aksi.
+- `google-apps-script/code.gs:1826-2424` — login, register, bootstrap dan filter per peran.
+- `google-apps-script/code.gs:2427-2700` — ganti password, admin user.
+- `google-apps-script/code.gs:2701-4713` — engine `sync` + validator per koleksi (agensi di ~3453, whitelist pengemudi di ~3560, booking/payment/ledger, voucher, notifikasi, tiket, route request, lintas koleksi).
+- `google-apps-script/code.gs:4714-akhir` — `apiCommit_`, penerapan koleksi, preservasi secret.
 - `google-apps-script/appsscript.json` — manifest dan OAuth scope.
-- `google-apps-script/local-tests/mock-harness.mjs` — 345 asersi mock (termasuk round-trip v2, blob chunk, migrasi `ensureSchema` + penghapusan kolom selfie, cek slot sadar-skema, alamat berjenjang pengemudi, foto pengemudi/kendaraan di tab sblob, upload KTP besar lewat jalur agen, armada tautan pengemudi pada bootstrap, pengisian server-side `driverId` pada ledger pelanggan, respons sync yang melampirkan catatan pengemudi jadwal tersentuh, pelepasan kursi pada booking pending hold kedaluwarsa, dan penolakan booking pengemudi di luar jendela penjualan 12 jam).
+- `google-apps-script/local-tests/mock-harness.mjs` — 348 asersi mock (termasuk round-trip v2, blob chunk, migrasi `ensureSchema` + penghapusan kolom selfie, cek slot sadar-skema, alamat berjenjang pengemudi, foto pengemudi/kendaraan di tab sblob, upload KTP besar lewat jalur agen, armada tautan pengemudi pada bootstrap, pengisian server-side `driverId` pada ledger pelanggan, respons sync yang melampirkan catatan pengemudi jadwal tersentuh, pelepasan kursi pada booking pending hold kedaluwarsa, penolakan booking pengemudi di luar jendela penjualan 12 jam, dan aksi `seatinfo` untuk cek kursi deteksi dini).
 - `transaceh-react/src/lib/db.js` — cache, diff, antrean sync, rollback.
 - `transaceh-react/src/lib/sheetsApi.js` — transport direct.
 - `transaceh-react/src/lib/remote.js` — bootstrap, login, logout, hydrate revisi.

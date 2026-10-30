@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
 import { routeById, vehicleById, bookingsOf, vehName, vehLayout, schedSeatCap, takenSeats, seatsLeft, audit, setScheduleTripStatus, scheduleNeedsReview, scheduleInHistory, schedById, setScheduleDelay, reportTripDelay, createDriverBooking, confirmDriverBookingPayment, splitFare, tripProgress, bookedPassengers, departureTiming, scheduleIsPast, scheduleMaintenance, maintenancePeriodLabel, scheduleEffectiveDepartureMs, DRIVER_SALE_WINDOW_HOURS } from '@/lib/domain.js';
+import { IS_SHEETS } from '@/lib/runtime.js';
+import { seatInfo } from '@/lib/sheetsApi.js';
 import { fmtClock, fmtRp } from '@/lib/utils.js';
 import { Icon, Empty, BadgeStatus, fmtDate, CabinGrid } from '@/components/ui.jsx';
 import { pickupArea, pickupOptions, pickupOf } from '@/lib/pickups.js';
@@ -265,7 +267,14 @@ function DriverBookingModal({ sid }) {
   const v = vehicleById(s?.vehicleId ?? null);
   const r = routeById(s?.routeId ?? null);
   const tk = takenSeats(s?.id ?? '');
-  const taken = new Set([...tk.paid, ...tk.hold, ...(s?.blockedSeats || []), ...tk.inactive]);
+  /* Overlay hasil cek seatinfo (state, bukan DB): kursi yang baru saja
+     terambil orang tapi belum ada di cache ditampilkan kuning-hold —
+     peta diperbarui hanya dari jawaban server terakhir. */
+  const freshAll = freshTaken && freshTaken.live
+    ? [...new Set([...(freshTaken.takenSeats || []), ...(freshTaken.blocked || []), ...(freshTaken.inactive || [])])]
+    : [];
+  const freshSet = freshAll.filter((x) => !tk.hold.includes(x) && !tk.paid.includes(x));
+  const taken = new Set([...tk.paid, ...tk.hold, ...freshAll, ...(s?.blockedSeats || []), ...tk.inactive]);
   const layout = vehLayout(v);
   const seatOrder = layout.filter((c) => c.type === 'seat' && c.sid).map((c) => c.sid);
   const available = seatOrder.filter((st) => !taken.has(st));
@@ -277,14 +286,53 @@ function DriverBookingModal({ sid }) {
   const [step, setStep] = useState(1);
   const [made, setMade] = useState(null);
   const [paying, setPaying] = useState(false);
+  /* Cek server deteksi dini, pola sama dengan wizard pelanggan: kursi yang
+     baru diklik ditandai 'checking'; baris datanya menampilkan indikator
+     sampai cek lulus, baru field [Nama]/[No. HP] muncul. Overlay hasil cek
+     disimpan di state saja — JANGAN ditulis ke DB (schedules milik server). */
+  const [seatChecks, setSeatChecks] = useState({});
+  const [freshTaken, setFreshTaken] = useState(null);
+  const seatsRef = useRef(seats);
+  useEffect(() => { seatsRef.current = seats; }, [seats]);
   const rows = [...pax].sort((a, b) => seatOrder.indexOf(a.seat) - seatOrder.indexOf(b.seat));
   if (!s) return <div className="p-6 font-bold text-slate-500">Jadwal tidak ditemukan</div>;
+
+  const checkBusy = Object.keys(seatChecks).length > 0;
+
+  /* Jawab cek server: seatInfo dedupe in-flight per jadwal; jawaban segar
+     dinilai terhadap SEMUA kursi terpilih. Fail-open bila jaringan gagal —
+     hakim final tetap validasi `sync` di domain (perisai saat Bayar).
+     Ini SATU-SATUNYA cek server di modal (tidak diulang saat Lanjut Bayar);
+     mengembalikan { out, clash } bila pemanggil perlu hasilnya. */
+  const runSeatCheck = async () => {
+    const out = await seatInfo(s.id);
+    if (!out) { setSeatChecks({}); return { out: null, clash: [] }; }
+    if (out.live === false) {
+      setSeatChecks({});
+      setFreshTaken(null);
+      toast((out.reason || 'Jadwal tidak tersedia') + ' — layar pesan ditutup.', 'err');
+      closeModal();
+      return { out, clash: [] };
+    }
+    const takenOut = new Set([...(out.takenSeats || []), ...(out.blocked || []), ...(out.inactive || [])]);
+    const clash = (seatsRef.current || []).filter((x) => takenOut.has(x));
+    if (clash.length) {
+      setSeats((cur) => cur.filter((x) => !takenOut.has(x)));
+      setPax((cur) => cur.filter((p) => !takenOut.has(p.seat)));
+      toast('Kursi ' + clash.join(', ') + ' sudah diambil — peta diperbarui.', 'err');
+    }
+    setFreshTaken(out);
+    setSeatChecks({});
+    return { out, clash };
+  };
 
   const total = Number(s.price || 0) * seats.length;
   const fare = splitFare(s, seats.length, 0, 'driver');
   const va = '8821 ' + String(Math.floor(100000000000 + Math.random() * 899999999999)).slice(0, 12).replace(/(\d{4})(?=\d)/g, '$1 ');
 
-  /* Pilih kursi seperti alur pelanggan: klik denah, klik lagi untuk melepas. */
+  /* Pilih kursi seperti alur pelanggan: klik denah, klik lagi untuk melepas,
+     dan cek server deteksi dini — baris datanya memuat indikator sampai cek
+     lulus. Kursi draft-resume tidak lewat jalur ini. */
   const toggleSeat = (st) => {
     if (seats.includes(st)) {
       setSeats(seats.filter((x) => x !== st));
@@ -295,6 +343,10 @@ function DriverBookingModal({ sid }) {
     if (seats.length >= maxS) { toast('Maksimal ' + maxS + ' kursi per booking', 'warn'); return; }
     setSeats([...seats, st]);
     setPax([...pax, { seat: st, name: '', phone: '' }]);
+    if (IS_SHEETS) {
+      setSeatChecks((c) => ({ ...c, [st]: 'checking' }));
+      runSeatCheck();
+    }
   };
 
   const setPaxField = (seat, field, val) => {
@@ -309,6 +361,8 @@ function DriverBookingModal({ sid }) {
       toast('Nama dan HP wajib diisi untuk semua penumpang', 'err');
       return;
     }
+    /* Cek server TIDAK diulang di sini — sudah berlaku tiap klik kursi di
+       denah; hakim final tetap validasi server saat pembayaran. */
     const res = createDriverBooking(sid, {
       passengers: rows,
       seats,
@@ -383,9 +437,10 @@ function DriverBookingModal({ sid }) {
           <CabinGrid
             layout={layout}
             paid={tk.paid}
-            hold={tk.hold}
+            hold={tk.hold.concat(freshSet)}
             inactive={tk.inactive}
             selected={seats}
+            checking={Object.keys(seatChecks)}
             onPick={toggleSeat}
             interactive
             plate={v?.plate}
@@ -417,10 +472,18 @@ function DriverBookingModal({ sid }) {
                     <span className="badge bg-sky-600 text-white">Kursi {p.seat}</span>
                     <button onClick={() => toggleSeat(p.seat)} className="text-red-500 hover:bg-red-50 p-1 rounded-lg" title="Lepas kursi"><Icon name="x" className="w-4 h-4" /></button>
                   </div>
-                  <div className="grid grid-cols-2 gap-2 mt-2">
-                    <input value={p.name || ''} onChange={(e) => setPaxField(p.seat, 'name', e.target.value)} placeholder="Nama penumpang" className="text-[13px] font-semibold bg-white border border-slate-200 rounded-xl px-3 py-2 focus-ring" />
-                    <input value={p.phone || ''} onChange={(e) => setPaxField(p.seat, 'phone', e.target.value)} placeholder="No. HP" className="text-[13px] font-semibold bg-white border border-slate-200 rounded-xl px-3 py-2 focus-ring" />
-                  </div>
+                  {seatChecks[p.seat] === 'checking' ? (
+                    /* Cek server berjalan: field [Nama]/[No. HP] baru muncul
+                       setelah cek lulus — tak ada ketikan yang bisa hilang. */
+                    <div className="flex items-center gap-2 mt-2 text-[12.5px] font-bold text-slate-500 bg-white border border-slate-200 rounded-xl px-3 py-2">
+                      <Icon name="timer" className="w-4 h-4 shrink-0 animate-spin" />Memeriksa kursi {p.seat} di server…
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                      <input value={p.name || ''} onChange={(e) => setPaxField(p.seat, 'name', e.target.value)} placeholder="Nama penumpang" className="text-[13px] font-semibold bg-white border border-slate-200 rounded-xl px-3 py-2 focus-ring" />
+                      <input value={p.phone || ''} onChange={(e) => setPaxField(p.seat, 'phone', e.target.value)} placeholder="No. HP" className="text-[13px] font-semibold bg-white border border-slate-200 rounded-xl px-3 py-2 focus-ring" />
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -448,7 +511,7 @@ function DriverBookingModal({ sid }) {
       </div>
 
       <div className="flex gap-2 mt-4"><button onClick={closeModal} className="flex-1 bg-slate-100 font-bold text-[13px] py-2.5 rounded-xl">Batal</button>
-        <button onClick={submit} disabled={left <= 0} className="flex-1 bg-[#0b2447] text-white font-extrabold text-[13px] py-2.5 rounded-xl disabled:opacity-40">Lanjut Bayar</button></div>
+        <button onClick={submit} disabled={left <= 0 || checkBusy} className={`flex-1 bg-[#0b2447] text-white font-extrabold text-[13px] py-2.5 rounded-xl${checkBusy ? ' cursor-not-allowed' : ' disabled:opacity-40'}`}>{checkBusy ? 'Memeriksa kursi…' : 'Lanjut Bayar'}</button></div>
     </div>
   );
 }

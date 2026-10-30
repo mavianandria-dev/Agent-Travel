@@ -97,6 +97,71 @@ export async function call(action, payload = {}) {
   return body.data;
 }
 
+/* seatinfo — cek kursi deteksi dini saat pengguna memilih kursi di denah.
+   Menahan diri: timeout pendek 5,5 dtk + coba ulang 1x; gagal tetap
+   kembalikan null (fail-open — hakim final tetap validasi `sync` server
+   saat pembayaran). Tidak memakai call() karena TIMEOUT_MS 30 dtk terlalu
+   panjang untuk cek ringan yang mengunci UI sekejap. */
+const SEAT_CHECK_TIMEOUT_MS = 5500;
+
+async function seatInfoOnce(scheduleId) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SEAT_CHECK_TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(SHEETS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'seatinfo', scheduleId }),
+      redirect: 'follow',
+      signal: controller.signal,
+    });
+  } catch (e) {
+    if (e && e.name === 'AbortError') throw new ApiError('TIMEOUT', 'Cek kursi kehabisan waktu.');
+    throw new ApiError('NETWORK', 'Tidak bisa menghubungi server untuk cek kursi.');
+  } finally {
+    clearTimeout(timer);
+  }
+
+  let body = null;
+  try {
+    body = JSON.parse(await res.text());
+  } catch {
+    throw new ApiError('BAD_RESPONSE', 'Respons cek kursi bukan JSON.', res.status);
+  }
+  if (!body || body.ok !== true) {
+    const err = (body && body.error) || {};
+    throw new ApiError(err.code || 'UNKNOWN', err.message || 'Cek kursi gagal.', res.status);
+  }
+  return body.data || null;
+}
+
+/* Dedupe in-flight per jadwal: klik beruntun pada jadwal yang sama memakai
+   satu request yang berjalan — klik berikutnya dijawab dari request itu
+   tanpa menambah beban Apps Script. */
+const seatInFlight = new Map();
+
+export async function seatInfo(scheduleId) {
+  const id = String(scheduleId || '').trim();
+  if (!SHEETS_URL || !id) return null;
+  const running = seatInFlight.get(id);
+  if (running) return running;
+  const job = (async () => {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await seatInfoOnce(id);
+      } catch { /* coba ulang 1x; gagal lagi → null */ }
+    }
+    return null;
+  })();
+  seatInFlight.set(id, job);
+  try {
+    return await job;
+  } finally {
+    seatInFlight.delete(id);
+  }
+}
+
 export const sheetsApi = {
   health: () => call('health'),
   login: (email, password) => call('login', { email, password }),

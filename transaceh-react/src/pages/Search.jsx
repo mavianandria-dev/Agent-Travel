@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useApp, freshBW } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
 import { schedById, schedReady, takenSeats, seatsLeft, routeById, vehicleById, driverById, vehLayout, schedSeatCap, audit, notify, vehName, splitFare, createLedger, routeBookable, isRouteSuspended, canPayBooking, scheduleIsPast, ensureHoldExpiry, agencyById, routeGroupKey, groupRoutes, routesInRouteGroup, scheduleMaintenance, maintenancePeriodLabel } from '@/lib/domain.js';
+import { IS_SHEETS } from '@/lib/runtime.js';
+import { seatInfo } from '@/lib/sheetsApi.js';
 import { fmtRp, todayStr, uid, fmtClock } from '@/lib/utils.js';
 import { Icon, CabinGrid, fmtDate } from '@/components/ui.jsx';
 import { HOME_PICKUP, pickupOptions } from '@/lib/pickups.js';
@@ -202,6 +204,45 @@ export default function Search() {
   const [calMonth, setCalMonth] = useState(null);
   useEffect(() => { if (bw.step <= 1) setCalMonth(null); }, [bw.step]);
 
+  /* Cek server saat memilih kursi (deteksi dini — BUKAN kunci): kursi yang
+     baru diklik ditandai 'checking'; baris [Nama]/[No. HP] kursi itu baru
+     muncul setelah cek lulus. Overlay `freshTaken` menyimpan hasil cek di
+     state komponen saja — JANGAN ditulis ke DB (koleksi schedules milik
+     server; menulisnya meracuni sync dengan diff palsu yang pasti ditolak).
+     Hakim final tetap validasi server saat Bayar. */
+  const [seatChecks, setSeatChecks] = useState({});
+  const [freshTaken, setFreshTaken] = useState(null);
+  const checkBusy = Object.keys(seatChecks).length > 0;
+  const bwRef = useRef(bw);
+  useEffect(() => { bwRef.current = bw; }, [bw]);
+  useEffect(() => { if (bw.step !== 4) setSeatChecks({}); }, [bw.step]);
+
+  /* Satu request cek per jadwal berjalan (seatInfo dedupe in-flight). Jawaban
+     segar dinilai terhadap SEMUA kursi terpilih — kursi yang baru diklik
+     pun dijawab dari peta yang sama. Fail-open bila jaringan gagal.
+     Ini SATU-SATUNYA cek server di alur pilih kursi (tidak diulang saat
+     Lanjut); mengembalikan { out, clash } bila pemanggil perlu hasilnya. */
+  const runSeatCheck = async (schedId) => {
+    const out = await seatInfo(schedId);
+    if (!out) { setSeatChecks({}); return { out: null, clash: [] }; }
+    if (out.live === false) {
+      setSeatChecks({});
+      setFreshTaken(null);
+      toast((out.reason || 'Jadwal tidak tersedia') + ' — pilih armada lain.', 'err');
+      setBw((cur) => ({ ...cur, step: 3, scheduleId: null, seats: [], passengers: [], pickup: '', pickupAddr: '', pickupCoords: '', voucher: '', discount: 0 }));
+      return { out, clash: [] };
+    }
+    const taken = new Set([...(out.takenSeats || []), ...(out.blocked || []), ...(out.inactive || [])]);
+    const clash = (bwRef.current.seats || []).filter((x) => taken.has(x));
+    if (clash.length) {
+      setBw((cur) => ({ ...cur, seats: cur.seats.filter((x) => !taken.has(x)), passengers: cur.passengers.filter((p) => !taken.has(p.seat)) }));
+      toast('Kursi ' + clash.join(', ') + ' sudah diambil — peta diperbarui.', 'err');
+    }
+    setFreshTaken(out);
+    setSeatChecks({});
+    return { out, clash };
+  };
+
   const allRoutes = DB.load('routes', []);
   const routes = allRoutes.filter(routeBookable);
   const routeGroups = groupRoutes(routes);
@@ -232,19 +273,24 @@ export default function Search() {
         if (!bw.pickupAddr.trim()) return toast('Isi alamat jemput rumah', 'warn');
         if (!validCoords(bw.pickupCoords)) return toast('Tentukan titik jemput di peta dulu', 'warn');
       }
+      /* Cek server TIDAK diulang di sini — cek sudah berlaku saat klik
+         kursi (semua kursi terpilih dinilai dalam jawaban yang sama).
+         Penjaring pasif cache tetap ada; hakim final tetap validasi
+         server saat Bayar (doCheckout + sync). Jendela tunggu antara
+         cek lulus dan Bayar disengaja: tanpa request kedua. */
       const tk = takenSeats(bw.scheduleId);
       const clash = bw.seats.find((s) => tk.paid.includes(s) || tk.hold.includes(s));
       if (clash) return toast('Kursi ' + clash + ' baru saja terbooking orang lain. Pilih kursi lain.', 'err');
     }
     if (bw.step >= 5) return;
-    setBw({ ...bw, step: bw.step + 1 });
+    setBw((cur) => ({ ...cur, step: cur.step + 1 }));
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const wizNav = (back, next) => (
+  const wizNav = (back, next, busy) => (
     <div className="flex gap-2 mt-5 sticky bottom-[76px] md:static bg-gradient-to-t from-white via-white to-transparent md:bg-none pt-2 pb-1 -mx-1 px-1 z-10">
       {back ? <button onClick={() => { setBw({ ...bw, step: bw.step - 1 }); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="btn-touch flex-1 bg-slate-100 hover:bg-slate-200 active:scale-[.98] font-extrabold text-[14px] py-3.5 rounded-2xl transition flex items-center justify-center gap-2"><Icon name="arrow-left" className="w-4 h-4" />Kembali</button> : null}
-      {next ? <button onClick={wizNext} className="btn-touch flex-[2] bg-[#0b2447] hover:bg-sky-600 active:scale-[.98] text-white font-extrabold text-[14px] py-3.5 rounded-2xl transition flex items-center justify-center gap-2 shadow-lg">Lanjut<Icon name="arrow-right" className="w-4 h-4" /></button> : null}
+      {next ? <button onClick={wizNext} disabled={!!busy} className={`btn-touch flex-[2] bg-[#0b2447] hover:bg-sky-600 active:scale-[.98] text-white font-extrabold text-[14px] py-3.5 rounded-2xl transition flex items-center justify-center gap-2 shadow-lg${busy ? ' opacity-60 cursor-not-allowed' : ''}`}>{busy ? 'Memeriksa kursi…' : 'Lanjut'}<Icon name="arrow-right" className="w-4 h-4" /></button> : null}
     </div>
   );
 
@@ -264,14 +310,22 @@ export default function Search() {
     } else {
       const maxS = schedSeatCap(bw.scheduleId);
       if (bw.seats.length >= maxS) { toast('Maksimal ' + maxS + ' kursi per booking', 'warn'); return; }
-      const passengers = [...bw.passengers];
-      if (!passengers.find((p) => p.seat === st)) passengers.push({ seat: st, name: '', phone: '' });
-      setBw({ ...bw, seats: [...bw.seats, st], passengers });
+      setBw((cur) => {
+        const passengers = cur.passengers.some((p) => p.seat === st) ? cur.passengers : [...cur.passengers, { seat: st, name: '', phone: '' }];
+        return { ...cur, seats: cur.seats.includes(st) ? cur.seats : [...cur.seats, st], passengers };
+      });
       /* Ponsel: gulir SEKALI saja — tepat saat kursi pertama dipilih (dari
          0 kursi). Pilihan berikutnya tidak pernah menggulir; di desktop
          form sudah tampak di samping. */
       if (bw.seats.length === 0 && !window.matchMedia('(min-width: 768px)').matches && paxRef.current && !paxShown()) paxRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
       toast('Kursi ' + st + ' dipilih', 'info');
+      /* Cek server deteksi dini: baris data kursi ini tampil "Memeriksa…"
+         dan field [Nama]/[No. HP] baru muncul setelah cek lulus. Kursi dari
+         draft-resume TIDAK lewat jalur ini — langsung dianggap ok. */
+      if (IS_SHEETS) {
+        setSeatChecks((c) => ({ ...c, [st]: 'checking' }));
+        runSeatCheck(bwRef.current.scheduleId);
+      }
     }
   };
 
@@ -476,6 +530,12 @@ export default function Search() {
     const s = schedById(bw.scheduleId);
     if (!s) return (<><div className="text-center py-10 text-slate-400 font-bold">Jadwal tidak ditemukan — kembali pilih armada.</div>{wizNav(true, false)}</>);
     const tk = takenSeats(s.id);
+    /* Overlay hasil cek seatinfo (state lokal, bukan DB): kursi yang baru
+       saja terambil orang tapi belum ada di cache ditampilkan kuning-hold —
+       peta diperbarui hanya dari jawaban server terakhir. */
+    const fresh = freshTaken && freshTaken.live ? freshTaken : null;
+    const freshSet = fresh ? [...new Set([...(fresh.takenSeats || []), ...(fresh.blocked || []), ...(fresh.inactive || [])])] : [];
+    const holdShown = tk.hold.concat(freshSet.filter((x) => !tk.hold.includes(x) && !tk.paid.includes(x)));
     const v = vehicleById(s.vehicleId);
     const r = routeById(s.routeId);
     const layout = vehLayout(v);
@@ -489,7 +549,7 @@ export default function Search() {
             ))}
             {(tk.inactive || []).length ? <span className="flex items-center gap-1.5 text-slate-500"><Icon name="ban" className="w-3.5 h-3.5" />Nonaktif ({tk.inactive.join(', ')})</span> : null}
           </div>
-          <CabinGrid layout={layout} paid={tk.paid} hold={tk.hold} inactive={tk.inactive} selected={bw.seats} onPick={toggleSeat} interactive plate={v.plate} vehName={vehName(v)} legend={false} />
+          <CabinGrid layout={layout} paid={tk.paid} hold={holdShown} inactive={tk.inactive} selected={bw.seats} checking={Object.keys(seatChecks)} onPick={toggleSeat} interactive plate={v.plate} vehName={vehName(v)} legend={false} />
         </div>
         <div ref={paxRef} className="scroll-mt-20"><h3 className="font-extrabold text-[16px]">Data Penumpang <span className="badge bg-sky-100 text-sky-700">{bw.seats.length} kursi</span></h3>
           {bw.seats.length === 0 ? (
@@ -499,10 +559,19 @@ export default function Search() {
               <div className="space-y-2.5 mt-3">{bw.seats.map((st) => (
                 <div key={st} className="bg-slate-50 border border-slate-200 rounded-2xl p-3">
                   <div className="flex items-center justify-between"><span className="badge bg-sky-600 text-white">Kursi {st}</span><button onClick={() => setBw({ ...bw, seats: bw.seats.filter((x) => x !== st), passengers: bw.passengers.filter((p) => p.seat !== st) })} className="text-red-500 hover:bg-red-50 p-1 rounded-lg"><Icon name="x" className="w-4 h-4" /></button></div>
-                  <div className="grid grid-cols-2 gap-2 mt-2">
-                    <input placeholder="Nama penumpang" value={((bw.passengers.find((p) => p.seat === st) || {}).name || '')} onChange={(e) => setPax(st, 'name', e.target.value)} className="text-[13px] font-semibold bg-white border border-slate-200 rounded-xl px-3 py-2 focus-ring" />
-                    <input placeholder="No. HP" value={((bw.passengers.find((p) => p.seat === st) || {}).phone || '')} onChange={(e) => setPax(st, 'phone', e.target.value)} className="text-[13px] font-semibold bg-white border border-slate-200 rounded-xl px-3 py-2 focus-ring" />
-                  </div>
+                  {seatChecks[st] === 'checking' ? (
+                    /* Cek server berjalan: field [Nama]/[No. HP] BARU muncul
+                       setelah cek lulus — tidak ada ketikan yang bisa hilang
+                       saat hasil mengembalikan kursi tutup otomatis. */
+                    <div className="flex items-center gap-2 mt-2 text-[12.5px] font-bold text-slate-500 bg-white border border-slate-200 rounded-xl px-3 py-2.5">
+                      <Icon name="timer" className="w-4 h-4 shrink-0 animate-spin" />Memeriksa kursi {st} di server…
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                      <input placeholder="Nama penumpang" value={((bw.passengers.find((p) => p.seat === st) || {}).name || '')} onChange={(e) => setPax(st, 'name', e.target.value)} className="text-[13px] font-semibold bg-white border border-slate-200 rounded-xl px-3 py-2 focus-ring" />
+                      <input placeholder="No. HP" value={((bw.passengers.find((p) => p.seat === st) || {}).phone || '')} onChange={(e) => setPax(st, 'phone', e.target.value)} className="text-[13px] font-semibold bg-white border border-slate-200 rounded-xl px-3 py-2 focus-ring" />
+                    </div>
+                  )}
                 </div>
               ))}</div>
               <label className="block text-[12px] font-extrabold mt-3 mb-1">TITIK JEMPUT (wilayah {r.from})</label>
@@ -580,7 +649,7 @@ export default function Search() {
         {bw.step === 1 ? renderStep1() : null}
         {bw.step === 2 ? renderStep2() : null}
         {bw.step === 3 ? renderStep3() : null}
-        {bw.step === 4 ? (<>{renderStep4()}{wizNav(true, true)}</>) : null}
+        {bw.step === 4 ? (<>{renderStep4()}{wizNav(true, true, checkBusy)}</>) : null}
         {bw.step === 5 ? renderStep5() : null}
       </div>
     </div>

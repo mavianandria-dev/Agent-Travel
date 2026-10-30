@@ -151,6 +151,13 @@ var API_SYNC_ORDER = [
   'settings', 'fees', 'audit'
 ];
 
+/* Aksi baca `seatinfo` — cek kursi deteksi dini saat pengguna memilih
+   kursi di wizard/modal tiket. Baca saja (tanpa lock, tanpa tulis); hakim
+   tetap milik validasi `sync` saat pembayaran. Throttle kasar hanya untuk
+   pelindung spam pada bacaan publik. */
+var API_SEATINFO_RPM = 90;
+var API_SEATINFO_WINDOW_SECONDS = 61;
+
 var API_PROP_REQUIRE_PROXY_KEY = 'REQUIRE_PROXY_KEY';
 var API_PROP_PROXY_KEY = 'API_PROXY_KEY';
 var API_PROP_TOKEN_SECRET = 'API_TOKEN_SECRET';
@@ -1580,6 +1587,112 @@ function apiTakenSeatsMap_(bookings, vehiclesById, schedules) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Action: seatinfo (baca publik — deteksi dini pemilihan kursi)       */
+/* ------------------------------------------------------------------ */
+
+/** Rute tampil untuk agensi itu? Aturan sama dengan klien
+ *  (domain.js routeBookable/isRouteSuspended): rute aktif, agensinya
+ *  terdaftar, dan tidak sedang disuspend untuk agensinya. */
+function apiSeatRouteVisibleForAgency_(route, agencyId) {
+  if (!route || route.active === false) return false;
+  var ids = Array.isArray(route.agencyIds) ? route.agencyIds : [];
+  if (!ids.length) return true;
+  if (ids.indexOf(String(agencyId || '')) < 0) return false;
+  var susp = (route && route.suspensions) || {};
+  return !susp[String(agencyId || '')];
+}
+
+/**
+ * Aksi `seatinfo` — jawab kursi terpakai satu jadwal WAKTU-ITU untuk cek
+ * dini saat pengguna klik kursi (Search.jsx / DriverBookingModal). Boleh
+ * tanpa token (tamu): jawaban hanya array nomor kursi. Aturan memakai yang
+ * seragam: apiTakenSeatsMap_ (paid/done + pending yang masih bisa dibayar;
+ * ghost hold kedaluwarsa tidak dihitung), apiSyncScheduleBookable_ (status
+ * open, bukan ontrip/cancelled, tak maintenance aktif, belum berangkat —
+ * delay-aware), agensi publik, rute tampil untuk agensinya. Baca saja:
+ * tanpa LockService dan tanpa penulisan — keputusan tetap milik validasi
+ * `sync` saat pembayaran; aksi ini hanya mempercepat kegagalan jujur.
+ */
+function apiSeatInfo_(req) {
+  var body = req.body || {};
+  var scheduleId = String(body.scheduleId || '').trim();
+  if (!scheduleId) throw apiError_('VALIDATION', 'scheduleId wajib diisi.');
+
+  /* Pelindung kasar anti-spam: satu jadwal dibatasi jumlah cek per menit. */
+  var cache = apiCache_();
+  if (cache) {
+    var rlKey = 'rl:seatinfo:' + scheduleId.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 48);
+    var hits = Number(cache.get(rlKey) || 0) || 0;
+    if (hits >= API_SEATINFO_RPM) {
+      throw apiError_('RATE_LIMITED', 'Terlalu banyak cek kursi. Coba lagi sebentar.');
+    }
+    cache.put(rlKey, String(hits + 1), API_SEATINFO_WINDOW_SECONDS);
+  }
+
+  var ss = apiSpreadsheet_();
+  var schedules = apiReadCollection_(ss, 'schedules');
+  var schedule = null;
+  for (var i = 0; i < schedules.length && !schedule; i++) {
+    if (String(schedules[i].id) === scheduleId) schedule = schedules[i];
+  }
+  if (!schedule) return { ok: true, data: { live: false, reason: 'Jadwal tidak ditemukan.' } };
+
+  var routes = apiReadCollection_(ss, 'routes');
+  var route = null;
+  for (var j = 0; j < routes.length && !route; j++) {
+    if (String(routes[j].id) === String(schedule.routeId || '')) route = routes[j];
+  }
+  var agencies = apiReadCollection_(ss, 'agencies');
+  var agency = null;
+  for (var k = 0; k < agencies.length && !agency; k++) {
+    if (String(agencies[k].id) === String(schedule.agencyId || '')) agency = agencies[k];
+  }
+
+  if (!apiSyncScheduleBookable_(schedule)) return { ok: true, data: { live: false, reason: 'Jadwal sudah tidak tersedia.' } };
+  if (!apiAgencyIsPublic_(agency)) return { ok: true, data: { live: false, reason: 'Agen tidak tersedia.' } };
+  if (!apiSeatRouteVisibleForAgency_(route, schedule.agencyId)) return { ok: true, data: { live: false, reason: 'Rute tidak tersedia.' } };
+
+  var vehicles = apiReadCollection_(ss, 'vehicles');
+  var vehicle = null;
+  for (var m = 0; m < vehicles.length && !vehicle; m++) {
+    if (String(vehicles[m].id) === String(schedule.vehicleId || '')) vehicle = vehicles[m];
+  }
+
+  /* Kursi dari booking memakai aturan hold seragam (sama dengan aturan
+     apiTakenSeatsMap_): paid/done selalu; pending hanya bila holdExpiry
+     masih berlaku; tanpa holdExpiry = hold tanpa batas (tetap memegang). */
+  var bookings = apiReadCollection_(ss, 'bookings');
+  var bySeat = {};
+  bookings.forEach(function (booking) {
+    var status = String((booking && booking.status) || '');
+    if (status !== 'paid' && status !== 'done' && status !== 'pending') return;
+    if (String((booking && booking.scheduleId) || '') !== scheduleId) return;
+    if (status === 'pending') {
+      var holdMs = Date.parse((booking && booking.holdExpiry) || '');
+      if (isFinite(holdMs) && holdMs <= Date.now()) return; /* ghost hold dilepas */
+    }
+    var seats = Array.isArray(booking && booking.seats) ? booking.seats : [];
+    seats.forEach(function (seat) {
+      if (seat != null && seat !== '') bySeat[String(seat)] = true;
+    });
+  });
+  var blocked = ((schedule && Array.isArray(schedule.blockedSeats)) ? schedule.blockedSeats : [])
+    .filter(function (st) { return st != null && st !== ''; });
+  var inactive = ((vehicle && Array.isArray(vehicle.inactiveSeats)) ? vehicle.inactiveSeats : [])
+    .filter(function (st) { return st != null && st !== ''; });
+
+  return {
+    ok: true,
+    data: {
+      live: true,
+      takenSeats: Object.keys(bySeat).sort(),
+      blocked: blocked,
+      inactive: inactive
+    }
+  };
+}
+
+/* ------------------------------------------------------------------ */
 /* User / role helper                                                  */
 /* ------------------------------------------------------------------ */
 
@@ -1695,6 +1808,7 @@ function apiDispatch_(req) {
     case 'register': return apiRegister_(req, cfg);
     case 'session': return apiSession_(req, cfg);
     case 'bootstrap': return apiBootstrap_(req, cfg);
+    case 'seatinfo': return apiSeatInfo_(req);
     case 'commit': return apiCommit_(req, cfg);
     case 'sync': return apiSync_(req, cfg);
     case 'changepassword': return apiChangePassword_(req, cfg);

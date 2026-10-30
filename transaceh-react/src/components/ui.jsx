@@ -203,7 +203,7 @@ export function DocPreview({ title, src, onBack }) {
 }
 
 /* Denah kabin 4 kolom — dipakai booking (interaktif), blokir kursi, & detail armada (statis) */
-export function CabinGrid({ layout, paid = [], hold = [], inactive = [], blocked = [], selected = [], onPick = () => {}, interactive = false, plate, vehName, legend = true }) {
+export function CabinGrid({ layout, paid = [], hold = [], inactive = [], blocked = [], selected = [], checking = [], onPick = () => {}, interactive = false, plate, vehName, legend = true }) {
   const cells = [];
   let skip = false;
   layout.forEach((c, i) => {
@@ -222,6 +222,7 @@ export function CabinGrid({ layout, paid = [], hold = [], inactive = [], blocked
       const st = c.sid;
       const isOff = inactive.includes(st);
       const isBlocked = blocked.includes(st);
+      const isChecking = interactive && selected.includes(st) && checking.includes(st);
       const cls = isOff || paid.includes(st) ? 'filled' : hold.includes(st) ? 'held' : isBlocked ? 'blocked' : selected.includes(st) ? 'selected' : 'avail';
       const dis = isBlocked ? false : (cls !== 'avail' && cls !== 'selected');
       const icon = isOff ? 'ban' : cls === 'filled' ? 'x' : cls === 'held' ? 'timer' : cls === 'blocked' ? 'ban' : 'armchair';
@@ -234,7 +235,7 @@ export function CabinGrid({ layout, paid = [], hold = [], inactive = [], blocked
         </>
       );
       cells.push(interactive ? (
-        <button key={i} disabled={dis} onClick={() => onPick(st)} aria-label={`Kursi ${st} (bangku lebar)`} title={isOff ? 'Nonaktif oleh agen' : isBlocked ? 'Diblokir — klik untuk buka lagi' : undefined} className={`seat ${cls} rounded-xl h-[58px] min-h-[54px] flex flex-col items-center justify-center font-extrabold text-[14px] active:scale-95`} style={{ gridColumn: 'span 2' }}>
+        <button key={i} disabled={dis} onClick={() => onPick(st)} aria-label={`Kursi ${st} (bangku lebar)`} title={isOff ? 'Nonaktif oleh agen' : isBlocked ? 'Diblokir — klik untuk buka lagi' : undefined} className={`seat ${cls} rounded-xl h-[58px] min-h-[54px] flex flex-col items-center justify-center font-extrabold text-[14px] active:scale-95${isChecking ? ' animate-pulse ring-2 ring-sky-400/70 ring-offset-1' : ''}`} style={{ gridColumn: 'span 2' }}>
           {inner}
         </button>
       ) : (
@@ -250,6 +251,7 @@ export function CabinGrid({ layout, paid = [], hold = [], inactive = [], blocked
       const st = c.sid;
       const isOff = c.type === 'off' || inactive.includes(st);
       const isBlocked = blocked.includes(st);
+      const isChecking = interactive && selected.includes(st) && checking.includes(st);
       const cls = isOff || paid.includes(st) ? 'filled' : hold.includes(st) ? 'held' : isBlocked ? 'blocked' : selected.includes(st) ? 'selected' : 'avail';
       const dis = isBlocked ? false : (cls !== 'avail' && cls !== 'selected');
       const icon = isOff ? 'ban' : cls === 'filled' ? 'x' : cls === 'held' ? 'timer' : cls === 'blocked' ? 'ban' : 'armchair';
@@ -262,7 +264,7 @@ export function CabinGrid({ layout, paid = [], hold = [], inactive = [], blocked
         </>
       );
       cells.push(interactive ? (
-        <button key={i} disabled={dis} onClick={() => onPick(st)} aria-label={`Kursi ${st}${isOff ? ' nonaktif' : ''}${isBlocked ? ' diblokir' : ''}`} title={isOff ? 'Nonaktif oleh agen' : isBlocked ? 'Diblokir — klik untuk buka lagi' : undefined} className={`seat ${cls} rounded-xl h-[58px] min-h-[54px] flex flex-col items-center justify-center font-extrabold text-[14px] active:scale-95`}>
+        <button key={i} disabled={dis} onClick={() => onPick(st)} aria-label={`Kursi ${st}${isOff ? ' nonaktif' : ''}${isBlocked ? ' diblokir' : ''}`} title={isOff ? 'Nonaktif oleh agen' : isBlocked ? 'Diblokir — klik untuk buka lagi' : undefined} className={`seat ${cls} rounded-xl h-[58px] min-h-[54px] flex flex-col items-center justify-center font-extrabold text-[14px] active:scale-95${isChecking ? ' animate-pulse ring-2 ring-sky-400/70 ring-offset-1' : ''}`}>
           {inner}
         </button>
       ) : (

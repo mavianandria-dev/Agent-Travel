@@ -1149,6 +1149,35 @@ const ghostSched = (pubGhost.schedules || []).find((x) => String(x.id) === 's_2'
 ok('proyeksi publik hanya menghitung hold yang masih valid (ghost A2 lepas, done B1 tetap)',
   Array.isArray(ghostSched.takenSeats) && ghostSched.takenSeats.includes('B1') && !ghostSched.takenSeats.includes('A2'),
   ghostSched.takenSeats);
+/* seatinfo — cek kursi baca-saja untuk deteksi dini (klik kursi di denah).
+   Aturan kursi harus sama persis dengan proyeksi publik: ghost hold
+   kedaluwarsa tidak dihitung; payload murni array kursi tanpa field lain;
+   jadwal basi/tak dikenal dijawab live:false bukan error. Diletakkan
+   SEBELUM sync booking kursi ghost supaya A2 masih berstatus ghost. */
+const seatOut = dispatch(bodyOf({ scheduleId: 's_2' }, { action: 'seatinfo' }));
+ok('seatinfo publik memakai aturan hold yang sama (ghost A2 lepas, done B1 tetap)',
+  seatOut.ok === true && seatOut.data.live === true &&
+  Array.isArray(seatOut.data.takenSeats) &&
+  seatOut.data.takenSeats.includes('B1') &&
+  !seatOut.data.takenSeats.includes('A2'), seatOut.data);
+ok('seatinfo payload murni kursi — tidak membocorkan field lain',
+  seatOut.ok === true && Object.keys(seatOut.data).sort().join(',') === 'blocked,inactive,live,takenSeats' &&
+  !('driverName' in seatOut.data) && !('holdExpiry' in seatOut.data), seatOut.data);
+const seatSchedulesBefore = S.apiReadCollection_(spread, 'schedules');
+const seatPastDep = nearDate(-3);
+seedCollection('schedules', seatSchedulesBefore.concat([{
+  id: 's_basi', agencyId: 'ag_1', routeId: 'rt_1', vehicleId: 'v_1', driverId: 'd_1',
+  driverName: 'Bang Jamil', backupDriverId: '', backupName: '', date: seatPastDep.date,
+  time: seatPastDep.time, price: 150000, status: 'open', tripStatus: 'scheduled',
+  blockedSeats: [], createdAt: '2026-10-20T00:00:00.000Z'
+}]));
+const seatPast = dispatch(bodyOf({ scheduleId: 's_basi' }, { action: 'seatinfo' }));
+const seatGone = dispatch(bodyOf({ scheduleId: 's_tidak_ada' }, { action: 'seatinfo' }));
+ok('seatinfo menjawab live:false untuk jadwal basi & jadwal yang tidak ada',
+  seatPast.ok === true && seatPast.data.live === false && !!seatPast.data.reason &&
+  seatGone.ok === true && seatGone.data.live === false && !!seatGone.data.reason,
+  [seatPast.data, seatGone.data]);
+seedCollection('schedules', seatSchedulesBefore);
 const ghostRev = revOf('bookings');
 res = sync({ bookings: { baseRev: ghostRev, upserts: [Object.assign({}, syncBooking, {
   id: 'b_sync_ghostseat', code: 'TA-GS', scheduleId: 's_2', seats: ['A2'],
