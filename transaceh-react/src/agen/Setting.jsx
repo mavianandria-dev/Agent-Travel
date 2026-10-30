@@ -132,7 +132,7 @@ function SettingInner({ agency }) {
       </div>
 
       <div className="bg-white rounded-3xl shadow-card p-5"><h3 className="font-extrabold text-[15px]">Kebijakan Refund &amp; Voucher</h3>
-        <div className="text-[12.5px] font-semibold bg-slate-50 rounded-2xl p-3 mt-2"><div className="text-[12px] font-bold text-slate-600">{refundPolicyText(a0.refundPolicy)}</div><div className="text-[11.5px] font-medium text-slate-400 mt-1">Refund tiket diatur Super Admin. Hanya komponen tiket yang dikembalikan; jasa agen &amp; fee platform tidak.</div></div>
+        <div className="text-[12.5px] font-semibold bg-slate-50 rounded-2xl p-3 mt-2"><div className="text-[12px] font-bold text-slate-600">{refundPolicyText(a0.refundPolicy)}</div><div className="text-[11.5px] font-medium text-slate-400 mt-1">Refund tiket diatur Super Admin. Tier (semua −fee) mengembalikan pembayaran kecuali fee platform; tier (tiket saja) hanya komponen tiket — komisi via sopir hangus.</div></div>
         <div className="text-[12px] font-extrabold mt-3">VOUCHER AKTIF</div>
         {vouchers.map((vv) => {
           const own = vv.agencyId === agency.id;

@@ -437,26 +437,26 @@ seedCollection('agencies', [
     id: 'ag_1', name: 'Barakah Travel', logo: '', address: 'Jl. Merdeka No.12, Calang',
     phone: '0654-20112', bank: 'BCA 8210-9921-11 a.n. Barakah Travel', status: 'active',
     feeType: 'percent', feeValue: 8,
-    refundPolicy: [{ minH: 72, pct: 100 }, { minH: 24, pct: 50 }, { minH: 0, pct: 0 }],
+    refundPolicy: [{ minH: 72, pct: 100, scope: 'minusFee' }, { minH: 24, pct: 50 }, { minH: 0, pct: 0 }],
     rating: 4.8, trips: 120, kyc: kyc1
   },
   {
     id: 'ag_2', name: 'Putra Jaya', logo: '', address: 'Jl. T. Umar No.88, Banda Aceh',
     phone: '0651-77821', bank: 'Mandiri 8900-1122-33 a.n. Putra Jaya', status: 'active',
     feeType: 'percent', feeValue: 10,
-    refundPolicy: [{ minH: 72, pct: 100 }, { minH: 24, pct: 50 }, { minH: 0, pct: 0 }],
+    refundPolicy: [{ minH: 72, pct: 100, scope: 'minusFee' }, { minH: 24, pct: 50 }, { minH: 0, pct: 0 }],
     rating: 4.6, trips: 80, kyc: kyc2
   },
   {
     id: 'ag_new', name: 'Travel Baru', logo: '', address: 'Jl. Baru No.1', phone: '0651-000000',
     bank: '-', status: 'pending', feeType: 'percent', feeValue: 8,
-    refundPolicy: [{ minH: 72, pct: 100 }, { minH: 24, pct: 50 }, { minH: 0, pct: 0 }],
+    refundPolicy: [{ minH: 72, pct: 100, scope: 'minusFee' }, { minH: 24, pct: 50 }, { minH: 0, pct: 0 }],
     rating: 5.0, trips: 0
   },
   {
     id: 'ag_4', name: 'Cahaya Perkasa', logo: '', address: 'Jl. Diponegoro No.7', phone: '0655-31212',
     bank: '-', status: 'pending', feeType: 'percent', feeValue: 8,
-    refundPolicy: [{ minH: 72, pct: 100 }, { minH: 24, pct: 50 }, { minH: 0, pct: 0 }],
+    refundPolicy: [{ minH: 72, pct: 100, scope: 'minusFee' }, { minH: 24, pct: 50 }, { minH: 0, pct: 0 }],
     rating: 5.0, trips: 0
   }
 ]);
@@ -765,7 +765,13 @@ const publicRes = dispatch(bodyOf({}, { action: 'bootstrap' }));
 const publicRecords = publicRes.data ? publicRes.data.records : {};
 const publicJson = JSON.stringify(publicRes);
 ok('bootstrap publik sukses tanpa token', publicRes.ok === true && publicRes.data.role === 'publik', publicRes);
-ok('bootstrap publik hanya koleksi publik', Object.keys(publicRecords).sort().join(',') === 'agencies,banners,reviews,routes,schedules,vehicles', Object.keys(publicRecords));
+ok('bootstrap publik hanya koleksi publik', Object.keys(publicRecords).sort().join(',') === 'agencies,banners,reviews,routes,schedules,settings,vehicles', Object.keys(publicRecords));
+ok('bootstrap publik hanya membuka platformFee dari settings',
+  (publicRecords.settings || []).length === 1 &&
+  String((publicRecords.settings[0] || {}).key) === 'platformFee' &&
+  String((publicRecords.settings[0].value || {}).type) === 'percent' &&
+  Number(publicRecords.settings[0].value.value) === 8,
+  publicRecords.settings);
 ok('bootstrap publik tanpa users/bookings/notifications',
   !Object.keys(publicRecords).includes('users') &&
   !Object.keys(publicRecords).includes('bookings') &&
@@ -853,6 +859,9 @@ ok('pelanggan hanya melihat tiket miliknya', idsOf(custRecords.supportTickets).j
 ok('pelanggan hanya melihat user dirinya', idsOf(custRecords.users).join(',') === 'u_cust_1', idsOf(custRecords.users));
 ok('pelanggan hanya melihat audit miliknya', idsOf(custRecords.audit).join(',') === 'a_1', idsOf(custRecords.audit));
 ok('pelanggan menerima voucher untuk checkout', (custRecords.vouchers || []).some((v) => v.code === 'HEMAT20'));
+ok('pelanggan tetap menerima settings penuh (platformFee ikut)',
+  (custRecords.settings || []).some((s) => String(s.key) === 'platformFee' && Number((s.value || {}).value) === 8),
+  custRecords.settings);
 ok('pelanggan tidak melihat katalog agensi pending', !idsOf(custRecords.vehicles).includes('v_pending') && !idsOf(custRecords.schedules).includes('s_pending') && !idsOf(custRecords.reviews).includes('rv_pending'));
 ok('pelanggan tidak menerima data agensi sensitif', !JSON.stringify(custRecords.agencies || []).includes('"kyc"'));
 ok('pelanggan melihat takenSeats jadwal', !!record(custRecords, 'schedules', 's_1') && record(custRecords, 'schedules', 's_1').takenSeats.join(',') === 'A1,A2,A3,A5');
@@ -1111,9 +1120,10 @@ const bookingBase = revOf('bookings');
 const syncBooking = {
   id: 'b_sync_1', code: 'TA-S1', scheduleId: 's_1', userEmail: 'cust1@test.local',
   seats: ['A4'], passengers: [{ name: 'Uji Sync', seat: 'A4' }],
-  subtotal: 150000, discount: 0, total: 150000, status: 'pending',
+  /* Model B: subtotal = Tiket (harga rute) + Jasa − Diskon; total = subtotal + fee */
+  subtotal: 160000, discount: 0, total: 172800, status: 'pending',
   holdExpiry: '2099-01-01T00:00:00.000Z',
-  createdAt: '2026-10-24T05:00:00.000Z'
+  createdAt: '2026-10-30T05:00:00.000Z'   /* ≥ FARE_MODEL_B_SINCE → Model B */
 };
 res = sync({ bookings: { baseRev: bookingBase, upserts: [syncBooking], deletes: [] } }, custToken);
 ok('sync pelanggan membuat booking di kursi kosong sukses', res.ok === true && res.data.revisions.bookings === bookingBase + 1, res);
@@ -1240,7 +1250,7 @@ ok('sync pelanggan tidak boleh mengubah field voucher lain', res.ok === false &&
 const voucherBooking = Object.assign({}, syncBooking, {
   id: 'b_voucher_restore', code: 'TA-VR', seats: ['A6'],
   passengers: [{ name: 'Voucher', seat: 'A6' }],
-  voucher: 'HEMAT20', discount: 30000, total: 120000
+  voucher: 'HEMAT20', discount: 30000, subtotal: 130000, total: 140400
 });
 res = sync({
   bookings: { baseRev: revOf('bookings'), upserts: [voucherBooking], deletes: [] },
@@ -1400,8 +1410,8 @@ res = sync({ schedules: { baseRev: revOf('schedules'), upserts: [Object.assign({
 ok('harga jadwal dikembalikan untuk uji pembayaran', res.ok === true, res);
 
 const bSyncPaid = Object.assign({}, readRec('bookings', 'b_sync_1'), {
-  status: 'paid', paidAt: '2026-10-24T05:15:00.000Z',
-  fare: { ticket: 128889, service: 10000, fee: 11111, total: 150000 }
+  status: 'paid', paidAt: '2026-10-30T05:15:00.000Z',
+  fare: { ticket: 150000, service: 10000, fee: 12800, total: 172800 }
 });
 res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [bSyncPaid], deletes: [] } }, custToken);
 ok('pelanggan menandai booking sendiri lunas', res.ok === true, res);
@@ -1416,14 +1426,14 @@ ok('sync menolak refund melebihi kebijakan pembatalan',
 const payBase = revOf('payments');
 const ledgerBase = revOf('ledger');
 const syncPayment = {
-  id: 'p_sync_1', bookingId: 'b_sync_1', amount: 150000, method: 'transfer',
-  status: 'pending', fee: 11111, time: '2026-10-24T05:20:00.000Z'
+  id: 'p_sync_1', bookingId: 'b_sync_1', amount: 172800, method: 'transfer',
+  status: 'pending', fee: 12800, time: '2026-10-30T05:20:00.000Z'
 };
 const syncLedger = {
   id: 'l_sync_1', agencyId: 'ag_1', bookingId: 'b_sync_1',
   scheduleId: 's_1', userEmail: 'cust1@test.local',
-  seats: ['A4'], ticket: 128889, service: 10000, fee: 11111, total: 150000,
-  status: 'ditahan', createdAt: '2026-10-24T05:20:00.000Z'
+  seats: ['A4'], ticket: 150000, service: 10000, fee: 12800, total: 172800,
+  status: 'ditahan', createdAt: '2026-10-30T05:20:00.000Z'
 };
 /* Sengaja TANPA driverId: itulah payload nyata pelanggan — proyeksi jadwal
    publik/pelanggan menyembunyikan pengemudi, dan cache jadwal bisa basi
@@ -1557,8 +1567,8 @@ ok('sync menolak agen membuat pembayaran baru',
 const driverBooking = {
   id: 'b_driver_sync', code: 'TA-DRV', scheduleId: 's_dekat', userEmail: null, userPhone: null,
   passengers: [{ name: 'Penumpang Driver', seat: 'A6' }], seats: ['A6'],
-  subtotal: 150000, discount: 0, total: 150000, status: 'pending', payMethod: 'cash',
-  voucher: '', source: 'driver', createdBy: 'd_1', createdAt: '2026-10-24T05:40:00.000Z',
+  subtotal: 160000, discount: 0, total: 172800, status: 'pending', payMethod: 'cash',
+  voucher: '', source: 'driver', createdBy: 'd_1', createdAt: '2026-10-30T05:25:00.000Z',
   paidAt: null, holdExpiry: '2026-10-24T05:55:00.000Z', tripStatus: 'scheduled', boarded: false
 };
 /* Jendela penjualan: s_2 berangkat ~2 hari lagi (di luar 12 jam) → ditolak. */
@@ -1573,8 +1583,8 @@ res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [driverBooking], d
 ok('sync pengemudi membuat booking driver di jadwalnya',
   res.ok === true, res);
 const driverPayment = {
-  id: 'p_driver_sync', bookingId: 'b_driver_sync', amount: 150000, method: 'cash',
-  status: 'pending', fee: 11111, time: '2026-10-24T05:41:00.000Z'
+  id: 'p_driver_sync', bookingId: 'b_driver_sync', amount: 172800, method: 'cash',
+  status: 'pending', fee: 12800, time: '2026-10-30T05:26:00.000Z'
 };
 res = sync({ payments: { baseRev: revOf('payments'), upserts: [driverPayment], deletes: [] } }, driverToken);
 ok('sync pengemudi membuat pembayaran booking driver',
@@ -1584,10 +1594,12 @@ res = sync({ payments: { baseRev: revOf('payments'), upserts: [Object.assign({},
 })], deletes: [] } }, driverToken);
 ok('sync menolak pembayaran lunas saat booking masih pending',
   res.ok === false && res.error.code === 'VALIDATION', res);
-const driverFare = { ticket: 138889, service: 0, fee: 11111, total: 150000 };
+/* Jurnal driver jalur Model B: Tiket penuh 150000; viaSopir (5.000) hanya
+   memo — kolom jasa tetap penuh 10.000; fee 8% × subtotal 160000 = 12800. */
+const driverFare = { ticket: 150000, service: 10000, fee: 12800, total: 172800 };
 res = sync({
   bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, driverBooking, {
-    status: 'paid', paidAt: '2026-10-24T05:42:00.000Z', holdExpiry: null,
+    status: 'paid', paidAt: '2026-10-30T05:27:00.000Z', holdExpiry: null,
     fare: driverFare
   })], deletes: [] },
   payments: { baseRev: revOf('payments'), upserts: [Object.assign({}, driverPayment, {
@@ -1595,19 +1607,76 @@ res = sync({
   })], deletes: [] },
   ledger: { baseRev: revOf('ledger'), upserts: [{
     id: 'l_driver_sync', bookingId: 'b_driver_sync', scheduleId: 's_dekat', agencyId: 'ag_1',
-    driverId: 'd_1', userEmail: null, seats: ['A6'], ticket: 138889, service: 0,
-    fee: 11111, total: 150000, status: 'ditahan', createdAt: '2026-10-24T05:42:00.000Z'
+    driverId: 'd_1', userEmail: null, seats: ['A6'], ticket: 150000, service: 10000,
+    fee: 12800, total: 172800, status: 'ditahan', createdAt: '2026-10-30T05:27:00.000Z'
   }], deletes: [] }
 }, driverToken);
 ok('sync pengemudi menyelesaikan booking driver + ledger',
   res.ok === true, res);
 
+/* Ekonomi Model B — fee platform dari subtotal:
+   jadwal s_dekat (harga 150000, TANPA maintenance di blok imajiner s_1/s_2),
+   kursi A8, voucher HEMAT20 (20% max 30000) → diskon 30000. Voucher
+   menanggung TIKET dulu: kolom tiket = 150000 − 30000 = 120000; jasa agen
+   tetap penuh 10000; subtotal = 160000 − 30000 = 130000; fee = 8% × 130000
+   = 10400; total = 140400. Uang tutup: 120000 + 10000 + 10400 = 140400. */
+const modelVoucher = readRec('vouchers', 'HEMAT20');
+const modelBooking = Object.assign({}, syncBooking, {
+  id: 'b_fee_bebas', code: 'TA-FB', scheduleId: 's_dekat', seats: ['A8'],
+  passengers: [{ name: 'Model B', seat: 'A8' }],
+  voucher: 'HEMAT20', discount: 30000, subtotal: 130000, total: 140400
+});
+res = sync({
+  bookings: { baseRev: revOf('bookings'), upserts: [modelBooking], deletes: [] },
+  vouchers: { baseRev: revOf('vouchers'), upserts: [Object.assign({}, modelVoucher, {
+    used: Number(modelVoucher.used || 0) + 1
+  })], deletes: [] }
+}, custToken);
+ok('Model B: booking voucher dibuat (diskon 30000, total 140400)',
+  res.ok === true, res);
+const modelPayBase = revOf('payments');
+const modelBookingBase = revOf('bookings');
+const modelFare = { ticket: 120000, service: 10000, fee: 10400, total: 140400 };
+const modelPayment = {
+  id: 'p_fee_bebas', bookingId: 'b_fee_bebas', amount: 140400, method: 'transfer',
+  status: 'pending', fee: 10400, time: '2026-10-30T05:54:00.000Z'
+};
+res = sync({ payments: { baseRev: modelPayBase, upserts: [modelPayment], deletes: [] } }, custToken);
+res = sync({
+  bookings: { baseRev: modelBookingBase, upserts: [Object.assign({}, modelBooking, {
+    status: 'paid', paidAt: '2026-10-24T05:55:00.000Z', holdExpiry: null,
+    fare: modelFare
+  })], deletes: [] },
+  payments: { baseRev: revOf('payments'), upserts: [Object.assign({}, modelPayment, {
+    status: 'paid'
+  })], deletes: [] },
+  ledger: { baseRev: revOf('ledger'), upserts: [{
+    id: 'l_fee_bebas', bookingId: 'b_fee_bebas', scheduleId: 's_dekat', agencyId: 'ag_1',
+    userEmail: 'cust1@test.local', seats: ['A8'], ticket: 120000, service: 10000,
+    fee: 10400, total: 140400, status: 'ditahan', createdAt: '2026-10-30T05:55:00.000Z'
+  }], deletes: [] }
+}, custToken);
+ok('Model B: lunas voucher menerima fee 10400 — fee platform mengikuti subtotal',
+  res.ok === true &&
+  res.data.revisions.payments === modelPayBase + 2 &&
+  res.data.revisions.bookings === modelBookingBase + 1, res);
+const mbRec = readRec('bookings', 'b_fee_bebas');
+const mfRec = (mbRec && mbRec.fare) || {};
+const mlRec = readRec('ledger', 'l_fee_bebas');
+ok('Model B: fare tersimpan 4 kolom & ledger dijuri (voucher menanggung tiket dulu)',
+  mfRec.ticket === 120000 && mfRec.service === 10000 && mfRec.fee === 10400 &&
+  mfRec.total === 140400 && mfRec.subtotal === undefined &&
+  mfRec.quoteTicket === undefined && mfRec.quoteService === undefined &&
+  mlRec && mlRec.ticket === 120000 && mlRec.service === 10000 &&
+  mlRec.fee === 10400 && mlRec.total === 140400,
+  { mbRec: mbRec && mbRec.fare, mlRec: mlRec && [mlRec.ticket, mlRec.service, mlRec.fee, mlRec.total] });
+
 const fakeMaintenanceCancel = Object.assign({}, bSyncPaid, {
   status: 'cancelled', tripStatus: 'cancelled', maintenanceState: 'refunded',
-  maintenanceResolvedAt: '2026-10-24T05:50:00.000Z',
-  refundPct: 100, refundAmount: 150000, refundScope: 'total',
+  maintenanceResolvedAt: '2026-10-30T05:50:00.000Z',
+  refundPct: 100, refundAmount: 172800, refundScope: 'total',
   refundStatus: 'pending', refundPaidAt: null, cancelReason: 'Palsu',
-  cancelledBy: 'pelanggan', cancelledAt: '2026-10-24T05:50:00.000Z'
+  cancelledBy: 'pelanggan', cancelledAt: '2026-10-30T05:50:00.000Z'
 });
 res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [fakeMaintenanceCancel], deletes: [] } }, custToken);
 ok('sync menolak refund maintenance tanpa jadwal maintenance',
@@ -1644,6 +1713,111 @@ res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({},
 })], deletes: [] } }, custToken);
 ok('sync mengizinkan refund maintenance 100% saat jadwal maintenance',
   res.ok === true, res);
+
+/* ===== Tangga refund Model B: ≥72 jam = semua −fee (subtotal 160000),
+   24–72 jam = 50% × Tiket murni (150000), <24 jam = 0%. ===== */
+const refSchedBase = revOf('schedules');
+const refDepartures = [nearDate(96), nearDate(48)];
+res = sync({ schedules: { baseRev: refSchedBase, upserts: [
+  {
+    id: 's_ref1', agencyId: 'ag_1', routeId: 'rt_1', vehicleId: 'v_sync_2',
+    driverId: 'd_sync', driverName: 'Driver Sync',
+    backupDriverId: '', backupName: '',
+    date: refDepartures[0].date, time: refDepartures[0].time, price: 150000,
+    status: 'open', tripStatus: 'scheduled', blockedSeats: []
+  },
+  {
+    id: 's_ref2', agencyId: 'ag_1', routeId: 'rt_1', vehicleId: 'v_sync_2',
+    driverId: 'd_sync', driverName: 'Driver Sync',
+    backupDriverId: '', backupName: '',
+    date: refDepartures[1].date, time: refDepartures[1].time, price: 150000,
+    status: 'open', tripStatus: 'scheduled', blockedSeats: []
+  }
+], deletes: [] } }, agenToken);
+if (!res.ok) console.log('  (peringatan) jadwal uji tangga refund gagal dibuat', res);
+
+const mkRefBooking = (id, code, schedId, seat, name) => ({
+  id, code, scheduleId: schedId, userEmail: 'cust1@test.local',
+  seats: [seat], passengers: [{ name, seat }],
+  subtotal: 160000, discount: 0, total: 172800, status: 'pending',
+  holdExpiry: '2099-01-01T00:00:00.000Z',
+  createdAt: '2026-10-30T06:05:00.000Z'
+});
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [
+  mkRefBooking('b_ref1', 'TA-RF1', 's_ref1', 'A2', 'Tangga 72'),
+  mkRefBooking('b_ref2', 'TA-RF2', 's_ref2', 'A3', 'Tangga 48')
+], deletes: [] } }, custToken);
+if (!res.ok) console.log('  (peringatan) booking uji tangga gagal dibuat', res);
+const refPayBase = revOf('payments');
+const refLedgerBase = revOf('ledger');
+const refPay1 = { id: 'p_ref1', bookingId: 'b_ref1', amount: 172800, method: 'transfer', status: 'pending', fee: 12800, time: '2026-10-30T06:06:00.000Z' };
+const refPay2 = { id: 'p_ref2', bookingId: 'b_ref2', amount: 172800, method: 'transfer', status: 'pending', fee: 12800, time: '2026-10-30T06:06:30.000Z' };
+res = sync({ payments: { baseRev: refPayBase, upserts: [refPay1, refPay2], deletes: [] } }, custToken);
+const refPayMid = revOf('payments');
+const refFare = { ticket: 150000, service: 10000, fee: 12800, total: 172800 };
+const bRef1Rec = readRec('bookings', 'b_ref1');
+const bRef2Rec = readRec('bookings', 'b_ref2');
+res = sync({
+  bookings: { baseRev: revOf('bookings'), upserts: [
+    Object.assign({}, bRef1Rec, { status: 'paid', paidAt: '2026-10-24T06:07:00.000Z', holdExpiry: null, fare: refFare }),
+    Object.assign({}, bRef2Rec, { status: 'paid', paidAt: '2026-10-24T06:07:30.000Z', holdExpiry: null, fare: refFare })
+  ], deletes: [] },
+  payments: { baseRev: refPayMid, upserts: [
+    Object.assign({}, refPay1, { status: 'paid' }),
+    Object.assign({}, refPay2, { status: 'paid' })
+  ], deletes: [] },
+  ledger: { baseRev: refLedgerBase, upserts: [
+    { id: 'l_ref1', agencyId: 'ag_1', bookingId: 'b_ref1', scheduleId: 's_ref1',
+      userEmail: 'cust1@test.local', seats: ['A2'],
+      ticket: 150000, service: 10000, fee: 12800, total: 172800,
+      status: 'ditahan', createdAt: '2026-10-30T06:07:00.000Z' },
+    { id: 'l_ref2', agencyId: 'ag_1', bookingId: 'b_ref2', scheduleId: 's_ref2',
+      userEmail: 'cust1@test.local', seats: ['A3'],
+      ticket: 150000, service: 10000, fee: 12800, total: 172800,
+      status: 'ditahan', createdAt: '2026-10-30T06:07:30.000Z' }
+  ], deletes: [] }
+}, custToken);
+if (!res.ok) console.log('  (peringatan) pay uji tangga gagal', res);
+const bRef1Paid = readRec('bookings', 'b_ref1');
+const bRef2Paid = readRec('bookings', 'b_ref2');
+/* Tier ≥72 jam: pengajuan penuh 172800 (scope total) MELAMPAU kebijakan —
+   sah hanya semua-kecuali-fee = subtotal 160000 dengan scope minusFee. */
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, bRef1Paid, {
+  status: 'cancelled', tripStatus: 'cancelled', refundPct: 100, refundAmount: 172800,
+  refundScope: 'total', refundStatus: 'pending', refundPaidAt: null,
+  cancelReason: 'Uji tangga', cancelledBy: 'pelanggan', cancelledAt: '2026-10-30T06:10:00.000Z'
+})], deletes: [] } }, custToken);
+const refOvershootOk = res.ok === false && res.error.code === 'FORBIDDEN';
+ok('tangga refund ≥72 jam: overshoot 172800 (scope total) ditolak',
+  refOvershootOk, res);
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, bRef1Paid, {
+  status: 'cancelled', tripStatus: 'cancelled', refundPct: 100, refundAmount: 160000,
+  refundScope: 'minusFee', refundStatus: 'pending', refundPaidAt: null,
+  cancelReason: 'Uji tangga', cancelledBy: 'pelanggan', cancelledAt: '2026-10-30T06:11:00.000Z'
+})], deletes: [] } }, custToken);
+const bRef1Done = readRec('bookings', 'b_ref1');
+ok('tangga refund ≥72 jam: semua−fee (subtotal) 160000 (scope minusFee) disahkan',
+  res.ok === true &&
+  bRef1Done.refundAmount === 160000 && bRef1Done.refundScope === 'minusFee',
+  { res, bRef1Done: [bRef1Done.refundPct, bRef1Done.refundAmount, bRef1Done.refundScope] });
+/* Tier 24–72 jam: 50% × Tiket murni (150000 × 50% = 75000) — jasa agen &
+   fee hangus; pengajuan tiket-gabungan penuh ditolak. */
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, bRef2Paid, {
+  status: 'cancelled', tripStatus: 'cancelled', refundPct: 50, refundAmount: 150000,
+  refundScope: 'ticket', refundStatus: 'pending', refundPaidAt: null,
+  cancelReason: 'Uji tangga', cancelledBy: 'pelanggan', cancelledAt: '2026-10-30T06:12:00.000Z'
+})], deletes: [] } }, custToken);
+const refTierOvershoot = res.ok === false && res.error.code === 'FORBIDDEN';
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, bRef2Paid, {
+  status: 'cancelled', tripStatus: 'cancelled', refundPct: 50, refundAmount: 75000,
+  refundScope: 'ticket', refundStatus: 'pending', refundPaidAt: null,
+  cancelReason: 'Uji tangga', cancelledBy: 'pelanggan', cancelledAt: '2026-10-30T06:13:00.000Z'
+})], deletes: [] } }, custToken);
+const bRef2Done = readRec('bookings', 'b_ref2');
+ok('tangga refund 24–72 jam: overshoot 150000 ditolak; 50% × Tiket 75000 (scope ticket) disahkan',
+  refTierOvershoot && res.ok === true &&
+  bRef2Done.refundAmount === 75000 && bRef2Done.refundScope === 'ticket' && bRef2Done.refundPct === 50,
+  { overshoot: refTierOvershoot, res, bRef2Done: [bRef2Done.refundPct, bRef2Done.refundAmount, bRef2Done.refundScope] });
 
 const n1Rec = readRec('notifications', 'n_1');
 const n2Rec = readRec('notifications', 'n_2');

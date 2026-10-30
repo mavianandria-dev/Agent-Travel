@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { agencyOf, routeById, vehicleById, vehName, vehLayout, driverById, schedById, bookingsOf, agencyById, audit, splitFare, createLedger, canCancelBooking, canPayBooking, cancelBooking as cancelBookingDomain, refundRuleFor, refundPolicyText, bookedPassengers } from '@/lib/domain.js';
+import { agencyOf, routeById, vehicleById, vehName, vehLayout, driverById, schedById, bookingsOf, agencyById, audit, splitFare, fareCore, createLedger, canCancelBooking, canPayBooking, cancelBooking as cancelBookingDomain, refundRuleFor, refundPolicyText, refundAmountFor, bookedPassengers } from '@/lib/domain.js';
 import { fmtRp, todayStr } from '@/lib/utils.js';
 import { Icon, BadgeStatus, fmtDate } from '@/components/ui.jsx';
 import { pickupOf } from '@/lib/pickups.js';
@@ -44,10 +44,11 @@ function CancelModal({ bid }) {
   if (!b) return <div className="p-6 font-bold text-slate-500">Booking tidak ditemukan</div>;
   const s = schedById(b.scheduleId);
   if (!s) return <div className="p-6 font-bold text-slate-500">Jadwal tidak ditemukan</div>;
-  const fare = b.fare || splitFare(s, (b.seats || []).length, b.discount || 0);
   const rule = refundRuleFor(s.agencyId, s);
   const paid = b.status === 'paid';
-  const est = paid ? Math.round((Number(fare.ticket) || 0) * rule.pct / 100) : 0;
+  /* Estimasi satu-sumber dengan pembatalan nyata (refundAmountFor) —
+     bukan lagi fare.ticket mentah (via pengemudi menyimpan tiket gabungan). */
+  const exp = paid ? refundAmountFor(b, s) : null;
   const cancelable = canCancelBooking(b, s);
   const doCancel = () => {
     const res = cancelBookingDomain(bid, { by: 'agen' });
@@ -58,8 +59,8 @@ function CancelModal({ bid }) {
   };
   return (
     <div className="p-6"><h3 className="font-extrabold text-[17px]">Batalkan Booking?</h3>
-      <p className="text-[13px] text-slate-500 font-medium mt-1">Refund mengikuti kebijakan travel: {refundPolicyText((agencyById(s.agencyId) || {}).refundPolicy)}. Hanya komponen tiket yang kembali — jasa agen &amp; fee platform hangus.</p>
-      <div className="mt-3"><div className="bg-sky-50 rounded-2xl p-3 text-[13px] font-bold text-sky-900">{paid ? <>Estimasi refund: <b>{rule.pct}% × {fmtRp(fare.ticket)} (tiket) = {fmtRp(est)}</b><br /><span className="font-medium text-[12px]">Keberangkatan {Math.max(0, Math.round(rule.hours))} jam lagi</span></> : <>Booking belum dibayar — <b>tidak ada refund</b>.</>}</div></div>
+      <p className="text-[13px] text-slate-500 font-medium mt-1">Refund mengikuti kebijakan travel: {refundPolicyText((agencyById(s.agencyId) || {}).refundPolicy)}.</p>
+      <div className="mt-3"><div className="bg-sky-50 rounded-2xl p-3 text-[13px] font-bold text-sky-900">{paid ? <>Estimasi refund: <b>{exp.pct}% × {fmtRp(exp.base)} ({exp.scope === 'minusFee' ? 'semua −fee' : 'tiket'}) = {fmtRp(exp.amount)}</b><br /><span className="font-medium text-[12px]">Keberangkatan {Math.max(0, Math.round(rule.hours))} jam lagi</span></> : <>Booking belum dibayar — <b>tidak ada refund</b>.</>}</div></div>
       {!cancelable ? <div className="mt-3 bg-amber-50 border border-amber-200 rounded-2xl px-3 py-2 text-[12px] font-semibold text-amber-800">Pembatalan sudah ditutup — jadwal berangkat/terlewat atau booking sudah selesai.</div> : null}
       <div className="flex gap-2 mt-4"><button onClick={() => closeModal()} className="flex-1 bg-slate-100 font-bold text-[13px] py-2.5 rounded-xl">Batal</button>
         <button onClick={doCancel} disabled={!cancelable} className="flex-1 bg-red-500 text-white font-extrabold text-[13px] py-2.5 rounded-xl disabled:opacity-40">Ya, Batalkan</button></div></div>
@@ -100,7 +101,7 @@ export default function Bookings({ ag }) {
     setVerifying(true);
     b.status = 'paid';
     b.paidAt = new Date().toISOString();
-    b.fare = splitFare(s, (b.seats || []).length, b.discount || 0);
+    b.fare = fareCore(splitFare(s, (b.seats || []).length, b.discount || 0));
     DB.save('bookings', arr); refresh();
     createLedger(b);
     const pays = DB.load('payments', []);

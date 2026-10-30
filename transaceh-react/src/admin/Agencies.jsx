@@ -21,7 +21,7 @@ function AgFormModal() {
   const saveAg = () => {
     const arr = DB.load('agencies', []);
     const id = uid('AG');
-    arr.push({ id, name: naN || 'Travel Baru', address: naP || '-', phone: '-', bank: '-', status: 'pending', feeType: 'percent', feeValue: 8, refundPolicy: [{ minH: 72, pct: 100 }, { minH: 24, pct: 50 }, { minH: 0, pct: 0 }], rating: 5.0, trips: 0 });
+    arr.push({ id, name: naN || 'Travel Baru', address: naP || '-', phone: '-', bank: '-', status: 'pending', feeType: 'percent', feeValue: 8, refundPolicy: [{ minH: 72, pct: 100, scope: 'minusFee' }, { minH: 24, pct: 50 }, { minH: 0, pct: 0 }], rating: 5.0, trips: 0 });
     DB.save('agencies', arr);
     refresh();
     const us = DB.load('users', []);

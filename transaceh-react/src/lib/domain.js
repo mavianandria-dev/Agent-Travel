@@ -1309,7 +1309,7 @@ export function moveMaintenanceBooking(bookingId, targetScheduleId, { by = 'pela
   b.replacementBy = by;
   b.maintenanceChoiceDeadline = null;
   b.maintenanceResolvedAt = b.replacementAt;
-  b.fare = splitFare(target, nextSeats.length, b.discount || 0, b.source);
+  b.fare = fareCore(splitFare(target, nextSeats.length, b.discount || 0, b.source));
 
   const ledger = DB.load('ledger', []);
   ledger.forEach((e) => {
@@ -1848,32 +1848,66 @@ export function savePlatformFee(fee){
   return fee;
 }
 
-export function splitFare(s,nSeats=1,discount=0, source='pelanggan'){
-  if(!s) return {ticket:0,service:0,fee:0,total:0};
-  const n=Math.max(1,Number(nSeats)||1);
-  const paid=Math.max(0,(Number(s.price)||0)*n-(Number(discount)||0));
-  const pf = platformFeeOf();
-  const base = pf.type === 'flat'
-    ? Math.max(0, paid - Number(pf.value || 0))
-    : paid / (1 + (Number(pf.value) || 8) / 100);
-  const S = servicePerSeat(s);
-  const service = source === 'driver' ? 0 : Math.min(S * n, Math.round(base));
-  const ticket = Math.max(0, Math.round(base) - service);
-  const fee = Math.max(0, paid - ticket - service);
-  return {ticket,service,fee,total:paid};
+/* Ekonomi per booking — Model B (createdAt ≥ FARE_MODEL_B_SINCE):
+   - Harga rute = harga TIKET murni (Tiket = s.price × n, ditaruh PENUH; bukan hasil potongan).
+   - Jasa agen di-tagih PENUH di atas harga tiket; jalur pengemudi membagi jasa
+     50/50 → "Jasa agen (50%)" (agensi) + "Via sopir (50%)" (komisi pengemudi,
+     memo `viaSopir`, tidak pernah tersimpan).
+   - Rantai layar: Tiket + Jasa − Diskon = Subtotal; Subtotal + Fee = Total;
+     fee % dihitung dari subtotal (flat: nilai flat). Penumpang membayar DI ATAS
+     harga rute — beda mendasar dengan Model A lama (fee & jasa dari dalam harga).
+   - Voucher menanggung TIKET dulu, lalu jasa (cap = tiket + jasa).
+   - Jurnal tetap tutup 4 kolom: ticket + service + fee = total — voucher yang
+     menekan tiket/jasa terserap di kolom, bentuk jurnal tidak berubah.
+   - Field `subtotal`/`quote*`/`viaSopir`/`disc` hanya memo layar — JANGAN
+     disimpan ke booking: kolom booking_fare hanya ticket/service/fee/total,
+     pakai fareCore() saat menulis. */
+
+/* Kunci model booking dengan tanda waktu, tanpa kolom baru: createdAt ≥
+   tanggal penyebaran = rumus B; sebelum itu rumus A (jurnal+refund lama). */
+export const FARE_MODEL_B_SINCE = '2026-10-30T00:00:00.000Z';
+export function fareModelOf(b) {
+  const t = new Date((b && b.createdAt) || 0).getTime();
+  return Number.isFinite(t) && t >= new Date(FARE_MODEL_B_SINCE).getTime() ? 'B' : 'A';
 }
+export function splitFare(s,nSeats=1,discount=0, source='pelanggan'){
+  const E={ticket:0,service:0,fee:0,total:0,subtotal:0,quoteTicket:0,quoteService:0,viaSopir:0,disc:0};
+  if(!s) return E;
+  const n=Math.max(1,Number(nSeats)||1);
+  const gross=Math.max(0,(Number(s.price)||0)*n);   /* Model B: Tiket = harga rute PENUH */
+  if(!gross) return E;
+  const pf=platformFeeOf();
+  const flat=pf.type==='flat'?(Number(pf.value)||0):0;
+  const pct=flat?0:(Number(pf.value)||8);
+  const jasaTotal=Math.max(0,servicePerSeat(s)*n);  /* jasa utuh di ATAS harga tiket */
+  /* voucher menanggung tiket dulu, lalu jasa (cap = tiket + jasa) */
+  const raw=Math.max(0,Math.min(Number(discount)||0,gross+jasaTotal));
+  const dTik=Math.min(raw,gross);
+  const dSvc=raw-dTik;
+  const subtotal=Math.max(0,gross+jasaTotal-raw);
+  const fee=flat?flat:Math.round(subtotal*pct/100);
+  const driver=source==='driver';
+  const viaSopir=driver?jasaTotal-Math.round(jasaTotal/2):0;  /* separuh jasa → pengemudi (memo) */
+  const total=subtotal+fee;
+  return {ticket:gross-dTik,service:jasaTotal-dSvc,fee,total,subtotal,quoteTicket:gross,quoteService:jasaTotal,viaSopir:viaSopir,disc:raw};
+}
+
+/** 4 kolom uang yang sah untuk booking_fare — memo layar (subtotal/quote) dibuang. */
+export const fareCore=(f)=>({ticket:f?.ticket||0,service:f?.service||0,fee:f?.fee||0,total:f?.total||0});
 
 /* ---------- Kebijakan refund tiket ----------
    Diatur super admin per agen. Refund pelanggan hanya komponen tiket;
    jasa agen & fee platform tidak dikembalikan. Pembatalan sepihak oleh
    operator (sopir/agen) sebelum berangkat = 100% total pembayaran. */
 export const DEFAULT_REFUND_POLICY = Object.freeze([
-  { minH: 72, pct: 100 },
+  { minH: 72, pct: 100, scope: 'minusFee' },
   { minH: 24, pct: 50 },
   { minH: 0, pct: 0 },
 ]);
 
-/** Normalisasi tier refund: jam & persen bulat, unik, urut menurun, selalu ada tier 0 jam. */
+/** Normalisasi tier refund: jam & persen bulat, unik, urut menurun, selalu ada tier 0 jam.
+ *  scope = DATA di baris kebijakan (tanpa kolom baru): 'minusFee' = semua kecuali
+ *  fee platform; 'ticket' = komponen tiket saja. Baris lama tanpa scope = 'ticket'. */
 export function normalizeRefundPolicy(list) {
   const seen = new Set();
   const out = [];
@@ -1882,9 +1916,9 @@ export function normalizeRefundPolicy(list) {
     const pct = Math.max(0, Math.min(100, Math.round(Number(t && t.pct) || 0)));
     if (seen.has(minH)) return;
     seen.add(minH);
-    out.push({ minH, pct });
+    out.push({ minH, pct, scope: t && t.scope === 'minusFee' ? 'minusFee' : 'ticket' });
   });
-  if (!seen.has(0)) out.push({ minH: 0, pct: 0 });
+  if (!seen.has(0)) out.push({ minH: 0, pct: 0, scope: 'ticket' });
   return out.sort((a, b) => b.minH - a.minH);
 }
 
@@ -1905,14 +1939,15 @@ export function refundRuleFor(agencyId, s, now = Date.now()) {
   return { ...(rule || { minH: 0, pct: 0 }), hours };
 }
 
-/** Teks ringkas kebijakan untuk pelanggan/agen, mis. "≥3 hari: 100% • ≥1 hari: 50% • <1 hari: 0%". */
+/** Teks ringkas kebijakan untuk pelanggan/agen, mis. "≥3 hari: 100% (semua −fee) • ≥1 hari: 50% (tiket saja) • <1 hari: 0%". */
 export function refundPolicyText(policy) {
   const pol = normalizeRefundPolicy(Array.isArray(policy) && policy.length ? policy : DEFAULT_REFUND_POLICY);
   const days = (minH) => String(Math.round(((Number(minH) || 0) / 24) * 10) / 10).replace('.', ',');
+  const basis = (p) => (p.pct <= 0 ? '' : p.scope === 'minusFee' ? ' (semua −fee)' : ' (tiket saja)');
   return pol
     .map((p, i) => (p.minH <= 0
-      ? '<' + days(pol[i - 1] ? pol[i - 1].minH : 24) + ' hari: ' + p.pct + '%'
-      : '≥' + days(p.minH) + ' hari: ' + p.pct + '%'))
+      ? '<' + days(pol[i - 1] ? pol[i - 1].minH : 24) + ' hari: ' + p.pct + '%' + basis(p)
+      : '≥' + days(p.minH) + ' hari: ' + p.pct + '%' + basis(p)))
     .join(' • ');
 }
 
@@ -1933,6 +1968,38 @@ export function saveRefundPolicy(agencyId, list) {
   DB.save('agencies', arr);
   audit('refund_policy', a.name + ' • ' + refundPolicyText(policy));
   return { ok: true, policy };
+}
+
+/** Nominal refund booking lunas menurut kebijakan agen (dipakai klien; di-mirror server).
+ *  scope 'minusFee': semua kecuali fee platform → base = total − fee (= tiket + jasa).
+ *  scope 'ticket'  : komponen tiket MURNI — booking via pengemudi menyimpan tiket
+ *  gabungan (tiket + komisi via sopir), komisi dipisah kembali (hangus di tier ini).
+ *  Booking pending tidak minum dari sini (pemanggil meneruskan refund Rp0). */
+export function refundAmountFor(b, s) {
+  const n = (b.seats || []).length;
+  const src = (b && b.source) || 'pelanggan';
+  const isB = fareModelOf(b) === 'B';
+  const q = src === 'driver' ? splitFare(s, n, b.discount || 0, 'driver') : null;
+  const fare = b.fare || q || splitFare(s, n, b.discount || 0, src);
+  const rule = refundRuleFor(s.agencyId, s);
+  const scope = rule.scope === 'minusFee' ? 'minusFee' : 'ticket';
+  let base;
+  let viaSopir = 0;
+  if (isB) {
+    /* Model B: kolom tiket jurnal sudah murni (komisi pengemudi ada di kolom
+       jasa — tidak perlu dipisah); minusFee = subtotal (total − fee). */
+    base = Math.max(0, scope === 'minusFee'
+      ? (Number(fare.total) || 0) - (Number(fare.fee) || 0)
+      : (Number(fare.ticket) || 0));
+  } else {
+    /* Model A: jurnal tiket pengemudi menampung komisi — pisahkan dulu (hangus). */
+    base = Math.max(0, scope === 'minusFee'
+      ? (Number(fare.total) || 0) - (Number(fare.fee) || 0)
+      : (Number(fare.ticket) || 0) - (q ? q.viaSopir : 0));
+    viaSopir = q ? q.viaSopir : 0;
+  }
+  const amount = Math.round(base * rule.pct / 100);
+  return { pct: rule.pct, scope, hours: rule.hours, base, amount, viaSopir };
 }
 /* Ledger: ditahan (bayar) → layak (trip tiba) → dicairkan (admin) ; void bila refund */
 export function createLedger(booking){
@@ -2017,7 +2084,9 @@ export function canCancelBooking(b, s) {
 
 /**
  * Pembatalan oleh pelanggan / agen atas permintaan pelanggan.
- * Refund hanya komponen tiket sesuai kebijakan agen; booking pending = Rp0.
+ * Refund mengikuti tangga kebijakan agen: tier scope 'minusFee' = semua kecuali
+ * fee platform; scope 'ticket' = komponen tiket murni (komisi via sopir hangus).
+ * Booking pending = Rp0. Scope refund tersimpan sebagai data (b.refundScope).
  */
 export function cancelBooking(bookingId, { reason = '', by = 'pelanggan' } = {}) {
   const bookings = DB.load('bookings', []);
@@ -2033,17 +2102,17 @@ export function cancelBooking(bookingId, { reason = '', by = 'pelanggan' } = {})
   if (!canCancelBooking(b, s)) return { ok: false, msg: 'Pembatalan ditutup — jadwal sudah berangkat atau terlewat' };
 
   const wasPaid = b.status === 'paid';
-  const fare = b.fare || splitFare(s, (b.seats || []).length, b.discount || 0);
-  const rule = wasPaid ? refundRuleFor(s.agencyId, s) : { minH: 0, pct: 0, hours: 0 };
-  const refund = wasPaid ? Math.round((Number(fare.ticket) || 0) * rule.pct / 100) : 0;
+  /* Satu sumber angka (refundAmountFor) — dipakai juga oleh estimasi layar. */
+  const exp = wasPaid ? refundAmountFor(b, s) : { pct: 0, scope: 'ticket', hours: 0, base: 0, amount: 0 };
+  const refund = exp.amount;
   const now = new Date().toISOString();
   const why = String(reason || '').trim() || (by === 'agen' ? 'Dibatalkan oleh agen' : 'Dibatalkan oleh pelanggan');
 
   b.status = 'cancelled';
   b.tripStatus = 'cancelled';
-  b.refundPct = rule.pct;
+  b.refundPct = exp.pct;
   b.refundAmount = refund;
-  b.refundScope = 'ticket';
+  b.refundScope = exp.scope;
   b.refundStatus = refund > 0 ? 'pending' : 'none';
   b.refundPaidAt = null;
   b.cancelReason = why;
@@ -2054,7 +2123,7 @@ export function cancelBooking(bookingId, { reason = '', by = 'pelanggan' } = {})
   voidLedger(b.id);
 
   const pays = DB.load('payments', []);
-  if (updatePaymentRefund(pays, b, { refund, pct: rule.pct, scope: 'ticket', status: wasPaid ? undefined : 'cancelled' })) {
+  if (updatePaymentRefund(pays, b, { refund, pct: exp.pct, scope: exp.scope, status: wasPaid ? undefined : 'cancelled' })) {
     DB.save('payments', pays);
   }
 
@@ -2062,12 +2131,12 @@ export function cancelBooking(bookingId, { reason = '', by = 'pelanggan' } = {})
     b.userEmail,
     'Booking dibatalkan — ' + b.code,
     refund > 0
-      ? 'Refund ' + new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(refund) + ' (' + rule.pct + '% tiket) diproses 1–3 hari kerja.'
+      ? 'Refund ' + new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(refund) + ' (' + exp.pct + '% ' + (exp.scope === 'minusFee' ? 'kecuali fee platform' : 'komponen tiket') + ') diproses 1–3 hari kerja.'
       : 'Tidak ada refund untuk booking ini (belum dibayar / kebijakan 0%).',
     'WA'
   );
-  audit('booking_cancel', b.code + ' • ' + by + ' • refund ' + rule.pct + '%');
-  return { ok: true, refund, pct: rule.pct, pending: !wasPaid };
+  audit('booking_cancel', b.code + ' • ' + by + ' • refund ' + exp.pct + '% ' + exp.scope);
+  return { ok: true, refund, pct: exp.pct, scope: exp.scope, pending: !wasPaid };
 }
 
 /** Admin mulai memproses refund (pending → diproses). */
@@ -2298,7 +2367,7 @@ export function createDriverBooking(sid, { passengers = [], seats = [], driverId
       pickupCoords: '',
     })),
     seats,
-    subtotal: Math.max(0, Number(s.price || 0) * seats.length),
+    subtotal: Math.max(0, Number(fare.subtotal) || 0),
     discount: Math.max(0, Number(discount) || 0),
     total,
     status: 'pending',
@@ -2346,7 +2415,7 @@ export function confirmDriverBookingPayment(bookingId){
   b.paidAt = now;
   b.holdExpiry = null;
   const fare = splitFare(s, (b.seats || []).length, b.discount || 0, b.source);
-  b.fare = fare;
+  b.fare = fareCore(fare);
   DB.save('bookings', bookings);
 
   const pays = DB.load('payments', []);

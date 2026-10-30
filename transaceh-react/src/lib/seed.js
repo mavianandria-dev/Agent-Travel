@@ -90,10 +90,10 @@ export function initDB(){
     {id:'U-CS1',name:'Pelanggan Demo',email:'user@demo.com',phone:'0813000001',pass:'user123',role:'pelanggan',agencyId:null,status:'active',photo:'',favorites:[{name:'Ayah',phone:'0813000002'}]},
   ];
   const agencies=[
-    {id:'AG1',name:'Barakah Travel',logo:'',...agencyProfileFromKyc(seedKyc.AG1),status:'active',serviceFee:10000,feeType:'percent',feeValue:8,refundPolicy:[{minH:72,pct:100},{minH:24,pct:50},{minH:0,pct:0}],rating:4.8,trips:1240,kyc:seedKyc.AG1},
+    {id:'AG1',name:'Barakah Travel',logo:'',...agencyProfileFromKyc(seedKyc.AG1),status:'active',serviceFee:10000,feeType:'percent',feeValue:8,refundPolicy:[{minH:72,pct:100,scope:'minusFee'},{minH:24,pct:50},{minH:0,pct:0}],rating:4.8,trips:1240,kyc:seedKyc.AG1},
     {id:'AG2',name:'Putra Jaya Trans',logo:'',...agencyProfileFromKyc(seedKyc.AG2),status:'active',serviceFee:10000,feeType:'flat',feeValue:5000,refundPolicy:[{minH:48,pct:100},{minH:0,pct:0}],rating:4.6,trips:860,kyc:seedKyc.AG2},
-    {id:'AG3',name:'Lintas Utara',logo:'',...agencyProfileFromKyc(seedKyc.AG3),status:'active',serviceFee:10000,feeType:'percent',feeValue:10,refundPolicy:[{minH:72,pct:100},{minH:24,pct:50},{minH:0,pct:0}],rating:4.7,trips:310,kyc:seedKyc.AG3},
-    {id:'AG4',name:'Cahaya Perkasa',logo:'',address:'Jl. Diponegoro No.7, Aceh Barat',phone:'0655-31212',bank:'-',status:'pending',serviceFee:10000,feeType:'percent',feeValue:8,refundPolicy:[{minH:72,pct:100},{minH:24,pct:50},{minH:0,pct:0}],rating:5.0,trips:0},
+    {id:'AG3',name:'Lintas Utara',logo:'',...agencyProfileFromKyc(seedKyc.AG3),status:'active',serviceFee:10000,feeType:'percent',feeValue:10,refundPolicy:[{minH:72,pct:100,scope:'minusFee'},{minH:24,pct:50},{minH:0,pct:0}],rating:4.7,trips:310,kyc:seedKyc.AG3},
+    {id:'AG4',name:'Cahaya Perkasa',logo:'',address:'Jl. Diponegoro No.7, Aceh Barat',phone:'0655-31212',bank:'-',status:'pending',serviceFee:10000,feeType:'percent',feeValue:8,refundPolicy:[{minH:72,pct:100,scope:'minusFee'},{minH:24,pct:50},{minH:0,pct:0}],rating:5.0,trips:0},
   ];
   const routes=[];  /* Rute dibuat melalui usulan agen (simulasi dari nol). */
   const vehicles=[

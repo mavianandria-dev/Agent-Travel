@@ -326,8 +326,14 @@ function DriverBookingModal({ sid }) {
     return { out, clash };
   };
 
-  const total = Number(s.price || 0) * seats.length;
   const fare = splitFare(s, seats.length, 0, 'driver');
+  /* Modal-Pengemudi Model B: Tiket = harga rute PENUH; jasa dibagi 50/50 —
+     "Jasa agen (50%)" (agensi) + "Via sopir (50%)" (komisi pengemudi, memo
+     layar, tidak disimpan). Rantai: Tiket + jasa-agensi + viaSopir − diskon
+     = subtotal; subtotal + fee = total. */
+  const viaSopir = fare.viaSopir;
+  const jasaAgenHalf = Math.max(0, fare.quoteService - viaSopir);
+  const tiketMurni = fare.quoteTicket;
   const va = '8821 ' + String(Math.floor(100000000000 + Math.random() * 899999999999)).slice(0, 12).replace(/(\d{4})(?=\d)/g, '$1 ');
 
   /* Pilih kursi seperti alur pelanggan: klik denah, klik lagi untuk melepas,
@@ -408,10 +414,15 @@ function DriverBookingModal({ sid }) {
         )}
 
         <div className="mt-4 space-y-1 text-[13px] font-semibold">
-          <div className="flex justify-between"><span>Total dibayar</span><span className="font-extrabold">{fmtRp(made.total)}</span></div>
+          <div className="flex justify-between"><span>Tiket (sopir) x{(made.seats || []).length}</span><span className="font-extrabold">{fmtRp(tiketMurni)}</span></div>
+          {fare.quoteService > 0 ? <>
+            <div className="flex justify-between"><span>Jasa agen (50%)</span><span>{fmtRp(jasaAgenHalf)}</span></div>
+            <div className="flex justify-between pl-3 text-[12.5px] text-slate-400"><span>&#8627; Via sopir (50%)</span><span>{fmtRp(viaSopir)}</span></div>
+            <div className="flex justify-between text-green-700"><span>Diskon voucher</span><span>− {fmtRp(fare.disc)}</span></div>
+          </> : null}
+          <div className="flex justify-between pt-1 border-t border-slate-200"><span className="font-extrabold">Subtotal ({(made.seats || []).length} kursi)</span><span>{fmtRp(fare.subtotal)}</span></div>
           <div className="flex justify-between"><span>Fee platform</span><span>{fmtRp(fare.fee)}</span></div>
-          <div className="flex justify-between"><span>Jasa agen</span><span>{fmtRp(0)}</span></div>
-          <div className="flex justify-between font-extrabold"><span>Untuk pengemudi</span><span className="text-sky-700">{fmtRp(fare.ticket)}</span></div>
+          <div className="flex justify-between pt-2 mt-1 border-t border-slate-200"><span className="font-extrabold">Total dibayar</span><span className="font-extrabold text-sky-700">{fmtRp(made.total)}</span></div>
         </div>
         <div className="text-[11px] text-slate-400 font-semibold mt-2">Kode booking: <b className="font-mono">{made.code}</b> • Kursi {made.seats.join(', ')}</div>
         <button onClick={pay} disabled={paying} className="mt-4 w-full bg-green-500 hover:bg-green-600 text-white font-extrabold py-3.5 rounded-2xl transition flex items-center justify-center gap-2 disabled:opacity-60 disabled:hover:bg-green-500"><Icon name="circle-check-big" className="w-5 h-5" />{paying ? 'Menyimpan pembayaran…' : 'Pembayaran Berhasil'}</button>
@@ -503,10 +514,15 @@ function DriverBookingModal({ sid }) {
         </div>
 
         <div className="bg-slate-50 rounded-2xl p-3 space-y-1 text-[13px] font-semibold">
-          <div className="flex justify-between"><span>Total bayar</span><span className="font-extrabold">{fmtRp(total)}</span></div>
+          <div className="flex justify-between"><span>Tiket (sopir) x{seats.length}</span><span className="font-extrabold">{fmtRp(tiketMurni)}</span></div>
+          {fare.quoteService > 0 ? <>
+            <div className="flex justify-between"><span>Jasa agen (50%)</span><span>{fmtRp(jasaAgenHalf)}</span></div>
+            <div className="flex justify-between pl-3 text-[12.5px] text-slate-400"><span>&#8627; Via sopir (50%)</span><span>{fmtRp(viaSopir)}</span></div>
+            <div className="flex justify-between text-green-700"><span>Diskon voucher</span><span>− {fmtRp(fare.disc)}</span></div>
+          </> : null}
+          <div className="flex justify-between pt-1 border-t border-slate-200"><span className="font-extrabold">Subtotal ({seats.length} kursi)</span><span>{fmtRp(fare.subtotal)}</span></div>
           <div className="flex justify-between"><span>Fee platform</span><span>{fmtRp(fare.fee)}</span></div>
-          <div className="flex justify-between"><span>Jasa agen</span><span>{fmtRp(0)}</span></div>
-          <div className="flex justify-between font-extrabold"><span>Untuk pengemudi</span><span className="text-sky-700">{fmtRp(fare.ticket)}</span></div>
+          <div className="flex justify-between pt-2 mt-1 border-t border-slate-200"><span className="font-extrabold">Total Bayar</span><span className="font-extrabold text-sky-700">{fmtRp(fare.total)}</span></div>
         </div>
       </div>
 

@@ -4,8 +4,8 @@ import { DB } from '@/lib/db.js';
 import { refundPolicyOf, refundPolicyText, saveRefundPolicy } from '@/lib/domain.js';
 import { Icon } from '@/components/ui.jsx';
 
-const toRows = (policy) => policy.map((r) => ({ minD: Number(r.minH) / 24, pct: r.pct }));
-const toPolicy = (rows) => rows.map((r) => ({ minH: Math.max(0, Math.round(Number(r.minD) || 0)) * 24, pct: r.pct }));
+const toRows = (policy) => policy.map((r) => ({ minD: Number(r.minH) / 24, pct: r.pct, scope: r.scope === 'minusFee' ? 'minusFee' : 'ticket' }));
+const toPolicy = (rows) => rows.map((r) => ({ minH: Math.max(0, Math.round(Number(r.minD) || 0)) * 24, pct: r.pct, scope: r.scope === 'minusFee' ? 'minusFee' : 'ticket' }));
 
 function PolicyCard({ ag, onApplyAll }) {
   const { toast, refresh } = useApp();
@@ -14,7 +14,7 @@ function PolicyCard({ ag, onApplyAll }) {
   const removeRow = (i) => setRows((list) => (list.length <= 1 ? list : list.filter((_, idx) => idx !== i)));
   const addRow = () => setRows((list) => {
     const next = list.length ? Math.max(...list.map((r) => Math.round(Number(r.minD) || 0))) + 1 : 0;
-    return [...list, { minD: next, pct: 0 }];
+    return [...list, { minD: next, pct: 0, scope: 'ticket' }];
   });
 
   const save = () => {
@@ -40,7 +40,7 @@ function PolicyCard({ ag, onApplyAll }) {
           <div className="font-extrabold text-[14.5px] truncate">{ag.name}</div>
           <div className="text-[11.5px] font-bold text-slate-400">{ag.status === 'active' ? 'Aktif' : ag.status === 'pending' ? 'Menunggu persetujuan' : 'Nonaktif'}</div>
         </div>
-        <span className="badge bg-sky-50 text-sky-700">Tiket saja</span>
+        <span className="badge bg-sky-50 text-sky-700">{(rows[0] && rows[0].scope === 'minusFee') ? 'Semua − fee' : 'Tiket saja'}</span>
       </div>
 
       <div className="mt-3 bg-slate-50 rounded-2xl p-3 text-[12px] font-semibold text-slate-600">
@@ -48,13 +48,17 @@ function PolicyCard({ ag, onApplyAll }) {
       </div>
 
       <div className="mt-3 space-y-2">
-        <div className="grid grid-cols-[1fr_1fr_36px] gap-2 text-[10.5px] font-extrabold text-slate-400 tracking-wider">
-          <span>MINIMAL (HARI)</span><span>REFUND TIKET (%)</span><span></span>
+        <div className="grid grid-cols-[1fr_1fr_1.3fr_36px] gap-2 text-[10.5px] font-extrabold text-slate-400 tracking-wider">
+          <span>MINIMAL (HARI)</span><span>REFUND (%)</span><span>JENIS REFUND</span><span></span>
         </div>
         {rows.map((r, i) => (
-          <div key={i} className="grid grid-cols-[1fr_1fr_36px] gap-2 items-center">
+          <div key={i} className="grid grid-cols-[1fr_1fr_1.3fr_36px] gap-2 items-center">
             <input type="number" min="0" step="1" value={r.minD} onChange={(e) => setRow(i, 'minD', e.target.value)} className="text-[13px] font-bold border-2 border-slate-200 rounded-xl px-2.5 py-2 focus-ring" />
             <input type="number" min="0" max="100" step="1" value={r.pct} onChange={(e) => setRow(i, 'pct', e.target.value)} className="text-[13px] font-bold border-2 border-slate-200 rounded-xl px-2.5 py-2 focus-ring" />
+            <select value={r.scope} onChange={(e) => setRow(i, 'scope', e.target.value)} className="text-[12.5px] font-bold border-2 border-slate-200 rounded-xl px-2 py-2 bg-white focus-ring">
+              <option value="ticket">Tiket saja</option>
+              <option value="minusFee">Semua − fee</option>
+            </select>
             <button onClick={() => removeRow(i)} disabled={rows.length <= 1} title="Hapus tier" className="w-9 h-9 rounded-xl bg-red-50 text-red-500 disabled:opacity-30 disabled:cursor-not-allowed"><Icon name="trash-2" className="w-4 h-4 mx-auto" /></button>
           </div>
         ))}

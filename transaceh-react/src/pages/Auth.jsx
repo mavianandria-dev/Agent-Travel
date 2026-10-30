@@ -253,7 +253,7 @@ export function RegisterAgen() {
     }
     const agId = uid('AG');
     const ags = DB.load('agencies', []);
-    ags.push({ id: agId, name: tname, logo: '', address: addr, phone: php || '-', bank: '-', status: 'pending', feeType: 'percent', feeValue: 8, refundPolicy: [{ minH: 72, pct: 100 }, { minH: 24, pct: 50 }, { minH: 0, pct: 0 }], rating: 5.0, trips: 0 });
+    ags.push({ id: agId, name: tname, logo: '', address: addr, phone: php || '-', bank: '-', status: 'pending', feeType: 'percent', feeValue: 8, refundPolicy: [{ minH: 72, pct: 100, scope: 'minusFee' }, { minH: 24, pct: 50 }, { minH: 0, pct: 0 }], rating: 5.0, trips: 0 });
     DB.save('agencies', ags);
     refresh();
     const arr = DB.load('users', []);

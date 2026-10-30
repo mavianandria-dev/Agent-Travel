@@ -576,7 +576,7 @@ var API_MAIN_TABLES = {
     ],
     children: [
       { table: 'agencies_refund_policy', path: 'refundPolicy', kind: 'list',
-        cols: ['n:minH', 'n:pct'] },
+        cols: ['n:minH', 'n:pct', 'scope'] },
       { table: 'agency_kyc', path: 'kyc', kind: 'one', cols: [
         'jenis', 'nama', 'nik', 'tmpLahir', 'tglLahir', 'gender', 'agama',
         'hp', 'email', 'bank', 'rekeningNo', 'rekeningNama', 'b:npwpSamaKtp',
@@ -2133,6 +2133,13 @@ function apiBootstrapData_(ss, meta, role, user) {
     putProjected('agencies', publicAgencies);
     putProjected('vehicles', publicVehicles(vehicles));
     put('schedules', publicSchedules(schedules));
+    /* Fee platform adalah angka publik: tanpa ini tamu jatuh ke default
+       pabrik (persen 8) meski admin sudah mengatur flat, dan hitungan
+       Ringkasan klien merugikan juri server saat Bayar. Hanya kunci ini
+       yang keluar — isi settings lain tetap tertutup. */
+    put('settings', read('settings').filter(function (r) {
+      return String((r && r.key) || '') === 'platformFee';
+    }));
     return { records: records, revisions: revisions };
   }
 
@@ -3085,19 +3092,66 @@ function apiSyncServicePerSeat_(ctx, schedule) {
   return apiSyncNumber_(agency && agency.serviceFee != null ? agency.serviceFee : 10000, 10000);
 }
 
-function apiSyncSplitFare_(ctx, schedule, seatCount, discount, source) {
+/* Mirror client splitFare (Model A):
+   - fee platform dipotong dari harga dasar (gross) — voucher tidak menyentuh,
+     kecuali lebihan voucher di atas subtotal (kasus ekstrem > ~90% harga);
+   - voucher menanggung jasa agen dulu, lalu tiket;
+   - source driver: komponen jasa dibagi 50/50 — separuh agensi (field
+     `service`), separuhnya menyatu di `ticket` milik pengemudi;
+   - ticket + service + fee = total = gross − diskon (selalu pas). */
+/* Kunci model fare tanpa kolom baru (mirror FARE_MODEL_B_SINCE + fareModelOf
+   di domain.js klien): createdAt booking ≥ tanda penyebaran → Model B
+   (Tiket = harga rute PENUH + Jasa − Diskon = Subtotal; Subtotal + Fee =
+   Total). Booking sebelum tanda itu tetap dinilai rumus A. */
+var FARE_MODEL_B_SINCE = '2026-10-30T00:00:00.000Z';
+
+function apiSyncIsModelB_(booking) {
+  var t = new Date((booking && booking.createdAt) || 0).getTime();
+  return isFinite(t) && t >= new Date(FARE_MODEL_B_SINCE).getTime();
+}
+
+function apiSyncSplitFare_(ctx, schedule, seatCount, discount, source, booking) {
   var n = Math.max(1, apiSyncNumber_(seatCount, 1));
-  var paid = Math.max(0, apiSyncNumber_(schedule && schedule.price, 0) * n - apiSyncNumber_(discount, 0));
+  var gross = Math.max(0, apiSyncNumber_(schedule && schedule.price, 0) * n);
+  if (!gross) return { ticket: 0, service: 0, fee: 0, total: 0, subtotal: 0, quoteTicket: 0, quoteService: 0, viaSopir: 0, disc: 0 };
   var pf = apiSyncPlatformFee_(ctx) || { type: 'percent', value: 8 };
-  var base = String(pf.type || 'percent') === 'flat'
-    ? Math.max(0, paid - apiSyncNumber_(pf.value, 0))
-    : paid / (1 + apiSyncNumber_(pf.value, 8) / 100);
-  var service = String(source || '') === 'driver'
-    ? 0
-    : Math.min(apiSyncServicePerSeat_(ctx, schedule) * n, Math.round(base));
-  var ticket = Math.max(0, Math.round(base) - service);
-  var fee = Math.max(0, paid - ticket - service);
-  return { ticket: ticket, service: service, fee: fee, total: paid };
+  var flat = String(pf.type || 'percent') === 'flat' ? apiSyncNumber_(pf.value, 0) : 0;
+  var pct = flat ? 0 : apiSyncNumber_(pf.value, 8);
+  /* Model B — mirror splitFare klien: jasa utuh di ATAS harga tiket; voucher
+     menanggung TIKET dulu lalu jasa (cap = tiket + jasa); fee % × subtotal
+     (flat: nilai flat). Source 'driver': jasa dibagi 50/50 → viaSopir =
+     memo layar saja (bagian jasa yang jalan ke pengemudi), tidak pernah
+     disimpan — jurnal tetap tutup 4 kolom. */
+  if (apiSyncIsModelB_(booking)) {
+    var jasaTotal = Math.max(0, apiSyncServicePerSeat_(ctx, schedule) * n);
+    var rawB = Math.max(0, Math.min(apiSyncNumber_(discount, 0), gross + jasaTotal));
+    var dTikB = Math.min(rawB, gross);
+    var dSvcB = rawB - dTikB;
+    var subtotalB = Math.max(0, gross + jasaTotal - rawB);
+    var feeB = flat ? flat : Math.round(subtotalB * pct / 100);
+    var driverB = String(source || '') === 'driver';
+    var viaSopirB = driverB ? jasaTotal - Math.round(jasaTotal / 2) : 0;
+    return { ticket: gross - dTikB, service: jasaTotal - dSvcB, fee: feeB, total: subtotalB + feeB, subtotal: subtotalB, quoteTicket: gross, quoteService: jasaTotal, viaSopir: viaSopirB, disc: rawB };
+  }
+  var base = flat ? Math.max(0, gross - flat) : gross / (1 + pct / 100);
+  var share = Math.round(base);
+  var fee0 = Math.max(0, gross - share);
+  var raw = Math.max(0, Math.min(apiSyncNumber_(discount, 0), gross));
+  var disc = Math.min(raw, share);
+  var over = raw - disc;
+  var fee = Math.max(0, fee0 - over);
+  var S = apiSyncServicePerSeat_(ctx, schedule);
+  var svcCap = Math.min(S * n, share);
+  var driver = String(source || '') === 'driver';
+  var quoteService = driver ? Math.round(svcCap / 2) : svcCap;
+  var quoteTicket = Math.max(0, share - quoteService);
+  var dSvc = Math.min(disc, quoteService);
+  var dTik = Math.min(disc - dSvc, quoteTicket);
+  var service = quoteService - dSvc;
+  var ticket = Math.max(0, quoteTicket - dTik);
+  /* viaSopir = memo layar saja (bagian jasa yang menyatu di tiket pengemudi) —
+     tidak pernah ikut disimpan ke booking (fare tetap 4 kolom). */
+  return { ticket: ticket, service: service, fee: fee, total: gross - raw, subtotal: share - disc, quoteTicket: quoteTicket, quoteService: quoteService, viaSopir: driver ? Math.max(0, svcCap - quoteService) : 0, disc: disc };
 }
 
 function apiSyncRefundPolicy_(ctx, schedule) {
@@ -3105,7 +3159,7 @@ function apiSyncRefundPolicy_(ctx, schedule) {
   var raw = agency && Array.isArray(agency.refundPolicy) ? agency.refundPolicy : [];
   if (!raw.length) {
     raw = [
-      { minH: 72, pct: 100 },
+      { minH: 72, pct: 100, scope: 'minusFee' },
       { minH: 24, pct: 50 },
       { minH: 0, pct: 0 }
     ];
@@ -3114,10 +3168,12 @@ function apiSyncRefundPolicy_(ctx, schedule) {
   raw.forEach(function (item) {
     var minH = Math.max(0, Math.round(apiSyncNumber_(item && item.minH, 0)));
     var pct = Math.max(0, Math.min(100, apiSyncNumber_(item && item.pct, 0)));
-    out.push({ minH: minH, pct: pct });
+    /* scope = data di baris kebijakan: 'minusFee' = semua kecuali fee platform;
+       'ticket' = komponen tiket saja. Baris lama tanpa scope = 'ticket'. */
+    out.push({ minH: minH, pct: pct, scope: item && item.scope === 'minusFee' ? 'minusFee' : 'ticket' });
   });
   out.sort(function (a, b) { return b.minH - a.minH; });
-  if (!out.some(function (x) { return x.minH === 0; })) out.push({ minH: 0, pct: 0 });
+  if (!out.some(function (x) { return x.minH === 0; })) out.push({ minH: 0, pct: 0, scope: 'ticket' });
   return out;
 }
 
@@ -3142,11 +3198,20 @@ function apiSyncRefundExpectation_(ctx, booking, schedule, next) {
       scope: 'total'
     };
   }
+  /* Mirror refundAmountFor klien: fare tersimpan dipakai bila ada;
+     booking via pengemudi selalu hitung ulang splitFare utk memo viaSopir
+     (viaSopir tidak pernah tersimpan — fare tetap 4 kolom). */
   var fare = booking.fare;
+  var hasFare = fare && isFinite(Number(fare.total)) && Number(fare.total) > 0;
+  var fresh = (!hasFare || String(booking.source || '') === 'driver')
+    ? apiSyncSplitFare_(ctx, schedule, (booking.seats || []).length,
+        booking.discount || 0, booking.source || '', booking)
+    : null;
+  var total = hasFare ? Number(fare.total) : (fresh ? fresh.total : 0);
+  var refundFee = hasFare && fare && isFinite(Number(fare.fee)) ? Number(fare.fee) : (fresh ? fresh.fee : 0);
   var ticket = fare && isFinite(Number(fare.ticket)) && Number(fare.ticket) > 0
     ? Number(fare.ticket)
-    : apiSyncSplitFare_(ctx, schedule, (booking.seats || []).length,
-        booking.discount || 0, booking.source || '').ticket;
+    : (fresh ? fresh.ticket : 0);
   var departure = apiSyncScheduleDepartureMs_(schedule);
   var hours = isFinite(departure) ? Math.max(0, (departure - Date.now()) / 36e5) : 0;
   var policy = apiSyncRefundPolicy_(ctx, schedule);
@@ -3154,10 +3219,19 @@ function apiSyncRefundExpectation_(ctx, booking, schedule, next) {
   for (var i = 0; i < policy.length; i++) {
     if (hours >= policy[i].minH) { rule = policy[i]; break; }
   }
+  var scope = rule && rule.scope === 'minusFee' ? 'minusFee' : 'ticket';
+  var pct = Math.max(0, Math.min(100, apiSyncNumber_(rule && rule.pct, 0)));
+  /* base 'minusFee' = total − fee (tiket + jasa ikut kembali); base 'ticket'
+     = tiket murni. Model B: kolom tiket jurnal sudah murni (komisi via sopir
+     matang di kolom jasa) — tidak ada yang dipisah. Model A: komisi via
+     sopir dipisah kembali (hangus). */
+  var base = scope === 'minusFee'
+    ? Math.max(0, total - refundFee)
+    : Math.max(0, ticket - (apiSyncIsModelB_(booking) ? 0 : (fresh ? fresh.viaSopir : 0)));
   return {
-    pct: Math.max(0, Math.min(100, apiSyncNumber_(rule && rule.pct, 0))),
-    amount: Math.round(Math.max(0, ticket) * Math.max(0, Math.min(100, apiSyncNumber_(rule && rule.pct, 0))) / 100),
-    scope: 'ticket'
+    pct: pct,
+    amount: Math.round(base * pct / 100),
+    scope: scope
   };
 }
 
@@ -4007,17 +4081,28 @@ function apiSyncValidateBookings_(ctx, target) {
       var subtotal = apiSyncNumber_(rec.subtotal, NaN);
       var discount = apiSyncNumber_(rec.discount, 0);
       var total = apiSyncNumber_(rec.total, NaN);
-      var expectedSubtotal = apiSyncNumber_(schedule.price, 0) * seats.length;
+      /* Kunci model mirror klien: createdAt ≥ FARE_MODEL_B_SINCE → Model B
+         (subtotal & total dari splitFare segar). Model A (booking lama):
+         subtotal = harga jadwal × kursi; total = subtotal − diskon. */
+      var recFareB = apiSyncIsModelB_(rec)
+        ? apiSyncSplitFare_(ctx, schedule, seats.length, discount, rec.source || '', rec)
+        : null;
+      var expectedSubtotal = recFareB
+        ? apiSyncNumber_(recFareB.subtotal, 0)
+        : apiSyncNumber_(schedule.price, 0) * seats.length;
+      var expectedTotal = recFareB
+        ? apiSyncNumber_(recFareB.total, 0)
+        : (subtotal - discount);
       if (!isFinite(subtotal) || !isFinite(discount) || !isFinite(total)) {
         throw apiError_('VALIDATION', 'Nominal booking tidak valid.');
       }
       if (Math.abs(subtotal - expectedSubtotal) > 0.5) {
-        throw apiError_('VALIDATION', 'Subtotal booking tidak sesuai harga jadwal.');
+        throw apiError_('VALIDATION', 'Subtotal booking tidak sesuai perhitungan jadwal.');
       }
       if (discount < 0 || discount > subtotal) {
         throw apiError_('VALIDATION', 'Diskon booking tidak valid.');
       }
-      if (Math.abs(total - (subtotal - discount)) > 0.5) {
+      if (Math.abs(total - expectedTotal) > 0.5) {
         throw apiError_('VALIDATION', 'Total booking tidak sesuai subtotal dan diskon.');
       }
       var voucherCheck = apiSyncVoucherDiscount_(ctx, schedule, seats.length, rec.voucher);
@@ -4101,6 +4186,14 @@ function apiSyncValidateBookings_(ctx, target) {
               refundPct > expectedRefund.pct + 0.5) {
             throw apiError_('FORBIDDEN', 'Refund melebihi kebijakan pembatalan.');
           }
+          /* Jenis refund (scope) harus sesuai kebijakan saat nominal >0:
+             scope salah = uang masuk komponen yang salah di ledger admin.
+             Pembatalan pending (refund 0) tidak dicek — tetap lancar. */
+          var submittedScope = String(rec.refundScope || '');
+          if (refundAmount > 0 && submittedScope &&
+              submittedScope !== expectedRefund.scope) {
+            throw apiError_('FORBIDDEN', 'Jenis refund tidak sesuai kebijakan.');
+          }
         }
         if (ctx.role === 'pengemudi' &&
             String(schedule.status || '') !== 'cancelled' &&
@@ -4172,7 +4265,7 @@ function apiSyncValidatePayments_(ctx, target) {
         throw apiError_('VALIDATION', 'Fee pembayaran tidak valid.');
       }
       var newFare = apiSyncSplitFare_(ctx, schedule, (booking.seats || []).length,
-        booking.discount || 0, booking.source || '');
+        booking.discount || 0, booking.source || '', booking);
       if (Math.abs(newFee - apiSyncNumber_(newFare.fee, 0)) > 0.5) {
         throw apiError_('VALIDATION', 'Fee pembayaran tidak sesuai perhitungan.');
       }
@@ -4222,7 +4315,7 @@ function apiSyncValidatePayments_(ctx, target) {
         throw apiError_('FORBIDDEN', 'Fee pembayaran hanya boleh diubah saat pending.');
       }
       var existingFare = apiSyncSplitFare_(ctx, schedule, (booking.seats || []).length,
-        booking.discount || 0, booking.source || '');
+        booking.discount || 0, booking.source || '', booking);
       if (Math.abs(fee - apiSyncNumber_(existingFare.fee, 0)) > 0.5) {
         throw apiError_('VALIDATION', 'Fee pembayaran tidak sesuai perhitungan.');
       }
@@ -4347,7 +4440,7 @@ function apiSyncValidateLedger_(ctx, target) {
       }
       var expected = apiSyncSplitFare_(
         ctx, schedule, (booking.seats || []).length,
-        booking.discount || 0, booking.source || ''
+        booking.discount || 0, booking.source || '', booking
       );
       ['ticket', 'service', 'fee', 'total'].forEach(function (field) {
         if (Math.abs(apiSyncNumber_(entry[field], 0) - apiSyncNumber_(expected[field], 0)) > 0.5) {
@@ -4394,7 +4487,7 @@ function apiSyncValidateLedger_(ctx, target) {
       }
       var movedExpected = apiSyncSplitFare_(
         ctx, targetSchedule, (booking.seats || []).length,
-        booking.discount || 0, booking.source || ''
+        booking.discount || 0, booking.source || '', booking
       );
       ['ticket', 'service', 'fee', 'total'].forEach(function (field) {
         if (Math.abs(apiSyncNumber_(entry[field], 0) - apiSyncNumber_(movedExpected[field], 0)) > 0.5) {
