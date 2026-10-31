@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useApp, freshBW } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { schedById, schedReady, takenSeats, seatsLeft, routeById, vehicleById, driverById, vehLayout, schedSeatCap, audit, notify, vehName, splitFare, fareCore, fareModelOf, servicePerSeat, scheduleDepartureMs, createLedger, routeBookable, isRouteSuspended, canPayBooking, scheduleIsPast, ensureHoldExpiry, agencyById, routeGroupKey, groupRoutes, routesInRouteGroup, scheduleMaintenance, maintenancePeriodLabel } from '@/lib/domain.js';
+import { schedById, schedReady, takenSeats, seatsLeft, routeById, vehicleById, driverById, vehLayout, schedSeatCap, audit, notify, vehName, splitFare, fareCore, fareModelOf, servicePerSeat, scheduleDepartureMs, createLedger, routeBookable, isRouteSuspended, canPayBooking, scheduleIsPast, agencyById, routeGroupKey, groupRoutes, routesInRouteGroup, scheduleMaintenance, maintenancePeriodLabel } from '@/lib/domain.js';
 import { IS_SHEETS } from '@/lib/runtime.js';
 import { seatInfo } from '@/lib/sheetsApi.js';
 import { refreshSnapshot } from '@/lib/remote.js';
@@ -193,7 +193,7 @@ export function PaymentModal({ booking, onDone }) {
   return (
     <div className="p-6">
       <div className="flex items-center justify-between"><h3 className="font-extrabold text-[17px] flex items-center gap-2"><Icon name="wallet" className="w-5 h-5 text-sky-600" />Pembayaran {booking.payMethod}</h3>
-        <button onClick={() => { closeModal(); go('tickets'); }} className="text-slate-400 hover:text-slate-700"><Icon name="x" className="w-5 h-5" /></button></div>
+        <button onClick={() => { closeModal(); const b0 = DB.load('bookings', []).find((x) => x.id === booking.id); if (b0 && b0.status === 'pending') toast('Booking menunggu pembayaran — dibatalkan otomatis jika hold 5 menit habis.', 'info'); go('tickets'); }} className="text-slate-400 hover:text-slate-700"><Icon name="x" className="w-5 h-5" /></button></div>
       <div className="text-center bg-amber-50 border border-amber-200 rounded-2xl py-2.5 mt-3 font-extrabold text-amber-800 text-[14px]">Sisa waktu bayar: <span className="font-mono">{mm}:{ss}</span></div>
       {_ps?.tripStatus === 'scheduled' && _ps.delayUntil && new Date(_ps.delayUntil).getTime() > Date.now() ? <div className="mt-2 bg-sky-50 border border-sky-200 rounded-2xl p-2.5 text-[12px] font-semibold text-sky-900">Jadwal delay {_ps.delayMinutes} menit • estimasi keberangkatan {fmtClock(_ps.delayUntil)}.</div> : null}
       {booking.payMethod === 'QRIS' ? (
@@ -214,18 +214,9 @@ export function PaymentModal({ booking, onDone }) {
       <div className="flex justify-between font-extrabold text-[15px] mt-2"><span>Total</span><span className="text-sky-700">{fmtRp(booking.total)}</span></div>
       <div className="text-[11px] text-slate-400 font-semibold">Kode booking: <b className="font-mono">{booking.code}</b></div>
       <button onClick={simulatePay} disabled={paying} className="w-full mt-4 bg-green-500 hover:bg-green-600 text-white font-extrabold py-3.5 rounded-2xl transition flex items-center justify-center gap-2 disabled:opacity-60 disabled:hover:bg-green-500"><Icon name="circle-check-big" className="w-5 h-5" />{paying ? 'Menyimpan pembayaran…' : 'Simulasi: Saya Sudah Bayar'}</button>
-      <button onClick={() => { closeModal(); go('tickets'); }} className="w-full mt-2 bg-slate-100 font-bold text-[13px] py-2.5 rounded-2xl">Bayar Nanti (lihat tiket)</button>
       <p className="text-[11px] text-slate-400 text-center mt-2 font-medium">Terintegrasi Midtrans / Xendit (mode simulasi)</p>
     </div>
   );
-}
-
-export function openPayment(bid, openModal) {
-  const b = DB.load('bookings', []).find((x) => x.id === bid);
-  if (!b || !canPayBooking(b, schedById(b.scheduleId))) return;
-  const nb = ensureHoldExpiry(b);
-  if (nb !== b) DB.save('bookings', DB.load('bookings', []).map((x) => (x.id === bid ? nb : x)));
-  openModal(<PaymentModal booking={nb} />);
 }
 
 export default function Search() {
@@ -440,21 +431,6 @@ export default function Search() {
     refresh();
     openModal(<PaymentModal booking={booking} />);
   };
-
-  const repay = (bid) => {
-    const b = DB.load('bookings', []).find((x) => x.id === bid);
-    if (!b) return;
-    if (!canPayBooking(b, schedById(b.scheduleId))) {
-      toast('Pembayaran ditutup — jadwal sudah berjalan/dibatalkan atau hold kedaluwarsa.', 'err');
-      refresh();
-      return;
-    }
-    const nb = ensureHoldExpiry(b);
-    if (nb !== b) DB.save('bookings', DB.load('bookings', []).map((x) => (x.id === bid ? nb : x)));
-    refresh();
-    openModal(<PaymentModal booking={nb} />);
-  };
-  void repay;
 
   const renderStep1 = () => (
     <>

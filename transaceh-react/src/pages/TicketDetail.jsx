@@ -1,12 +1,11 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { schedById, routeById, vehicleById, driverById, agencyById, audit, vehName, splitFare, fareModelOf, cancelBooking as cancelBookingDomain, canCancelBooking, canPayBooking, refundPolicyOf, refundPolicyText, refundAmountFor, scheduleIsPast, ensureHoldExpiry, bookedPassengers, maintenanceBookingInfo, maintenanceDeadlineLabel, refundMaintenanceBooking, moveMaintenanceBooking, seatsLeft } from '@/lib/domain.js';
+import { schedById, routeById, vehicleById, driverById, agencyById, audit, vehName, splitFare, fareModelOf, cancelBooking as cancelBookingDomain, canCancelBooking, refundPolicyOf, refundPolicyText, refundAmountFor, scheduleIsPast, bookedPassengers, maintenanceBookingInfo, maintenanceDeadlineLabel, refundMaintenanceBooking, moveMaintenanceBooking, seatsLeft } from '@/lib/domain.js';
 import { fmtRp, todayStr, uid, fmtClock } from '@/lib/utils.js';
 import { pickupOf } from '@/lib/pickups.js';
 import { Icon, Empty, BadgeStatus, fmtDate } from '@/components/ui.jsx';
 import { FareChain, discLabelOf } from '@/components/FareChain.jsx';
-import { PaymentModal } from './Search.jsx';
 
 function TripTimeline({ st }) {
   const steps = [['scheduled', 'check', 'Dijadwalkan'], ['ontrip', 'car', 'Dalam Perjalanan'], ['arrived', 'flag', 'Tiba di Tujuan']];
@@ -82,18 +81,6 @@ export default function TicketDetail({ bid }) {
     audit('review', b.code + ' ★' + rate);
     toast('Ulasan terkirim. Terima kasih!');
     refresh();
-  };
-
-  const repay = () => {
-    if (!canPayBooking(b, s)) {
-      toast('Pembayaran ditutup — jadwal sudah berjalan/dibatalkan atau hold kedaluwarsa.', 'err');
-      refresh();
-      return;
-    }
-    const nb = ensureHoldExpiry(b);
-    if (nb !== b) DB.save('bookings', DB.load('bookings', []).map((x) => (x.id === b.id ? nb : x)));
-    refresh();
-    openModal(<PaymentModal booking={nb} />);
   };
 
   const cancelable = canCancelBooking(b, s) && !mtActive;
@@ -197,9 +184,7 @@ export default function TicketDetail({ bid }) {
             <button onClick={() => window.print()} className="flex-1 bg-slate-100 font-extrabold text-[13px] py-2.5 rounded-xl flex items-center justify-center gap-2"><Icon name="printer" className="w-4 h-4" />Cetak / PDF</button>
             <button onClick={() => toast('Tiket dikirim via WhatsApp ke ' + (firstPax?.phone || 'penumpang'), 'ok')} className="flex-1 bg-green-500 text-white font-extrabold text-[13px] py-2.5 rounded-xl flex items-center justify-center gap-2"><Icon name="message-circle" className="w-4 h-4" />Kirim WA</button>
           </div>
-          {b.status === 'pending' ? (canPayBooking(b, s)
-            ? <button onClick={repay} className="no-print w-full mt-2 bg-green-500 text-white font-extrabold text-[13px] py-2.5 rounded-xl">Bayar Sekarang</button>
-            : <button disabled className="no-print w-full mt-2 bg-slate-100 text-slate-400 font-extrabold text-[13px] py-2.5 rounded-xl cursor-not-allowed">Pembayaran Ditutup</button>) : null}
+          {b.status === 'pending' ? <div className="no-print mt-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-[12px] font-semibold text-amber-800 text-center">Menunggu pembayaran — dibatalkan otomatis jika hold 5 menit habis.</div> : null}
           {cancelable
             ? <button onClick={cancelBooking} className="no-print w-full mt-2 bg-red-50 text-red-600 font-extrabold text-[13px] py-2.5 rounded-xl">Batalkan Booking</button>
             : <div className="no-print mt-2"><button disabled className="w-full bg-slate-100 text-slate-400 font-extrabold text-[13px] py-2.5 rounded-xl cursor-not-allowed">Batalkan Booking</button><div className="mt-1.5 text-[11.5px] font-semibold text-slate-400 text-center">{cancelBlockReason}</div></div>}

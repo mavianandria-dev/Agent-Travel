@@ -1,9 +1,8 @@
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { schedById, routeById, vehicleById, vehName, canCancelBooking, canPayBooking, ensureHoldExpiry, bookedPassengers, maintenanceBookingInfo, maintenanceDeadlineLabel } from '@/lib/domain.js';
+import { schedById, routeById, vehicleById, vehName, canCancelBooking, bookedPassengers, maintenanceBookingInfo, maintenanceDeadlineLabel } from '@/lib/domain.js';
 import { fmtRp } from '@/lib/utils.js';
 import { Icon, Empty, BadgeStatus, fmtDate } from '@/components/ui.jsx';
-import { PaymentModal } from './Search.jsx';
 
 export function ticketCardData(b) {
   const s = schedById(b.scheduleId);
@@ -13,22 +12,8 @@ export function ticketCardData(b) {
 }
 
 export default function Tickets() {
-  const { user, go, toast, refresh, tick, openModal } = useApp();
+  const { user, go, toast, tick } = useApp();
   void tick;
-
-  const repay = (bid) => {
-    const b = DB.load('bookings', []).find((x) => x.id === bid);
-    if (!b) return;
-    if (!canPayBooking(b, schedById(b.scheduleId))) {
-      toast('Pembayaran ditutup — jadwal sudah berjalan/dibatalkan atau hold kedaluwarsa.', 'err');
-      refresh();
-      return;
-    }
-    const nb = ensureHoldExpiry(b);
-    if (nb !== b) DB.save('bookings', DB.load('bookings', []).map((x) => (x.id === bid ? nb : x)));
-    refresh();
-    openModal(<PaymentModal booking={nb} />);
-  };
 
   const cancelBooking = (bid) => {
     go('ticket-detail:' + bid);
@@ -74,12 +59,9 @@ export default function Tickets() {
                 {mt?.state === 'cancelled_unpaid' ? <div className="mt-2 bg-slate-100 border border-slate-200 rounded-xl px-2.5 py-1.5 text-[11.5px] font-semibold text-slate-600">Dibatalkan karena maintenance armada. Booking belum dibayar, tidak ada refund.</div> : null}
                 {mt?.state === 'replaced' ? <div className="mt-2 bg-green-50 border border-green-200 rounded-xl px-2.5 py-1.5 text-[11.5px] font-semibold text-green-800">Dipindahkan dari {fmtDate(mt.originalSchedule.date)} {mt.originalSchedule.time} ke {fmtDate(d.s.date)} {d.s.time} • kursi {b.seats.join(', ')}.</div> : null}
                 <div className="flex items-center justify-between mt-2"><span className="font-extrabold text-[15px]">{fmtRp(b.total)}</span>
-                  {b.status === 'pending' ? <span className="text-[11px] font-extrabold text-amber-700">Hold: {d.ms > 0 ? Math.floor(d.ms / 60000) + ' mnt' : 'habis'}</span> : null}</div>
+                  {b.status === 'pending' ? <span className="text-[11px] font-extrabold text-amber-700">Menunggu pembayaran — dibatalkan otomatis {d.ms > 0 ? 'dalam ' + Math.floor(d.ms / 60000) + ' mnt' : 'sekarang'}</span> : null}</div>
                 <div className="flex gap-2 mt-3">
                   <button onClick={() => go('ticket-detail:' + b.id)} className="flex-1 bg-[#0b2447] text-white text-[12.5px] font-extrabold py-2.5 rounded-xl">{mt?.state === 'choice_pending' ? (mt.candidates?.length ? 'Pilih Refund / Pindah' : 'Lihat Refund') : 'Detail / E-Tiket'}</button>
-                  {b.status === 'pending' ? (canPayBooking(b, d.s)
-                    ? <button onClick={() => repay(b.id)} className="flex-1 bg-green-500 text-white text-[12.5px] font-extrabold py-2.5 rounded-xl">Bayar</button>
-                    : <button disabled className="flex-1 bg-slate-100 text-slate-400 text-[12.5px] font-extrabold py-2.5 rounded-xl cursor-not-allowed">Pembayaran ditutup</button>) : null}
                   {canCancelBooking(b, d.s) ? <button onClick={() => cancelBooking(b.id)} className="px-3.5 bg-red-50 text-red-600 rounded-xl" title="Batalkan"><Icon name="trash-2" className="w-4 h-4" /></button> : null}
                 </div></div></div>
           );
