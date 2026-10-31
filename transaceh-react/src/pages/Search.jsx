@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useApp, freshBW } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { schedById, schedReady, takenSeats, seatsLeft, routeById, vehicleById, driverById, vehLayout, schedSeatCap, audit, notify, vehName, splitFare, fareCore, fareModelOf, createLedger, routeBookable, isRouteSuspended, canPayBooking, scheduleIsPast, ensureHoldExpiry, agencyById, routeGroupKey, groupRoutes, routesInRouteGroup, scheduleMaintenance, maintenancePeriodLabel } from '@/lib/domain.js';
+import { schedById, schedReady, takenSeats, seatsLeft, routeById, vehicleById, driverById, vehLayout, schedSeatCap, audit, notify, vehName, splitFare, fareCore, fareModelOf, servicePerSeat, scheduleDepartureMs, createLedger, routeBookable, isRouteSuspended, canPayBooking, scheduleIsPast, ensureHoldExpiry, agencyById, routeGroupKey, groupRoutes, routesInRouteGroup, scheduleMaintenance, maintenancePeriodLabel } from '@/lib/domain.js';
 import { IS_SHEETS } from '@/lib/runtime.js';
 import { seatInfo } from '@/lib/sheetsApi.js';
 import { refreshSnapshot } from '@/lib/remote.js';
@@ -11,6 +11,17 @@ import { HOME_PICKUP, pickupOptions } from '@/lib/pickups.js';
 import { saveCheckoutDraft, clearCheckoutDraft } from '@/lib/checkoutDraft.js';
 import { CITY_COORDS } from '@/lib/geo.js';
 import { MapPicker } from '@/components/MapPicker.jsx';
+
+/* Label sisa waktu menuju keberangkatan jadwal (hitung saat render kartu). */
+const sisaWaktuBerangkat = (s) => {
+  const ms = scheduleDepartureMs(s) - Date.now();
+  if (!Number.isFinite(ms) || ms <= 0) return 'Berangkat terlewat';
+  const mnt = Math.ceil(ms / 60000);
+  if (mnt < 60) return mnt + ' mnt lagi';
+  const jam = Math.floor(mnt / 60);
+  if (jam < 24) return jam + ' jam lagi';
+  return Math.floor(jam / 24) + ' hari ' + (jam % 24) + ' jam lagi';
+};
 
 const validCoords = (s) => {
   const m = /^(-?\d+(\.\d+)?)\s*,\s*(-?\d+(\.\d+)?)$/.exec((s || '').trim());
@@ -546,7 +557,7 @@ export default function Search() {
                 <div className="text-[12.5px] font-bold text-sky-700 mt-1 flex items-center gap-2"><Icon name="clock" className="w-3.5 h-3.5" />Berangkat {s.time} WIB • <Icon name="user" className="w-3.5 h-3.5" />{dr ? dr.name + ' ★' + dr.rating : 'Pengemudi ditugaskan travel'}</div>
                 {mt ? <div className="mt-2 text-[12px] font-semibold text-red-800 bg-red-50 border border-red-200 rounded-xl px-2.5 py-1.5">Tidak dapat dipesan • {mt.legacy ? 'Status armada sedang maintenance.' : 'Maintenance ' + maintenancePeriodLabel(mt) + '.'} Pilih tanggal/jadwal lain.</div> : null}
                 <div className="flex flex-wrap gap-1.5 mt-2">{(v.facilities || []).map((f) => (<span key={f} className="badge bg-slate-100 text-slate-600 !font-semibold"><Icon name="check" className="w-3 h-3" />{f}</span>))}</div>
-                <div className="flex items-center justify-between mt-2.5"><div className="font-extrabold text-[17px] text-[#0b2447]">{fmtRp(s.price)}<span className="text-[11px] font-semibold text-slate-400">/kursi</span><div className="text-[10.5px] font-semibold text-slate-400">Harga tiket • + jasa & fee di kasir</div></div>
+                <div className="flex items-center justify-between mt-2.5"><div className="font-extrabold text-[17px] text-[#0b2447]">{fmtRp(s.price + servicePerSeat(s))}<span className="text-[11px] font-semibold text-slate-400">/kursi</span><div className="text-[10.5px] font-semibold text-slate-400">{sisaWaktuBerangkat(s)}</div></div>
                   <span className={'badge ' + (mt ? 'bg-red-100 text-red-700' : left > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700')}>{mt ? 'Tutup' : left + ' kursi tersisa'}</span></div></div>
               <div className="hidden sm:flex items-center"><div className={'w-6 h-6 rounded-full flex items-center justify-center ' + (sel && selectable ? 'bg-sky-500 text-white' : 'border-2 border-slate-200 text-transparent')}><Icon name="check" className="w-4 h-4" /></div></div>
             </div>
