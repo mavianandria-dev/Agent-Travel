@@ -1,5 +1,5 @@
 import { DB } from '@/lib/db.js';
-import { schedById, routeById, splitFare } from '@/lib/domain.js';
+import { schedById, routeById, splitFare, fareModelOf } from '@/lib/domain.js';
 import { fmtRp, todayStr } from '@/lib/utils.js';
 import { StatCard, useChart } from '@/components/ui.jsx';
 
@@ -10,7 +10,7 @@ export function Overview() {
   const fee = DB.load('payments', []).filter((p) => p.status === 'paid').reduce((a, p) => {
     const b = bookings.find((x) => x.id === p.bookingId);
     const s = b ? schedById(b.scheduleId) : null;
-    const f = b && s ? (b.fare || splitFare(s, (b.seats || []).length, b.discount || 0)) : null;
+    const f = b && s ? (b.fare || splitFare(s, (b.seats || []).length, b.discount || 0, 'pelanggan', fareModelOf(b))) : null;
     return a + (f ? Number(f.fee) || 0 : Number(p.fee) || 0);
   }, 0);
   const ags = DB.load('agencies', []);

@@ -5,6 +5,7 @@ import { schedById, routeById, vehicleById, driverById, agencyById, audit, vehNa
 import { fmtRp, todayStr, uid, fmtClock } from '@/lib/utils.js';
 import { pickupOf } from '@/lib/pickups.js';
 import { Icon, Empty, BadgeStatus, fmtDate } from '@/components/ui.jsx';
+import { FareChain, discLabelOf } from '@/components/FareChain.jsx';
 import { PaymentModal } from './Search.jsx';
 
 function TripTimeline({ st }) {
@@ -37,15 +38,15 @@ export default function TicketDetail({ bid }) {
   const v = vehicleById(s.vehicleId);
   const dr = driverById(s.driverId);
   const ag = agencyById(s.agencyId);
-  const _fare = b.fare || splitFare(s, (b.seats || []).length, b.discount || 0, b.source);
+  const isB = fareModelOf(b) === 'B';
+  const _fare = b.fare || splitFare(s, (b.seats || []).length, b.discount || 0, b.source, isB ? 'B' : 'A');
   /* E-tiket dua model uang (lihat domain.js — Model B memakai `fareModelOf`):
      - Model B (createdAt ≥ tanda deploy): rantai penuh Tiket (harga rute PENUH)
        + Jasa − Diskon + Subtotal + Fee; jalur pengemudi memecah jasa
        "Jasa agen (50%)" + "↳ Via sopir (50%)". Angka dari splitFare segar.
      - Model A (booking lama): rantai jurnal semula + memo viaSopir.
      viaSopir tidak pernah tersimpan — jurnal tetap 4 kolom. */
-  const isB = fareModelOf(b) === 'B';
-  const qB = isB ? splitFare(s, (b.seats || []).length, b.discount || 0, b.source) : null;
+  const qB = isB ? splitFare(s, (b.seats || []).length, b.discount || 0, b.source, 'B') : null;
   const driverSrc = b.source === 'driver';
   const viaSopir = isB ? qB.viaSopir
     : (driverSrc ? splitFare(s, (b.seats || []).length, b.discount || 0, 'driver').viaSopir : 0);
@@ -53,7 +54,6 @@ export default function TicketDetail({ bid }) {
     : (driverSrc ? Math.max(0, _fare.ticket - viaSopir) : _fare.ticket);
   const jasaAgen = isB ? Math.max(0, qB.quoteService - qB.viaSopir) : _fare.service;
   const feeRow = isB ? qB.fee : _fare.fee;
-  const discRow = isB ? qB.disc : 0;
   const subtotalFare = isB ? qB.subtotal : Math.max(0, b.total - _fare.fee);
   const pax = bookedPassengers(b);
   const firstPax = pax[0] || null;
@@ -171,19 +171,23 @@ export default function TicketDetail({ bid }) {
             {pax.length ? pax.map((p) => (<div key={p.seat} className="flex justify-between border-t border-slate-200 pt-1.5"><span>{p.name} <span className="text-slate-400">({p.phone})</span></span><span className="badge bg-sky-600 text-white">{p.seat}</span></div>)) : <div className="border-t border-slate-200 pt-1.5 text-slate-400">Data penumpang tidak tersedia</div>}
             <div className="flex justify-between border-t pt-1.5"><span>Jemput</span><b>{pickupText}</b></div>
             <div className="flex justify-between"><span>Travel</span><b>{ag.name} • {ag.phone}</b></div>
-            {driverSrc ? <>
-              <div className="flex justify-between"><span>{isB ? 'Tiket (sopir) x' + (b.seats || []).length : 'Tiket (sopir)'}</span><span>{fmtRp(tiketMurni)}</span></div>
+            {isB ? (
+              /* Model B: rantai satu-sejalan dengan checkout & layar bayar —
+                 Label "Tiket (sopir)"/"Via sopir" hilang dari render; komisi via
+                 sopir tetap memo viaSopir untuk blok estimasi refund. Total
+                 baris di bawah = snapshot booking (b.total), tanpa doble. */
+              <div className="mt-2 pt-1"><FareChain s={s} fare={qB} n={(b.seats || []).length} discLabel={discLabelOf(b.voucher || b.voucherCode)} showTotal={false} /></div>
+            ) : driverSrc ? <>
+              <div className="flex justify-between"><span>Tiket (sopir)</span><span>{fmtRp(tiketMurni)}</span></div>
               {jasaAgen > 0 || viaSopir > 0 ? <>
-                <div className="flex justify-between"><span>{isB ? 'Jasa agen (50%)' : 'Jasa agen'}</span><span>{fmtRp(jasaAgen)}</span></div>
-                <div className="flex justify-between pl-3 text-[12.5px] text-slate-400"><span>{isB ? <>&#8627; Via sopir (50%)</> : <>&#8627; Via sopir</>}</span><span>{fmtRp(viaSopir)}</span></div>
-                {isB ? <div className="flex justify-between text-green-700"><span>Diskon voucher</span><span>− {fmtRp(discRow)}</span></div> : null}
+                <div className="flex justify-between"><span>Jasa agen</span><span>{fmtRp(jasaAgen)}</span></div>
+                <div className="flex justify-between pl-3 text-[12.5px] text-slate-400"><span>&#8627; Via sopir</span><span>{fmtRp(viaSopir)}</span></div>
               </> : null}
-              <div className="flex justify-between border-t border-slate-200 pt-1"><span className={isB ? 'font-extrabold' : ''}>Subtotal ({(b.seats || []).length} kursi)</span><span>{fmtRp(subtotalFare)}</span></div>
+              <div className="flex justify-between border-t border-slate-200 pt-1"><span>Subtotal ({(b.seats || []).length} kursi)</span><span>{fmtRp(subtotalFare)}</span></div>
               <div className="flex justify-between"><span>Fee platform</span><span>{fmtRp(feeRow)}</span></div>
             </> : <>
               <div className="flex justify-between"><span>Tiket x{(b.seats || []).length}</span><span>{fmtRp(tiketMurni)}</span></div>
               <div className="flex justify-between"><span>Jasa agen</span><span>{fmtRp(jasaAgen)}</span></div>
-              {isB ? <div className="flex justify-between text-green-700"><span>Diskon voucher</span><span>− {fmtRp(discRow)}</span></div> : null}
               <div className="flex justify-between"><span className="font-extrabold">Subtotal ({(b.seats || []).length} kursi)</span><span>{fmtRp(subtotalFare)}</span></div>
               <div className="flex justify-between"><span>Fee platform</span><span>{fmtRp(feeRow)}</span></div>
             </>}

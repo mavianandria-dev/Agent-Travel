@@ -7,6 +7,7 @@ import { seatInfo } from '@/lib/sheetsApi.js';
 import { refreshSnapshot } from '@/lib/remote.js';
 import { fmtRp, todayStr, uid, fmtClock } from '@/lib/utils.js';
 import { Icon, CabinGrid, fmtDate } from '@/components/ui.jsx';
+import { FareChain, discLabelOf } from '@/components/FareChain.jsx';
 import { HOME_PICKUP, pickupOptions } from '@/lib/pickups.js';
 import { saveCheckoutDraft, clearCheckoutDraft } from '@/lib/checkoutDraft.js';
 import { CITY_COORDS } from '@/lib/geo.js';
@@ -132,12 +133,13 @@ export function PaymentModal({ booking, onDone }) {
   const ss = String(Math.max(0, Math.floor((ms % 60000) / 1000))).padStart(2, '0');
   const va = booking._va || ('8821 ' + String(Math.floor(100000000000 + Math.random() * 899999999999)).slice(0, 12).replace(/(\d{4})(?=\d)/g, '$1 '));
   const _ps = schedById(booking.scheduleId);
-  const _fare = splitFare(_ps, (booking.seats || []).length, booking.discount || 0);
-  /* Ringkasan bayar: booking Model B menampilkan rantai penuh — Tiket (harga
-     rute penuh) + Jasa − Diskon + Subtotal + Fee (angka fresh splitFare).
-     Booking Model A (lama) tampil nilai jurnal + Subtotal (total − fee).
-     Semuanya murni layar, tidak menulis ke booking. */
   const isB = fareModelOf(booking) === 'B';
+  /* Ringkasan bayar: booking Model B menampilkan rantai penuh — Tiket (harga
+     rute penuh) + Diskon + Subtotal + Fee (angka fresh splitFare). Booking
+     Model A (lama) tampil nilai jurnal + Subtotal (total − fee). Replay fee
+     sadar-model: tarif flat legacy tetap flat-sekali. Semuanya murni layar,
+     tidak menulis ke booking. */
+  const _fare = splitFare(_ps, (booking.seats || []).length, booking.discount || 0, 'pelanggan', isB ? 'B' : 'A');
   const paySubtotal = Math.max(0, (booking.total || 0) - _fare.fee);
 
   const simulatePay = async () => {
@@ -161,7 +163,7 @@ export function PaymentModal({ booking, onDone }) {
     setPaying(true);
     b.status = 'paid';
     b.paidAt = new Date().toISOString();
-    b.fare = fareCore(splitFare(s, (b.seats || []).length, b.discount || 0));
+    b.fare = fareCore(splitFare(s, (b.seats || []).length, b.discount || 0, 'pelanggan', fareModelOf(b) === 'B' ? 'B' : 'A'));
     DB.save('bookings', arr);
     refresh();
     createLedger(b);
@@ -205,7 +207,7 @@ export function PaymentModal({ booking, onDone }) {
         <div className="mt-4 bg-gradient-to-r from-sky-500 to-blue-600 text-white rounded-2xl p-4 text-center font-extrabold">Bayar via E-Wallet<br /><span className="text-[26px] font-mono">{fmtRp(booking.total)}</span><div className="text-[12px] opacity-80 font-semibold">Dana • OVO • GoPay • ShopeePay</div></div>
       )}
       {isB ? (
-        <div className="mt-4 space-y-1 text-[13px] font-semibold"><div className="flex justify-between"><span>Tiket x{(booking.seats || []).length}</span><span>{fmtRp(_fare.quoteTicket)}</span></div><div className="flex justify-between"><span>Jasa agen</span><span>{fmtRp(_fare.quoteService)}</span></div><div className="flex justify-between text-green-700"><span>Diskon voucher</span><span>− {fmtRp(_fare.disc)}</span></div><div className="flex justify-between"><span className="font-extrabold">Subtotal ({(booking.seats || []).length} kursi)</span><span>{fmtRp(_fare.subtotal)}</span></div><div className="flex justify-between"><span>Fee platform</span><span>{fmtRp(_fare.fee)}</span></div></div>
+        <div className="mt-4"><FareChain s={_ps} fare={_fare} n={(booking.seats || []).length} discLabel={discLabelOf(booking.voucher || booking.voucherCode)} showTotal={false} /></div>
       ) : (
         <div className="mt-4 space-y-1 text-[13px] font-semibold"><div className="flex justify-between"><span>Tiket x{(booking.seats || []).length}</span><span>{fmtRp(_fare.ticket)}</span></div><div className="flex justify-between"><span>Jasa agen</span><span>{fmtRp(_fare.service)}</span></div><div className="flex justify-between"><span className="font-extrabold">Subtotal ({(booking.seats || []).length} kursi)</span><span>{fmtRp(paySubtotal)}</span></div><div className="flex justify-between"><span>Fee platform</span><span>{fmtRp(_fare.fee)}</span></div></div>
       )}
@@ -643,7 +645,6 @@ export default function Search() {
     const r = routeById(s.routeId);
     const v = vehicleById(s.vehicleId);
     const ag = agencyById(s.agencyId);
-    const sub = s.price * bw.seats.length;
     const discount = calcDiscount(bw.voucher, bw.scheduleId, bw.seats.length);
     const _fare = splitFare(s, bw.seats.length, discount);
     const total = _fare.total;
@@ -659,12 +660,7 @@ export default function Search() {
             <div className="text-[12.5px] font-semibold text-slate-600 mt-1">{fmtDate(s.date)} • {s.time} WIB • {vehName(v)} ({v.plate})</div>
             {s.tripStatus === 'scheduled' && s.delayUntil && new Date(s.delayUntil).getTime() > Date.now() ? <div className="text-[12px] font-extrabold text-amber-700 mt-1">Delay {s.delayMinutes} menit • estimasi {fmtClock(s.delayUntil)}</div> : null}
             <div className="text-[12.5px] font-semibold text-slate-600">Kursi: <b>{bw.seats.join(', ')}</b> • Jemput: <b>{bw.pickup === HOME_PICKUP ? 'Rumah: ' + bw.pickupAddr : bw.pickup || (pickupOptions(r)[0] || '')}</b>{bw.pickup === HOME_PICKUP && bw.pickupCoords ? <b> ({bw.pickupCoords})</b> : null}</div>
-            <div className="mt-2 space-y-1 text-[13px] font-semibold"><div className="flex justify-between"><span>Tiket x{bw.seats.length}</span><span>{fmtRp(_fare.quoteTicket)}</span></div>
-              <div className="flex justify-between"><span>Jasa agen</span><span>{fmtRp(_fare.quoteService)}</span></div>
-              <div className="flex justify-between text-green-700"><span>Diskon voucher</span><span>− {fmtRp(_fare.disc)}</span></div>
-              <div className="flex justify-between"><span className="font-extrabold">Subtotal ({bw.seats.length} kursi)</span><span>{fmtRp(_fare.subtotal)}</span></div>
-              <div className="flex justify-between"><span>Fee platform</span><span>{fmtRp(_fare.fee)}</span></div>
-              <div className="flex justify-between font-extrabold text-[16px] pt-2 border-t"><span>Total Bayar</span><span className="text-sky-700">{fmtRp(total)}</span></div></div>
+            <div className="mt-2"><FareChain s={s} fare={_fare} n={bw.seats.length} discLabel={discLabelOf(bw.voucher)} /></div>
             <div className="mt-3"><label className="text-[12px] font-extrabold">KODE VOUCHER</label>
               <div className="flex gap-2 mt-1"><input value={bw.voucher} onChange={(e) => setBw({ ...bw, voucher: e.target.value.toUpperCase() })} placeholder="cth: HEMAT20" className="flex-1 text-[13px] font-bold uppercase bg-white border-2 border-slate-200 rounded-xl px-3 py-2 focus-ring" /><button onClick={applyVoucher} className="bg-[#0b2447] text-white text-[12px] font-extrabold px-4 rounded-xl">Pakai</button></div>
               <div className="flex flex-wrap gap-1.5 mt-2">{vouchers.map((x) => (<button key={x.code} onClick={() => { const d = calcDiscount(x.code, bw.scheduleId, bw.seats.length); setBw({ ...bw, voucher: x.code, discount: d }); refresh(); }} className="badge bg-amber-100 text-amber-800 hover:bg-amber-200">{x.code} • {x.desc}</button>))}</div></div>

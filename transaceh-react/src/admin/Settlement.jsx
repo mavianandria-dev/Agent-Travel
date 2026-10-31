@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { settleLedger, ledgerEligible, driverById, schedById, routeById, agencyById, scheduleNeedsReview, setScheduleTripStatus, resolveScheduleNoShow, splitFare, markRefundPaid, startRefundProcessing } from '@/lib/domain.js';
+import { settleLedger, ledgerEligible, driverById, schedById, routeById, agencyById, scheduleNeedsReview, setScheduleTripStatus, resolveScheduleNoShow, splitFare, fareModelOf, markRefundPaid, startRefundProcessing } from '@/lib/domain.js';
 import { fmtRp } from '@/lib/utils.js';
 import { Icon, Empty } from '@/components/ui.jsx';
 
@@ -11,7 +11,7 @@ function NoShowModal({ sid }) {
   const s = schedById(sid);
   if (!s) return <div className="p-6 font-bold text-slate-500">Jadwal tidak ditemukan</div>;
   const paid = DB.load('bookings', []).filter((b) => b.scheduleId === sid && b.status === 'paid');
-  const totalPay = paid.reduce((a, b) => a + (Number(b.total) || Number((b.fare || splitFare(s, (b.seats || []).length, b.discount || 0)).total) || 0), 0);
+  const totalPay = paid.reduce((a, b) => a + (Number(b.total) || Number((b.fare || splitFare(s, (b.seats || []).length, b.discount || 0, 'pelanggan', fareModelOf(b))).total) || 0), 0);
   const refund = Math.round(totalPay * (Number(pct) || 0) / 100);
   const submit = () => {
     const res = resolveScheduleNoShow(sid, pct);
@@ -112,7 +112,7 @@ export default function Settlement() {
             const ag = agencyById(s.agencyId);
             const d = driverById(s.driverId);
             const paid = bookings.filter((b) => b.scheduleId === s.id && b.status === 'paid');
-            const totalTicket = paid.reduce((a, b) => a + (Number((b.fare || splitFare(s, (b.seats || []).length, b.discount || 0)).ticket) || 0), 0);
+            const totalTicket = paid.reduce((a, b) => a + (Number((b.fare || splitFare(s, (b.seats || []).length, b.discount || 0, 'pelanggan', fareModelOf(b))).ticket) || 0), 0);
             const led = ledger.filter((e) => e.scheduleId === s.id);
             return (
               <tr key={s.id}>

@@ -1309,12 +1309,12 @@ export function moveMaintenanceBooking(bookingId, targetScheduleId, { by = 'pela
   b.replacementBy = by;
   b.maintenanceChoiceDeadline = null;
   b.maintenanceResolvedAt = b.replacementAt;
-  b.fare = fareCore(splitFare(target, nextSeats.length, b.discount || 0, b.source));
+  b.fare = fareCore(splitFare(target, nextSeats.length, b.discount || 0, b.source, fareModelOf(b)));
 
   const ledger = DB.load('ledger', []);
   ledger.forEach((e) => {
     if (e.bookingId !== b.id || e.status === 'dicairkan') return;
-    const fare = splitFare(target, nextSeats.length, b.discount || 0, b.source);
+    const fare = splitFare(target, nextSeats.length, b.discount || 0, b.source, fareModelOf(b));
     e.scheduleId = target.id;
     e.agencyId = target.agencyId;
     e.driverId = target.driverId || null;
@@ -1870,7 +1870,7 @@ export function fareModelOf(b) {
   const t = new Date((b && b.createdAt) || 0).getTime();
   return Number.isFinite(t) && t >= new Date(FARE_MODEL_B_SINCE).getTime() ? 'B' : 'A';
 }
-export function splitFare(s,nSeats=1,discount=0, source='pelanggan'){
+export function splitFare(s,nSeats=1,discount=0, source='pelanggan', model='B'){
   const E={ticket:0,service:0,fee:0,total:0,subtotal:0,quoteTicket:0,quoteService:0,viaSopir:0,disc:0};
   if(!s) return E;
   const n=Math.max(1,Number(nSeats)||1);
@@ -1885,7 +1885,11 @@ export function splitFare(s,nSeats=1,discount=0, source='pelanggan'){
   const dTik=Math.min(raw,gross);
   const dSvc=raw-dTik;
   const subtotal=Math.max(0,gross+jasaTotal-raw);
-  const fee=flat?flat:Math.round(subtotal*pct/100);
+  /* Fee platform: tarif % → % × subtotal (flat:0); tarif FLAT Rp dihitung
+     PER KURSI (fee = flat × n) — baris-item di tabel Ringkasan. Booking
+     Model A lama tetap legacy: flat sekali per booking, harga token replay
+     & validasi historisnya tidak berubah. */
+  const fee=flat?(model==='A'?flat:flat*n):Math.round(subtotal*pct/100);
   const driver=source==='driver';
   const viaSopir=driver?jasaTotal-Math.round(jasaTotal/2):0;  /* separuh jasa → pengemudi (memo) */
   const total=subtotal+fee;
@@ -1979,8 +1983,8 @@ export function refundAmountFor(b, s) {
   const n = (b.seats || []).length;
   const src = (b && b.source) || 'pelanggan';
   const isB = fareModelOf(b) === 'B';
-  const q = src === 'driver' ? splitFare(s, n, b.discount || 0, 'driver') : null;
-  const fare = b.fare || q || splitFare(s, n, b.discount || 0, src);
+  const q = src === 'driver' ? splitFare(s, n, b.discount || 0, 'driver', isB ? 'B' : 'A') : null;
+  const fare = b.fare || q || splitFare(s, n, b.discount || 0, src, isB ? 'B' : 'A');
   const rule = refundRuleFor(s.agencyId, s);
   const scope = rule.scope === 'minusFee' ? 'minusFee' : 'ticket';
   let base;
@@ -2006,7 +2010,7 @@ export function createLedger(booking){
   if(!booking||booking.status!=='paid') return null;
   if(DB.load('ledger',[]).some(x=>x.bookingId===booking.id)) return null;
   const s=schedById(booking.scheduleId); if(!s) return null;
-  const f=splitFare(s,(booking.seats||[]).length,booking.discount||0, booking.source);
+  const f=splitFare(s,(booking.seats||[]).length,booking.discount||0, booking.source, fareModelOf(booking));
   const e={id:uid('LG'),bookingId:booking.id,scheduleId:s.id,agencyId:s.agencyId,driverId:s.driverId||null,userEmail:booking.userEmail,seats:[...(booking.seats||[])],ticket:f.ticket,service:f.service,fee:f.fee,total:f.total,status:'ditahan',createdAt:new Date().toISOString(),releasedAt:null,paidOutAt:null};
   const arr=DB.load('ledger',[]); arr.unshift(e); DB.save('ledger',arr);
   audit('ledger_hold',booking.code+' • T'+f.ticket+' J'+f.service+' F'+f.fee);
@@ -2240,7 +2244,7 @@ export function cancelScheduleByOperator(sid, reason, by = 'pengemudi') {
   bookings.forEach((b) => {
     if (b.scheduleId !== sid) return;
     if (b.status === 'paid') {
-      const fare = b.fare || splitFare(s, (b.seats || []).length, b.discount || 0);
+      const fare = b.fare || splitFare(s, (b.seats || []).length, b.discount || 0, 'pelanggan', fareModelOf(b));
       const refund = Math.max(0, Number(b.total) || Number(fare.total) || 0);
       b.status = 'cancelled';
       b.tripStatus = 'cancelled';
@@ -2414,7 +2418,7 @@ export function confirmDriverBookingPayment(bookingId){
   b.status = 'paid';
   b.paidAt = now;
   b.holdExpiry = null;
-  const fare = splitFare(s, (b.seats || []).length, b.discount || 0, b.source);
+  const fare = splitFare(s, (b.seats || []).length, b.discount || 0, b.source, fareModelOf(b));
   b.fare = fareCore(fare);
   DB.save('bookings', bookings);
 
@@ -2583,7 +2587,7 @@ export function resolveScheduleNoShow(sid, refundPct = 100) {
   bookings.forEach((b) => {
     if (b.scheduleId !== sid) return;
     if (b.status === 'paid') {
-      const fare = b.fare || splitFare(s, (b.seats || []).length, b.discount || 0);
+      const fare = b.fare || splitFare(s, (b.seats || []).length, b.discount || 0, 'pelanggan', fareModelOf(b));
       /* Jadwal tidak berangkat = kegagalan operator, jadi dasar refund = TOTAL pembayaran
          (tiket + jasa agen + fee platform), bukan hanya komponen tiket. */
       const base = Math.max(0, Number(b.total) || Number(fare.total) || 0);

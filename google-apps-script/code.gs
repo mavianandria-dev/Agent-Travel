@@ -3119,7 +3119,7 @@ function apiSyncSplitFare_(ctx, schedule, seatCount, discount, source, booking) 
   var pct = flat ? 0 : apiSyncNumber_(pf.value, 8);
   /* Model B — mirror splitFare klien: jasa utuh di ATAS harga tiket; voucher
      menanggung TIKET dulu lalu jasa (cap = tiket + jasa); fee % × subtotal
-     (flat: nilai flat). Source 'driver': jasa dibagi 50/50 → viaSopir =
+     (flat: per kursi — flat × n). Source 'driver': jasa dibagi 50/50 → viaSopir =
      memo layar saja (bagian jasa yang jalan ke pengemudi), tidak pernah
      disimpan — jurnal tetap tutup 4 kolom. */
   if (apiSyncIsModelB_(booking)) {
@@ -3128,7 +3128,7 @@ function apiSyncSplitFare_(ctx, schedule, seatCount, discount, source, booking) 
     var dTikB = Math.min(rawB, gross);
     var dSvcB = rawB - dTikB;
     var subtotalB = Math.max(0, gross + jasaTotal - rawB);
-    var feeB = flat ? flat : Math.round(subtotalB * pct / 100);
+    var feeB = flat ? flat * n : Math.round(subtotalB * pct / 100);
     var driverB = String(source || '') === 'driver';
     var viaSopirB = driverB ? jasaTotal - Math.round(jasaTotal / 2) : 0;
     return { ticket: gross - dTikB, service: jasaTotal - dSvcB, fee: feeB, total: subtotalB + feeB, subtotal: subtotalB, quoteTicket: gross, quoteService: jasaTotal, viaSopir: viaSopirB, disc: rawB };

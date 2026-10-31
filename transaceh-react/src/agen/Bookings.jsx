@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { agencyOf, routeById, vehicleById, vehName, vehLayout, driverById, schedById, bookingsOf, agencyById, audit, splitFare, fareCore, createLedger, canCancelBooking, canPayBooking, cancelBooking as cancelBookingDomain, refundRuleFor, refundPolicyText, refundAmountFor, bookedPassengers } from '@/lib/domain.js';
+import { agencyOf, routeById, vehicleById, vehName, vehLayout, driverById, schedById, bookingsOf, agencyById, audit, splitFare, fareCore, createLedger, fareModelOf, canCancelBooking, canPayBooking, cancelBooking as cancelBookingDomain, refundRuleFor, refundPolicyText, refundAmountFor, bookedPassengers } from '@/lib/domain.js';
 import { fmtRp, todayStr } from '@/lib/utils.js';
 import { Icon, BadgeStatus, fmtDate } from '@/components/ui.jsx';
 import { pickupOf } from '@/lib/pickups.js';
@@ -101,7 +101,7 @@ export default function Bookings({ ag }) {
     setVerifying(true);
     b.status = 'paid';
     b.paidAt = new Date().toISOString();
-    b.fare = fareCore(splitFare(s, (b.seats || []).length, b.discount || 0));
+    b.fare = fareCore(splitFare(s, (b.seats || []).length, b.discount || 0, 'pelanggan', fareModelOf(b)));
     DB.save('bookings', arr); refresh();
     createLedger(b);
     const pays = DB.load('payments', []);

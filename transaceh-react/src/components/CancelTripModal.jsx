@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { schedById, routeById, cancelScheduleByOperator, splitFare } from '@/lib/domain.js';
+import { schedById, routeById, cancelScheduleByOperator, splitFare, fareModelOf } from '@/lib/domain.js';
 import { fmtRp } from '@/lib/utils.js';
 import { Icon, fmtDate } from '@/components/ui.jsx';
 
@@ -16,7 +16,7 @@ export default function CancelTripModal({ sid, by = 'pengemudi' }) {
   const bookings = DB.load('bookings', []).filter((b) => b.scheduleId === sid);
   const paid = bookings.filter((b) => b.status === 'paid');
   const pending = bookings.filter((b) => b.status === 'pending');
-  const total = paid.reduce((a, b) => a + (Number(b.total) || Number((b.fare || splitFare(s, (b.seats || []).length, b.discount || 0)).total) || 0), 0);
+  const total = paid.reduce((a, b) => a + (Number(b.total) || Number((b.fare || splitFare(s, (b.seats || []).length, b.discount || 0, 'pelanggan', fareModelOf(b))).total) || 0), 0);
 
   const submit = () => {
     const res = cancelScheduleByOperator(sid, reason, by);

@@ -21,7 +21,7 @@ function PlatformFeeCard() {
   return (
     <div className="bg-white rounded-3xl shadow-card p-5">
       <h3 className="font-extrabold text-[15px] flex items-center gap-2"><Icon name="percent" className="w-5 h-5 text-violet-600" />FEE PLATFORM GLOBAL</h3>
-      <div className="text-[11.5px] text-slate-400 font-medium mt-1">Berlaku untuk semua agen dan semua transaksi baru. Transaksi yang sudah diproses tidak berubah. Booking yang dibuat pengemudi tetap kena fee ini (jasa agen Rp0).</div>
+      <div className="text-[11.5px] text-slate-400 font-medium mt-1">Berlaku untuk semua agen dan semua transaksi baru. Transaksi yang sudah diproses tidak berubah. Persen = % × subtotal; Flat Rp = per kursi (nilai × jumlah kursi). Booking yang dibuat pengemudi tetap kena fee ini (jasa agen Rp0).</div>
       <div className="grid grid-cols-2 gap-2.5 mt-3">
         <select value={type} onChange={(e) => setType(e.target.value)} className="text-[13px] font-bold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">
           <option value="percent">Persen %</option>

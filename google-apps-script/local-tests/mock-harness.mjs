@@ -2484,6 +2484,74 @@ const pubVeh2 = (pubRec2.vehicles || []).find((x) => String(x.id) === 'v_taut_1'
 ok('proyeksi publik kendaraan tidak memuat driverId',
   pubVeh2.id === 'v_taut_1' && !Object.prototype.hasOwnProperty.call(pubVeh2, 'driverId'), pubVeh2);
 
+/* ------------------------------------------------------------------ */
+/* Ekonomi Model B — fee FLAT Rp per kursi                              */
+/* ------------------------------------------------------------------ */
+/* Admin memilih tarif FLAT Rp → fee dihitung PER KURSI (fee = flat × n),
+   mirror baris-item tabel Ringkasan & Pembayaran. Tarif test: flat 5000.
+   2 kursi di s_dekat (harga 150000, jasa agen 10000/kursi), tanpa voucher:
+   gross = 300000; jasa = 20000; subtotal = 320000; fee = 5000 × 2 = 10000;
+   total = 330000. Satuan × jumlah = total di kolom-4 (rumus pengguna). */
+seedCollection('settings', [{ key: 'platformFee', value: { type: 'flat', value: 5000 } }]);
+const flatBase = revOf('bookings');
+const flatBooking = {
+  id: 'b_flat_2', code: 'TA-FL', scheduleId: 's_dekat', userEmail: 'cust1@test.local',
+  seats: ['A7', 'A9'], passengers: [{ name: 'Flat A', seat: 'A7' }, { name: 'Flat B', seat: 'A9' }],
+  subtotal: 320000, discount: 0, total: 330000, status: 'pending',
+  holdExpiry: '2099-01-01T00:00:00.000Z',
+  createdAt: '2026-10-31T06:00:00.000Z'   /* Model B: fee flat × kursi */
+};
+res = sync({ bookings: { baseRev: flatBase, upserts: [flatBooking], deletes: [] } }, custToken);
+ok('Model B flat: booking 2 kursi dibuat (fee = 5000 × 2, total 330000)',
+  res.ok === true, res);
+const flatBookingBase = revOf('bookings');
+res = sync({ payments: { baseRev: revOf('payments'), upserts: [Object.assign({}, flatBooking, {
+  id: 'p_flat_bad', bookingId: 'b_flat_2', amount: 1, method: 'transfer', fee: 10000,
+  status: 'pending', time: '2026-10-31T06:01:00.000Z'
+})], deletes: [] } }, custToken);
+ok('Model B flat: menolak pembayaran dengan nominal bukan total 330000',
+  res.ok === false && (res.error.code === 'VALIDATION' || res.error.code === 'FORBIDDEN'), res);
+const flatFare = { ticket: 300000, service: 20000, fee: 10000, total: 330000 };
+const flatPay1 = revOf('payments');
+const flatLedger0 = revOf('ledger');
+res = sync({ payments: { baseRev: flatPay1, upserts: [{
+  id: 'p_flat_2', bookingId: 'b_flat_2', amount: 330000, method: 'transfer',
+  status: 'pending', fee: 10000, time: '2026-10-31T06:02:00.000Z'
+}], deletes: [] } }, custToken);
+res = sync({
+  bookings: { baseRev: flatBookingBase, upserts: [Object.assign({}, flatBooking, {
+    status: 'paid', paidAt: '2026-10-31T06:03:00.000Z', holdExpiry: null,
+    fare: flatFare
+  })], deletes: [] },
+  payments: { baseRev: revOf('payments'), upserts: [Object.assign({}, readRec('payments', 'p_flat_2'), {
+    status: 'paid'
+  })], deletes: [] },
+  ledger: { baseRev: flatLedger0, upserts: [{
+    id: 'l_flat_2', bookingId: 'b_flat_2', scheduleId: 's_dekat', agencyId: 'ag_1',
+    userEmail: 'cust1@test.local', seats: ['A7', 'A9'], ticket: 300000, service: 20000,
+    fee: 10000, total: 330000, status: 'ditahan', createdAt: '2026-10-31T06:03:00.000Z'
+  }], deletes: [] }
+}, custToken);
+ok('Model B flat: lunas diterima — payments+bookings+ledger naik revisi',
+  res.ok === true &&
+  res.data.revisions.bookings === flatBookingBase + 1 &&
+  res.data.revisions.payments === flatPay1 + 2 &&
+  res.data.revisions.ledger === flatLedger0 + 1, res);
+const fbRec = readRec('bookings', 'b_flat_2');
+const ffRec = (fbRec && fbRec.fare) || {};
+const flRec = readRec('ledger', 'l_flat_2');
+ok('Model B flat: fare 4 kolom fee 10000 (flat × 2 kursi) & ledger dijuri',
+  ffRec.ticket === 300000 && ffRec.service === 20000 && ffRec.fee === 10000 &&
+  ffRec.total === 330000 && ffRec.subtotal === undefined &&
+  flRec && flRec.fee === 10000 && flRec.total === 330000,
+  { fbRec: ffRec, flRec: flRec && [flRec.ticket, flRec.service, flRec.fee, flRec.total] });
+/* Kembalikan tarif persisten ke percent 8 (kondisi fixture semula) —
+   bootstrap publik kembali membaca tarif persen. */
+seedCollection('settings', [{ key: 'platformFee', value: { type: 'percent', value: 8 } }]);
+const pubFlat = (dispatch(bodyOf({}, { action: 'bootstrap' })).data.records || {});
+ok('tarif flat dipulihkan — bootstrap publik kembali membaca percent 8',
+  String((((pubFlat.settings || [])[0] || {}).value || {}).type) === 'percent', pubFlat.settings);
+
 console.log('\n== Ringkasan ==');
 console.log('PASS: ' + passed + ', FAIL: ' + failed);
 process.exit(failed === 0 ? 0 : 1);
