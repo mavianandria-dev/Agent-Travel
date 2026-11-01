@@ -1174,7 +1174,9 @@ ok('proyeksi publik hanya menghitung hold yang masih valid (ghost A2 lepas, done
   ghostSched.takenSeats);
 /* seatinfo — cek kursi baca-saja untuk deteksi dini (klik kursi di denah).
    Aturan kursi harus sama persis dengan proyeksi publik: ghost hold
-   kedaluwarsa tidak dihitung; payload murni array kursi tanpa field lain;
+   kedaluwarsa tidak dihitung; payload murni array kursi tanpa field lain,
+   kini TERBAGI GRUP — takenSeats gabungan (dipakai logika pencekalan),
+   paidSeats lunas murni (abu "Terisi"), holds hidup (kuning "Hold");
    jadwal basi/tak dikenal dijawab live:false bukan error. Diletakkan
    SEBELUM sync booking kursi ghost supaya A2 masih berstatus ghost. */
 const seatOut = dispatch(bodyOf({ scheduleId: 's_2' }, { action: 'seatinfo' }));
@@ -1183,9 +1185,25 @@ ok('seatinfo publik memakai aturan hold yang sama (ghost A2 lepas, done B1 tetap
   Array.isArray(seatOut.data.takenSeats) &&
   seatOut.data.takenSeats.includes('B1') &&
   !seatOut.data.takenSeats.includes('A2'), seatOut.data);
+ok('seatinfo terbagi grup: B1 (done) = paidSeats saja; A2 ghost tidak di mana pun',
+  seatOut.ok === true && Array.isArray(seatOut.data.paidSeats) && Array.isArray(seatOut.data.holds) &&
+  seatOut.data.paidSeats.includes('B1') && !seatOut.data.holds.includes('B1') &&
+  !seatOut.data.paidSeats.includes('A2') && !seatOut.data.holds.includes('A2') &&
+  seatOut.data.holds.length === 0, seatOut.data);
 ok('seatinfo payload murni kursi — tidak membocorkan field lain',
-  seatOut.ok === true && Object.keys(seatOut.data).sort().join(',') === 'blocked,inactive,live,takenSeats' &&
+  seatOut.ok === true && Object.keys(seatOut.data).sort().join(',') === 'blocked,holds,inactive,live,paidSeats,takenSeats' &&
   !('driverName' in seatOut.data) && !('holdExpiry' in seatOut.data), seatOut.data);
+/* Grup hold: pada s_1 — b_1 (paid) → A1 di paidSeats; b_2 (pending tanpa
+   holdExpiry = tanpa batas, hidup) → A3 di holds & takenSeats, bukan
+   paidSeats; b_sync_1 (pending, holdExpiry ditulis ulang server → hidup) →
+   A4 juga holds. */
+const seatOutHold = dispatch(bodyOf({ scheduleId: 's_1' }, { action: 'seatinfo' }));
+ok('seatinfo grup hold: A3/A4 hidup = holds saja; A1 lunas = paidSeats',
+  seatOutHold.ok === true && seatOutHold.data.live === true &&
+  seatOutHold.data.holds.includes('A3') && seatOutHold.data.holds.includes('A4') &&
+  !seatOutHold.data.paidSeats.includes('A3') && !seatOutHold.data.paidSeats.includes('A4') &&
+  seatOutHold.data.takenSeats.includes('A3') && seatOutHold.data.takenSeats.includes('A4') &&
+  seatOutHold.data.paidSeats.includes('A1') && !seatOutHold.data.holds.includes('A1'), seatOutHold.data);
 const seatSchedulesBefore = S.apiReadCollection_(spread, 'schedules');
 const seatPastDep = nearDate(-3);
 seedCollection('schedules', seatSchedulesBefore.concat([{

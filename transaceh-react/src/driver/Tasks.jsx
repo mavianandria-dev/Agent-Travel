@@ -268,13 +268,26 @@ function DriverBookingModal({ sid }) {
   const v = vehicleById(s?.vehicleId ?? null);
   const r = routeById(s?.routeId ?? null);
   const tk = takenSeats(s?.id ?? '');
-  /* Overlay hasil cek seatinfo (state, bukan DB): kursi yang baru saja
-     terambil orang tapi belum ada di cache ditampilkan kuning-hold —
-     peta diperbarui hanya dari jawaban server terakhir. */
-  const freshAll = freshTaken && freshTaken.live
-    ? [...new Set([...(freshTaken.takenSeats || []), ...(freshTaken.blocked || []), ...(freshTaken.inactive || [])])]
-    : [];
-  const freshSet = freshAll.filter((x) => !tk.hold.includes(x) && !tk.paid.includes(x));
+  /* Kursi milik sendiri: pesanan pending akun pengemudi ini pada jadwal itu —
+     cek server & peta memperlakukannya bukan "kursi orang lain" (sama dengan
+     wizard pelanggan; hold basi milik sendiri tidak memblokir dirinya). */
+  const own = new Set(
+    DB.load('bookings', [])
+      .filter((x) => x.status === 'pending' && x.userEmail === user.email && String(x.scheduleId) === String(s?.id ?? ''))
+      .flatMap((x) => x.seats || [])
+  );
+  /* Overlay hasil cek seatinfo (state, bukan DB): jawaban segar MEMISAHKAN
+     GRUP server — paidSeats lunas murni (abu "Terisi"), holds hold hidup
+     (kuning "Ditahan"), bukan satu proyeksi gabungan. Kursi milik sendiri
+     dikeluarkan; tanpa jawaban segar memakai fallback proyeksi lama. */
+  const fresh = freshTaken && freshTaken.live ? freshTaken : null;
+  const freshAll = fresh ? [...new Set([...(fresh.takenSeats || []), ...(fresh.blocked || []), ...(fresh.inactive || [])])] : [];
+  const freshPay = fresh && Array.isArray(fresh.paidSeats) ? fresh.paidSeats : null;
+  const freshHold = fresh && Array.isArray(fresh.holds) ? fresh.holds : null;
+  const freshSet = freshAll.filter((x) => !own.has(x) && !tk.hold.includes(x) && !tk.paid.includes(x) &&
+    (!freshPay || !freshPay.includes(x)) && (!freshHold || !freshHold.includes(x)));
+  /* Terisi (abu) = lunas murni saja — fallback proyeksi gabungan lama. */
+  const gridPaid = (freshPay ? freshPay : tk.paid).filter((x) => !own.has(x));
   const taken = new Set([...tk.paid, ...tk.hold, ...freshAll, ...(s?.blockedSeats || []), ...tk.inactive]);
   const layout = vehLayout(v);
   const seatOrder = layout.filter((c) => c.type === 'seat' && c.sid).map((c) => c.sid);
@@ -315,7 +328,11 @@ function DriverBookingModal({ sid }) {
       closeModal();
       return { out, clash: [] };
     }
-    const takenOut = new Set([...(out.takenSeats || []), ...(out.blocked || []), ...(out.inactive || [])]);
+    /* server menjawab flat list termasuk hold milik sendiri; hold sendiri
+       bukan tabrakan — hanya kursi ORANG lain yang boleh menghapus pilihan. */
+    const takenOut = new Set(
+      [...(out.takenSeats || []), ...(out.blocked || []), ...(out.inactive || [])].filter((x) => !own.has(x))
+    );
     const clash = (seatsRef.current || []).filter((x) => takenOut.has(x));
     if (clash.length) {
       setSeats((cur) => cur.filter((x) => !takenOut.has(x)));
@@ -435,8 +452,8 @@ function DriverBookingModal({ sid }) {
           </div>
           <CabinGrid
             layout={layout}
-            paid={tk.paid}
-            hold={tk.hold.concat(freshSet)}
+            paid={gridPaid}
+            hold={(freshHold ? freshHold : tk.hold).filter((x) => !own.has(x)).concat(freshSet)}
             inactive={tk.inactive}
             selected={seats}
             checking={Object.keys(seatChecks)}

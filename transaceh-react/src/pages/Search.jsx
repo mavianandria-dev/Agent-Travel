@@ -386,6 +386,9 @@ export default function Search() {
      mencegah tumpang tindih dengan cek klik kursi). */
   useEffect(() => {
     if (!IS_SHEETS || bw.step !== 4 || !bw.scheduleId || modal) return undefined;
+    /* Cek pertama langsung jalan saat efek terpasang (bukan menunggu
+       putaran 20 dtk pertama) — warna peta bisa benar sejak masuk. */
+    runSeatCheck(bwRef.current.scheduleId, { quiet: true });
     const iv = setInterval(() => {
       if (document.hidden) return;
       runSeatCheck(bwRef.current.scheduleId, { quiet: true });
@@ -700,17 +703,22 @@ export default function Search() {
     if (!s) return (<><div className="text-center py-10 text-slate-400 font-bold">Jadwal tidak ditemukan — kembali pilih armada.</div>{wizNav(true, false)}</>);
     const tk = takenSeats(s.id);
     const own = ownHeldSeats(s.id);
-    /* Overlay hasil cek seatinfo (state lokal, bukan DB): kursi yang baru
-       saja terambil orang tapi belum ada di cache ditampilkan kuning-hold —
-       peta diperbarui hanya dari jawaban server terakhir. Kursi milik sendiri
-       (pesanan pending) dikeluarkan dari daftar terisi & hold: tampil biru
-       bila terpilih, hijau bila tidak, jadi selalu bisa diketuk lagi. */
+    /* Overlay hasil cek seatinfo (state lokal, bukan DB): jawaban segar
+       MEMISAHKAN GRUP server — paidSeats = lunas murni → abu "Terisi";
+       holds = hold hidup pelanggan mana pun → kuning "Hold 5 mnt"; bukan
+       lagi satu proyeksi gabungan. Kursi milik sendiri (pesanan pending)
+       dikeluarkan dari keduanya: tampil biru bila terpilih, hijau bila
+       tidak, jadi selalu bisa diketuk lagi. Tanpa jawaban segar memakai
+       fallback proyeksi lama. */
     const fresh = freshTaken && freshTaken.live ? freshTaken : null;
     const freshSet = fresh ? [...new Set([...(fresh.takenSeats || []), ...(fresh.blocked || []), ...(fresh.inactive || [])])] : [];
-    const gridPaid = tk.paid.filter((x) => !own.has(x));
-    const holdShown = tk.hold
+    const freshPay = fresh && Array.isArray(fresh.paidSeats) ? fresh.paidSeats : null;
+    const freshHold = fresh && Array.isArray(fresh.holds) ? fresh.holds : null;
+    const gridPaid = (freshPay ? freshPay : tk.paid).filter((x) => !own.has(x));
+    const holdShown = (freshHold ? freshHold : tk.hold)
       .filter((x) => !own.has(x))
-      .concat(freshSet.filter((x) => !own.has(x) && !tk.hold.includes(x) && !tk.paid.includes(x)));
+      .concat(freshSet.filter((x) => !own.has(x) && !tk.hold.includes(x) && !tk.paid.includes(x) &&
+        (!freshPay || !freshPay.includes(x)) && (!freshHold || !freshHold.includes(x))));
     const v = vehicleById(s.vehicleId);
     const r = routeById(s.routeId);
     const layout = vehLayout(v);

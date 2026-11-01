@@ -1660,9 +1660,14 @@ function apiSeatInfo_(req) {
 
   /* Kursi dari booking memakai aturan hold seragam (sama dengan aturan
      apiTakenSeatsMap_): paid/done selalu; pending hanya bila holdExpiry
-     masih berlaku; tanpa holdExpiry = hold tanpa batas (tetap memegang). */
+     masih berlaku; tanpa holdExpiry = hold tanpa batas (tetap memegang).
+     Grup terpisah membawa jawaban yang terbagi: paidSeats = lunas murni
+     (memori "Terisi" abu), holds = hold hidup (tampil kuning) —
+     takenSeats tetap gabungan untuk logika pencekalan klien. */
   var bookings = apiReadCollection_(ss, 'bookings');
   var bySeat = {};
+  var paySeat = {};
+  var holdSeat = {};
   bookings.forEach(function (booking) {
     var status = String((booking && booking.status) || '');
     if (status !== 'paid' && status !== 'done' && status !== 'pending') return;
@@ -1670,10 +1675,15 @@ function apiSeatInfo_(req) {
     if (status === 'pending') {
       var holdMs = Date.parse((booking && booking.holdExpiry) || '');
       if (isFinite(holdMs) && holdMs <= Date.now()) return; /* ghost hold dilepas */
+      var seatsH = Array.isArray(booking && booking.seats) ? booking.seats : [];
+      seatsH.forEach(function (seat) {
+        if (seat != null && seat !== '') { bySeat[String(seat)] = true; holdSeat[String(seat)] = true; }
+      });
+      return;
     }
     var seats = Array.isArray(booking && booking.seats) ? booking.seats : [];
     seats.forEach(function (seat) {
-      if (seat != null && seat !== '') bySeat[String(seat)] = true;
+      if (seat != null && seat !== '') { bySeat[String(seat)] = true; paySeat[String(seat)] = true; }
     });
   });
   var blocked = ((schedule && Array.isArray(schedule.blockedSeats)) ? schedule.blockedSeats : [])
@@ -1686,6 +1696,8 @@ function apiSeatInfo_(req) {
     data: {
       live: true,
       takenSeats: Object.keys(bySeat).sort(),
+      paidSeats: Object.keys(paySeat).sort(),
+      holds: Object.keys(holdSeat).sort(),
       blocked: blocked,
       inactive: inactive
     }
