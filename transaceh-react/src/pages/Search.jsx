@@ -730,7 +730,10 @@ export default function Search() {
                        Lanjut terblokir sampai cek ulang lulus; polling
                        mencoba otomatis tiap 20 dtk, atau ketuk Cek Ulang. */
                     <div className="flex items-center justify-between gap-2 mt-2 text-[12.5px] font-bold text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5">
-                      <span className="flex items-center gap-1.5 truncate"><Icon name="triangle-alert" className="w-4 h-4 shrink-0" />Belum terkonfirmasi server</span>
+                      <span className="min-w-0">
+                        <span className="flex items-center gap-1.5 truncate"><Icon name="triangle-alert" className="w-4 h-4 shrink-0" />Belum terkonfirmasi server</span>
+                        <span className="block text-[11px] font-semibold text-red-500 mt-0.5">Server tidak menjawab — mencoba otomatis tiap 20 dtk</span>
+                      </span>
                       <button onClick={() => { setSeatChecks((c) => ({ ...c, [st]: 'checking' })); runSeatCheck(bwRef.current.scheduleId); }} className="shrink-0 bg-white border border-red-300 text-red-600 rounded-lg px-2.5 py-1 hover:bg-red-100 active:scale-[.97] transition">Cek Ulang</button>
                     </div>
                   ) : (

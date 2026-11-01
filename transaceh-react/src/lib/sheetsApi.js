@@ -98,11 +98,13 @@ export async function call(action, payload = {}) {
 }
 
 /* seatinfo — cek kursi deteksi dini saat pengguna memilih kursi di denah.
-   Menahan diri: timeout pendek 5,5 dtk + coba ulang 1x; gagal tetap
-   kembalikan null (fail-open — hakim final tetap validasi `sync` server
-   saat pembayaran). Tidak memakai call() karena TIMEOUT_MS 30 dtk terlalu
-   panjang untuk cek ringan yang mengunci UI sekejap. */
-const SEAT_CHECK_TIMEOUT_MS = 5500;
+   Menahan diri: timeout 12 dtk (start dingin Apps Script kerap > 5-10 dtk)
+   + coba ulang 1x; gagal tetap kembalikan null — dan penelepon memakai
+   fail-closed (kursi ditandai 'fail', Lanjut terblokir sampai cek lulus),
+   hakim final tetap validasi `sync` server saat pembayaran. Tidak memakai
+   call() karena TIMEOUT_MS 30 dtk terlalu panjang untuk cek ringan yang
+   mengunci UI sekejap. */
+const SEAT_CHECK_TIMEOUT_MS = 12000;
 
 async function seatInfoOnce(scheduleId) {
   const controller = new AbortController();
