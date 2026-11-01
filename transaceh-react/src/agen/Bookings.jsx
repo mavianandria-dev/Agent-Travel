@@ -5,9 +5,10 @@ import { agencyOf, routeById, vehicleById, vehName, vehLayout, driverById, sched
 import { fmtRp, todayStr } from '@/lib/utils.js';
 import { Icon, BadgeStatus, fmtDate } from '@/components/ui.jsx';
 import { pickupOf } from '@/lib/pickups.js';
+import { TicketView } from '@/components/TicketView.jsx';
 
 export function ManifestModal({ sid }) {
-  const { closeModal } = useApp();
+  const { closeModal, openModal } = useApp();
   const s = schedById(sid);
   if (!s) return <div className="p-6 font-bold text-slate-500">Jadwal tidak ditemukan</div>;
   const r = routeById(s.routeId);
@@ -22,14 +23,17 @@ export function ManifestModal({ sid }) {
     <div className="p-6 print-only-off">
       <div className="flex items-center justify-between"><h3 className="font-extrabold text-[16px] flex items-center gap-2"><Icon name="clipboard-list" className="w-5 h-5 text-sky-600" />Manifest Penumpang</h3><button onClick={() => closeModal()} className="text-slate-400"><Icon name="x" className="w-5 h-5" /></button></div>
       <div className="text-[13px] font-bold mt-2">{r?.from} → {r?.to} • {fmtDate(s.date)} {s.time}<br /><span className="text-slate-500 font-medium">{vehName(v)} {v?.plate} • Pengemudi: {dr?.name}</span></div>
-      <table className="data w-full mt-3"><thead><tr><th>#</th><th>Kursi</th><th>Nama</th><th>HP</th><th>Jemput</th><th>Status</th></tr></thead><tbody>
+      <table className="data w-full mt-3"><thead><tr><th>&nbsp;</th><th>Kursi</th><th>Nama</th><th>HP</th><th>Jemput</th><th>Status</th></tr></thead><tbody>
         {[...order, ...bookedExtra].map((st) => {
           const b = bk.find((x) => (x.seats || []).includes(st));
           const p = (b?.passengers || []).find((x) => x.seat === st);
           const vehOff = offSet.has(st);
           const blocked = (s.blockedSeats || []).includes(st);
           return (
-            <tr key={st}><td>{st}</td><td className="font-extrabold">{st}</td><td className="font-semibold">{p ? p.name : vehOff ? <span className="text-slate-400">— nonaktif (armada) —</span> : blocked ? <span className="text-slate-400">— diblokir —</span> : <span className="text-slate-300">— kosong —</span>}</td><td>{p ? p.phone : '-'}</td><td className="text-[12px]">{p ? (pickupOf(p,b) || '-') + (p.pickupCoords ? ' • ' + p.pickupCoords : '') : '-'}</td><td>{b ? <BadgeStatus st={b.status} /> : (vehOff || blocked) ? <span className="badge b-cancel">Tutup</span> : <span className="badge b-wait">Kosong</span>}</td></tr>
+            /* Kolom pertama dulunya duplikat {st} — kini tombol mata: baris
+               berstatus paid/done membuka layar e-tiket (komponen bersama),
+               ditempol sama dengan manifest pengemudi. */
+            <tr key={st}><td>{b && ['paid', 'done'].includes(b.status) ? <button onClick={() => openModal(<TicketView bid={b.id} />)} className="text-sky-600 hover:bg-sky-50 rounded-lg p-1 -ml-1" title="Lihat Tiket"><Icon name="eye" className="w-4 h-4" /></button> : <span className="text-slate-200">-</span>}</td><td className="font-extrabold">{st}</td><td className="font-semibold">{p ? p.name : vehOff ? <span className="text-slate-400">— nonaktif (armada) —</span> : blocked ? <span className="text-slate-400">— diblokir —</span> : <span className="text-slate-300">— kosong —</span>}</td><td>{p ? p.phone : '-'}</td><td className="text-[12px]">{p ? (pickupOf(p,b) || '-') + (p.pickupCoords ? ' • ' + p.pickupCoords : '') : '-'}</td><td>{b ? <BadgeStatus st={b.status} /> : (vehOff || blocked) ? <span className="badge b-cancel">Tutup</span> : <span className="badge b-wait">Kosong</span>}</td></tr>
           );
         })}
       </tbody></table>

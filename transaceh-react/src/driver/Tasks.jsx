@@ -8,6 +8,7 @@ import { refreshSnapshot } from '@/lib/remote.js';
 import { fmtClock, fmtRp } from '@/lib/utils.js';
 import { Icon, Empty, BadgeStatus, fmtDate, CabinGrid } from '@/components/ui.jsx';
 import { FareChain } from '@/components/FareChain.jsx';
+import { TicketView } from '@/components/TicketView.jsx';
 import { pickupArea, pickupOptions, pickupOf } from '@/lib/pickups.js';
 import CancelTripModal from '@/components/CancelTripModal.jsx';
 import BlockSeatModal from '@/components/BlockSeatModal.jsx';
@@ -114,14 +115,18 @@ function ManifestModal({ sid }) {
         <button onClick={closeModal} className="text-slate-400"><Icon name="x" className="w-5 h-5" /></button>
       </div>
       <div className="text-[13px] font-bold mt-2">{r.from} → {r.to} • {fmtDate(s.date)} {s.time}<br /><span className="text-slate-500 font-medium">{vehName(v)} {v?.plate} • Pengemudi: {dr?.name}</span></div>
-      <table className="data w-full mt-3"><thead><tr><th>#</th><th>Kursi</th><th>Nama</th><th>HP</th><th>Jemput</th><th>Status</th></tr></thead><tbody>
+      <table className="data w-full mt-3"><thead><tr><th>&nbsp;</th><th>Kursi</th><th>Nama</th><th>HP</th><th>Jemput</th><th>Status</th></tr></thead><tbody>
         {[...order, ...bookedExtra].map((st) => {
           const b = bk.find((x) => (x.seats || []).includes(st));
           const p = (b?.passengers || []).find((x) => x.seat === st);
           const vehOff = offSet.has(st);
           const blocked = (s.blockedSeats || []).includes(st);
           return (
-            <tr key={st}><td>{st}</td><td className="font-extrabold">{st}</td>
+            /* Kolom pertama dulunya duplikat {st} — kini tombol mata:
+               baris berstatus paid/done membuka layar e-tiket yang sama
+               dgn pasca-bayar; kursi kosong/diblokir/belum lunas/batal
+               tidak punya tiket sah untuk ditunjukkan. */
+            <tr key={st}><td>{b && ['paid', 'done'].includes(b.status) ? <button onClick={() => openModal(<TicketView bid={b.id} />)} className="text-sky-600 hover:bg-sky-50 rounded-lg p-1 -ml-1" title="Lihat Tiket"><Icon name="eye" className="w-4 h-4" /></button> : <span className="text-slate-200">-</span>}</td><td className="font-extrabold">{st}</td>
               <td className="font-semibold">{p ? p.name : vehOff ? <span className="text-slate-400">- nonaktif (armada) -</span> : blocked ? <span className="text-slate-400">- diblokir -</span> : <span className="text-slate-300">- kosong -</span>}</td>
               <td>{p ? p.phone : '-'}</td><td className="text-[12px]">{p ? (pickupOf(p,b) || '-') + (p.pickupCoords ? ' • ' + p.pickupCoords : '') : '-'}</td>
               <td>{b ? <BadgeStatus st={b.status} /> : (vehOff || blocked) ? <span className="badge b-cancel">Tutup</span> : <span className="badge b-wait">Kosong</span>}</td></tr>
@@ -263,7 +268,7 @@ export function boardPassenger(sid, code, toast, closeModal, refresh) {
 }
 
 function DriverBookingModal({ sid }) {
-  const { toast, closeModal, refresh, user } = useApp();
+  const { toast, closeModal, refresh, openModal, user } = useApp();
   const driver = drvOfUser(user);
   const s = schedById(sid);
   const v = vehicleById(s?.vehicleId ?? null);
@@ -416,6 +421,13 @@ function DriverBookingModal({ sid }) {
   if (!s) return <div className="p-6 font-bold text-slate-500">Jadwal tidak ditemukan</div>;
 
   const checkBusy = Object.keys(seatChecks).length > 0;
+  /* Form Metode Pembayaran + tabel rincian harga tertahan sampai ada kursi
+     terpilih DAN cek server atas SEMUA kursi terpilih lulus (seatChecks
+     bersih = semuanya verified) — baru QRIS/VA/E-Wallet dan tabel rincian
+     muncul, tanpa teks pengganti. Rincian ikut tertahan karena FareChain
+     memaksa jumlah kursi minimal 1: tabel "x1 / Rp …" tampil duluan tanpa
+     kursi nyata cuma membingungkan. */
+  const paidReady = seats.length > 0 && !checkBusy;
 
   const fare = splitFare(s, seats.length, 0, 'driver');
   /* Modal-Pengemudi Model B: Tiket = harga rute PENUH dengan jasa agen utuh
@@ -500,7 +512,10 @@ function DriverBookingModal({ sid }) {
       return;
     }
     toast('Pembayaran berhasil. Tiket ' + res.booking.code, 'ok');
-    closeModal();
+    /* Bukti lunas langsung tampil: isi modal berganti layar e-tiket —
+       ditunjukkan ke penumpang tanpa aplikasi; tiket yang sama bisa dibuka
+       ulang kapan saja dari Manifest (tombol mata). */
+    openModal(<TicketView bid={made.id} />);
     refresh();
   };
 
@@ -608,19 +623,24 @@ function DriverBookingModal({ sid }) {
           )}
         </div>
 
-        <div>
-          <label className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wide">Metode Pembayaran</label>
-          <div className="grid grid-cols-3 gap-2 mt-1">
-            {[['QRIS', 'qr-code'], ['VA', 'landmark'], ['EWALLET', 'wallet']].map((m) => (
-              <button key={m[0]} onClick={() => setPayMethod(m[0])} className={'paybtn rounded-2xl border-2 p-2.5 text-center transition ' + (payMethod === m[0] ? 'border-sky-500 bg-sky-50' : 'border-slate-200')}>
-                <Icon name={m[1]} className={'w-5 h-5 mx-auto ' + (payMethod === m[0] ? 'text-sky-600' : 'text-slate-400')} />
-                <div className="font-extrabold text-[11.5px] mt-1">{m[0]}</div>
-              </button>
-            ))}
+        {paidReady ? (
+          /* Metode pembayaran + rincian harga hadir SETELAH kursi dipilih DAN
+             cek server atas semua kursi terpilih lulus; sebelum itu tak ada
+             blok pembayaran (tanpa teks pengganti). */
+          <div>
+            <label className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wide">Metode Pembayaran</label>
+            <div className="grid grid-cols-3 gap-2 mt-1">
+              {[['QRIS', 'qr-code'], ['VA', 'landmark'], ['EWALLET', 'wallet']].map((m) => (
+                <button key={m[0]} onClick={() => setPayMethod(m[0])} className={'paybtn rounded-2xl border-2 p-2.5 text-center transition ' + (payMethod === m[0] ? 'border-sky-500 bg-sky-50' : 'border-slate-200')}>
+                  <Icon name={m[1]} className={'w-5 h-5 mx-auto ' + (payMethod === m[0] ? 'text-sky-600' : 'text-slate-400')} />
+                  <div className="font-extrabold text-[11.5px] mt-1">{m[0]}</div>
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        ) : null}
 
-        <div className="bg-slate-50 rounded-2xl p-3"><FareChain s={s} fare={fare} n={seats.length} discLabel="0%" /></div>
+        {paidReady && <div className="bg-slate-50 rounded-2xl p-3"><FareChain s={s} fare={fare} n={seats.length} discLabel="0%" /></div>}
       </div>
 
       <div className="flex gap-2 mt-4"><button onClick={closeModal} className="flex-1 bg-slate-100 font-bold text-[13px] py-2.5 rounded-xl">Batal</button>
