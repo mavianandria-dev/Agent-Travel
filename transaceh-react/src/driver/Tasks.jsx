@@ -660,7 +660,7 @@ function DriverSaleWindowModal({ sid }) {
 }
 
 export default function Tasks() {
-  const { go, user, toast, refresh, openModal } = useApp();
+  const { go, user, toast, refresh, openModal, modal } = useApp();
   const me = drvOfUser(user);
   const [, setClock] = useState(0);
   const [now, setNow] = useState(() => Date.now());
@@ -669,6 +669,25 @@ export default function Tasks() {
     const iv = setInterval(() => { setNow(Date.now()); setClock((x) => x + 1); }, 30000);
     return () => clearInterval(iv);
   }, []);
+  /* Tarik snapshot berkala (mode Sheets): Apps Script tak punya kanal push —
+     jadwal baru/berubah dari agen, booking & pembayaran pelanggan baru
+     diketahui lewat bootstrap. Tanpa ini board halaman basi sampai reload.
+     Cek pertama langsung saat halaman dibuka; putaran berikut tiap 30 dtk.
+     Diam saat tab tersembunyi, modal terbuka (layar bayar & denyut modal
+     bekerja dari mekanismenya sendiri), dan saat ada tarikan berjalan
+     (tidak menumpuk request). */
+  const pullInFlight = useRef(false);
+  useEffect(() => {
+    if (!IS_SHEETS || !me) return undefined;
+    const pull = () => {
+      if (document.hidden || modal || pullInFlight.current) return;
+      pullInFlight.current = true;
+      refreshSnapshot().then(() => refresh()).catch(() => {}).finally(() => { pullInFlight.current = false; });
+    };
+    pull();
+    const iv = setInterval(pull, 30000);
+    return () => clearInterval(iv);
+  }, [me?.id, modal]);
   const mySched = DB.load('schedules', []).filter((s) => !me || s.driverId === me.id).sort((a, b) => (a.date + b.time).localeCompare(b.date + b.time));
   const overdue = mySched.filter(scheduleNeedsReview);
   const upcoming = mySched.filter((s) => !scheduleInHistory(s) && !scheduleNeedsReview(s) && s.status !== 'cancelled' && !['arrived', 'missed', 'cancelled'].includes(s.tripStatus));
