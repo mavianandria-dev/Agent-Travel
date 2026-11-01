@@ -302,6 +302,20 @@ export default function Search() {
       .flatMap((x) => x.seats || [])
   );
 
+  /* Tarikan pasca-tabrakan: seatinfo sudah menjawab peta (overlay kuning),
+     snapshot penuh mengikuti di belakang supaya seluruh data (proyeksi
+     terisi, kuota langkah-3, Tiket Saya) segar juga — tidak hanya denah.
+     Dijaring paling 1x per 15 dtk: putaran klik/polling yang bertubi tak
+     menumpuk bootstrap penuh. refreshSnapshot membilas antrean tulis lokal
+     lebih dulu — pesanan tanggungan milik sendiri ikut terdorong ke server. */
+  const clashPullRef = useRef(0);
+  const pullLatestAfterClash = () => {
+    const now = Date.now();
+    if (now - clashPullRef.current < 15000) return;
+    clashPullRef.current = now;
+    refreshSnapshot().then(refresh).catch(() => {});
+  };
+
   /* Satu request cek per jadwal berjalan (seatInfo dedupe in-flight). Jawaban
      segar dinilai terhadap SEMUA kursi terpilih — kursi yang baru diklik
      pun dijawab dari peta yang sama. Jaringan gagal = FAIL-CLOSED: kursi
@@ -337,6 +351,9 @@ export default function Search() {
     if (clash.length) {
       setBw((cur) => ({ ...cur, seats: cur.seats.filter((x) => !taken.has(x)), passengers: cur.passengers.filter((p) => !taken.has(p.seat)) }));
       toast('Kursi ' + clash.join(', ') + ' sudah diambil — peta diperbarui.', 'err');
+      /* selangkah lebih baik: tarik snapshot penuh di belakang — proyeksi
+         terisi & kuota ikut segar, bukan hanya peta (dijaring 15 dtk). */
+      pullLatestAfterClash();
     }
     setFreshTaken(out);
     setSeatChecks({});
