@@ -184,7 +184,6 @@ export default function TicketDetail({ bid }) {
             <button onClick={() => window.print()} className="flex-1 bg-slate-100 font-extrabold text-[13px] py-2.5 rounded-xl flex items-center justify-center gap-2"><Icon name="printer" className="w-4 h-4" />Cetak / PDF</button>
             <button onClick={() => toast('Tiket dikirim via WhatsApp ke ' + (firstPax?.phone || 'penumpang'), 'ok')} className="flex-1 bg-green-500 text-white font-extrabold text-[13px] py-2.5 rounded-xl flex items-center justify-center gap-2"><Icon name="message-circle" className="w-4 h-4" />Kirim WA</button>
           </div>
-          {b.status === 'pending' ? <div className="no-print mt-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-[12px] font-semibold text-amber-800 text-center">Menunggu pembayaran — dibatalkan otomatis jika hold 5 menit habis.</div> : null}
           {cancelable
             ? <button onClick={cancelBooking} className="no-print w-full mt-2 bg-red-50 text-red-600 font-extrabold text-[13px] py-2.5 rounded-xl">Batalkan Booking</button>
             : <div className="no-print mt-2"><button disabled className="w-full bg-slate-100 text-slate-400 font-extrabold text-[13px] py-2.5 rounded-xl cursor-not-allowed">Batalkan Booking</button><div className="mt-1.5 text-[11.5px] font-semibold text-slate-400 text-center">{cancelBlockReason}</div></div>}

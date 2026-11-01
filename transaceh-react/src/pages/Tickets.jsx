@@ -29,8 +29,14 @@ export default function Tickets() {
     );
   }
 
-  const list = DB.load('bookings', []).filter((b) => b.userEmail === user.email).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  const active = list.filter((b) => ['pending', 'paid'].includes(b.status));
+  /* Tiket = pesanan yang pernah lunas (paid/done) atau batal sungguhan yang
+     pernah lunas. Pesanan tanggungan checkout (pending — kunci kursi
+     5 menit) dan batalnya karena hold basi/pesanan diganti disembunyikan:
+     pada alur baru tiket baru "terbuat" saat pelunasan sukses. */
+  const list = DB.load('bookings', []).filter(
+    (b) => b.userEmail === user.email && (['paid', 'done'].includes(b.status) || (b.status === 'cancelled' && !!b.paidAt))
+  ).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const active = list.filter((b) => ['paid'].includes(b.status));
 
   return (
     <div className="anim bg-white rounded-3xl shadow-card p-5">
@@ -58,8 +64,7 @@ export default function Tickets() {
                 {mt?.state === 'refunded' ? <div className="mt-2 bg-green-50 border border-green-200 rounded-xl px-2.5 py-1.5 text-[11.5px] font-semibold text-green-800">Refund 100% {fmtRp(b.refundAmount)} • {b.refundStatus === 'done' ? 'Selesai' : 'Sedang diproses'}.</div> : null}
                 {mt?.state === 'cancelled_unpaid' ? <div className="mt-2 bg-slate-100 border border-slate-200 rounded-xl px-2.5 py-1.5 text-[11.5px] font-semibold text-slate-600">Dibatalkan karena maintenance armada. Booking belum dibayar, tidak ada refund.</div> : null}
                 {mt?.state === 'replaced' ? <div className="mt-2 bg-green-50 border border-green-200 rounded-xl px-2.5 py-1.5 text-[11.5px] font-semibold text-green-800">Dipindahkan dari {fmtDate(mt.originalSchedule.date)} {mt.originalSchedule.time} ke {fmtDate(d.s.date)} {d.s.time} • kursi {b.seats.join(', ')}.</div> : null}
-                <div className="flex items-center justify-between mt-2"><span className="font-extrabold text-[15px]">{fmtRp(b.total)}</span>
-                  {b.status === 'pending' ? <span className="text-[11px] font-extrabold text-amber-700">Menunggu pembayaran — dibatalkan otomatis {d.ms > 0 ? 'dalam ' + Math.floor(d.ms / 60000) + ' mnt' : 'sekarang'}</span> : null}</div>
+                <div className="flex items-center justify-between mt-2"><span className="font-extrabold text-[15px]">{fmtRp(b.total)}</span></div>
                 <div className="flex gap-2 mt-3">
                   <button onClick={() => go('ticket-detail:' + b.id)} className="flex-1 bg-[#0b2447] text-white text-[12.5px] font-extrabold py-2.5 rounded-xl">{mt?.state === 'choice_pending' ? (mt.candidates?.length ? 'Pilih Refund / Pindah' : 'Lihat Refund') : 'Detail / E-Tiket'}</button>
                   {canCancelBooking(b, d.s) ? <button onClick={() => cancelBooking(b.id)} className="px-3.5 bg-red-50 text-red-600 rounded-xl" title="Batalkan"><Icon name="trash-2" className="w-4 h-4" /></button> : null}

@@ -2836,6 +2836,11 @@ function apiSync_(req, cfg) {
     for (var a = 0; a < keys.length; a++) {
       revisions[keys[a]] = apiApplyCollection_(ss, keys[a], changes[keys[a]], meta);
     }
+    /* Sapu bersih hold checkout basi sebelum meta dipersist: kenaikan revisi
+       koleksi tersentuh ikut masuk respons (angka revisi final) sehingga
+       requester tidak ditolak REV_CONFLICT oleh sapuannya sendiri.
+       Idempoten: tanpa baris basi = tanpa tulis, tanpa kenaikan revisi. */
+    apiSweepExpiredHolds_(ss, meta, revisions);
     apiUpdateMeta_(ss, meta);
     SpreadsheetApp.flush();
     return { ok: true, data: { touched: keys, revisions: revisions, scheduleNotes: scheduleNotes } };
@@ -4994,5 +4999,93 @@ function apiCopyMissingSecrets_(target, source) {
         Object.prototype.hasOwnProperty.call(source, field)) {
       target[field] = source[field];
     }
+  }
+}
+
+/**
+ * Sapu bersih pesanan hold checkout basi (mode Sheets). Interval
+ * cleanupHolds klien tidak berjalan saat datanya di Sheets, jadi gerbang
+ * sync mengambil alih: booking pending dengan holdExpiry lewat dibatalkan
+ * otomatis dengan semantik baris-baris persis sama dengan klien — refund
+ * Rp0, tripStatus cancelled, kuota voucher dikembalikan (used − 1, mirror
+ * restoreVoucher: hanya kode dengan diskon > 0), dan payment terkait ikut
+ * dibatalkan (mirror updatePaymentRefund dengan refund 0). Kursi lalu lepas
+ * untuk pembeli lain dan tidak ada jejak "menunggu pembayaran" menggantung.
+ * Idempoten: bila tidak ada yang basi, TIDAK ada tulis sama sekali — revisi
+ * tak naik, batch yang sedang berjalan tidak terganggu REV_CONFLICT baru.
+ * Kenaikan revisi di meta dilakukan di sini (sebelum apiUpdateMeta_), dan
+ * map revisions respons diasah ke angka final.
+ */
+function apiSweepExpiredHolds_(ss, meta, revisions) {
+  var bookings = apiReadCollection_(ss, 'bookings');
+  var now = Date.now();
+  var nowIso = new Date(now).toISOString();
+  var expired = [];
+  for (var i = 0; i < bookings.length; i++) {
+    var b = bookings[i] || {};
+    if (String(b.status || '') !== 'pending') continue;
+    var hms = Date.parse(b.holdExpiry || '');
+    if (isNaN(hms) || hms > now) continue;
+    expired.push(b);
+  }
+  if (!expired.length) return;
+  var expiredIds = {};
+  for (var j = 0; j < expired.length; j++) {
+    var e = expired[j];
+    e.status = 'cancelled';
+    e.tripStatus = 'cancelled';
+    e.refundPct = 0;
+    e.refundAmount = 0;
+    e.refundScope = 'ticket';
+    e.refundStatus = 'none';
+    e.refundPaidAt = null;
+    e.cancelReason = 'Hold kedaluwarsa (5 mnt)';
+    e.cancelledBy = 'sistem';
+    e.cancelledAt = nowIso;
+    expiredIds[String(apiRecordId_(e))] = true;
+  }
+  apiWriteCollection_(ss, 'bookings', bookings);
+  apiBumpRev_(meta, 'bookings');
+  revisions.bookings = Number(meta['rev.bookings']) || 0;
+  /* Kuota voucher kembali per pesanan batal (tanpa dedup: dua pesanan yang
+     memakai kode sama memulihkan dua pemakaian, seperti di klien). */
+  var voucherTouched = false;
+  var vouchers = apiReadCollection_(ss, 'vouchers');
+  for (var v0 = 0; v0 < expired.length; v0++) {
+    var code = String((expired[v0].voucher || expired[v0].voucherCode) || '').trim().toUpperCase();
+    if (!code || !(Number(expired[v0].discount) > 0)) continue;
+    for (var v1 = 0; v1 < vouchers.length; v1++) {
+      var vou = vouchers[v1] || {};
+      if (String(vou.code || '').trim().toUpperCase() !== code) continue;
+      if (Number(vou.used) > 0) { vou.used = Number(vou.used) - 1; voucherTouched = true; }
+      break;
+    }
+  }
+  if (voucherTouched) {
+    apiWriteCollection_(ss, 'vouchers', vouchers);
+    apiBumpRev_(meta, 'vouchers');
+    revisions.vouchers = Number(meta['rev.vouchers']) || 0;
+  }
+  /* Payment pending milik pesanan batal ikut dibatalkan. */
+  var payTouched = false;
+  var payments = apiReadCollection_(ss, 'payments');
+  for (var p0 = 0; p0 < payments.length; p0++) {
+    var p = payments[p0] || {};
+    if (!expiredIds[String(p.bookingId || '')]) continue;
+    if (String(p.status || '') === 'cancelled') continue;
+    p.refundAmount = 0;
+    p.refundPct = 0;
+    p.refundScope = 'ticket';
+    p.refundStatus = 'none';
+    p.refundRequestedAt = nowIso;
+    p.refundedAt = null;
+    p.refundPaidAt = null;
+    p.status = 'cancelled';
+    payTouched = true;
+  }
+  if (payTouched) {
+    apiWriteCollection_(ss, 'payments', payments);
+    apiBumpRev_(meta, 'payments');
+    revisions.payments = Number(meta['rev.payments']) || 0;
   }
 }

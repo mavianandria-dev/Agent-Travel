@@ -721,6 +721,19 @@ res = login('cust1@test.local', LEGACY_CUST1_PW);
 ok('login pelanggan direct sukses', res.ok === true && res.data.user.role === 'pelanggan', res);
 custToken = res.data.token;
 
+/* Pra-sapu: sync pertama apa pun segera menjalankan sapuannya, dan fixture
+   menyimpan hold basi (b_ghost). Waktu sapuan pertama diubah ke SINI supaya
+   delta revisi blok-blok uji di bawahnya tidak tergeser. Dipicu lewat
+   token superadmin (penulis bebas; daftar notifikasi milik pelanggan di
+   uji bootstrap di bawah tetap murni). */
+res = sync({ notifications: { baseRev: revOf('notifications'), upserts: [{
+  id: 'n_pra_sapu', to: 'admin@transaceh.id', title: 'Pra-sapu', msg: 'uji', ch: 'app',
+  time: new Date().toISOString(), read: false }], deletes: [] } }, adminToken);
+ok('pra-sapu: sapuan pertama membalik b_ghost jadi dibatalkan sistem',
+  res.ok === true && (readRec('bookings', 'b_ghost') || {}).status === 'cancelled' &&
+  (readRec('bookings', 'b_ghost') || {}).cancelReason === 'Hold kedaluwarsa (5 mnt)' &&
+  (readRec('bookings', 'b_ghost') || {}).cancelledBy === 'sistem', res);
+
 /* ------------------------------------------------------------------ */
 
 console.log('\n== 3) login salah, session, token ==');
@@ -2551,6 +2564,76 @@ seedCollection('settings', [{ key: 'platformFee', value: { type: 'percent', valu
 const pubFlat = (dispatch(bodyOf({}, { action: 'bootstrap' })).data.records || {});
 ok('tarif flat dipulihkan — bootstrap publik kembali membaca percent 8',
   String((((pubFlat.settings || [])[0] || {}).value || {}).type) === 'percent', pubFlat.settings);
+
+/* ------------------------------------------------------------------ */
+/* Sapu bersih hold checkout basi (mode Sheets)                        */
+/* ------------------------------------------------------------------ */
+/* Interval cleanupHolds klien tidak berjalan di mode Sheets; gerbang sync
+   kini menyapunya: booking pending dengan holdExpiry lewat dibatalkan
+   otomatis — mirror semantik klien (refund Rp0, kuota voucher kembali,
+   payment ikut dibatalkan) dan idempoten (tanpa basi = tanpa tulis).
+   Baris basi HANYA bisa ditanam lewat seedCollection: lewat sync-upsert
+   server menulis ulang holdExpiry booking baru ke now + hold, sehingga
+   booking baru tidak pernah basi saat dibuat. */
+const sweepDeadIso = new Date(Date.now() - 2000).toISOString();
+const sweepLiveIso = new Date(Date.now() + 9 * 60000).toISOString();
+const sweepPrevBookings = S.apiReadCollection_(spread, 'bookings');
+const sweepPrevPays = S.apiReadCollection_(spread, 'payments');
+const sweepUsedBefore = (S.apiReadCollection_(spread, 'vouchers').find((x) => x.code === 'HEMAT20') || {}).used;
+seedCollection('bookings', sweepPrevBookings.concat([
+  { id: 'b_sweep_dead', code: 'TA-SW', scheduleId: 's_dekat', userEmail: 'cust1@test.local',
+    seats: ['B1', 'B2'], passengers: [{ name: 'Sapu A', seat: 'B1' }, { name: 'Sapu B', seat: 'B2' }],
+    subtotal: 320000, discount: 30000, voucher: 'HEMAT20', total: 290000, status: 'pending',
+    holdExpiry: sweepDeadIso, createdAt: sweepDeadIso },
+  { id: 'b_sweep_live', code: 'TA-SL', scheduleId: 's_dekat', userEmail: 'cust2@test.local',
+    seats: ['B3'], passengers: [{ name: 'Hidup A', seat: 'B3' }],
+    subtotal: 160000, discount: 0, total: 160000, status: 'pending',
+    holdExpiry: sweepLiveIso, createdAt: sweepLiveIso }
+]));
+seedCollection('payments', sweepPrevPays.concat([
+  { id: 'p_sweep_dead', bookingId: 'b_sweep_dead', amount: 290000, method: 'transfer',
+    status: 'pending', fee: 16000, time: sweepDeadIso }
+]));
+const sweepBase = revOf('bookings');
+const sweepPayBase = revOf('payments');
+const sweepVoucherBase = revOf('vouchers');
+res = sync({ notifications: { baseRev: revOf('notifications'), upserts: [{
+  id: 'n_sweep_1', to: 'cust1@test.local', title: 'Sapu basi', msg: 'uji', ch: 'app',
+  time: new Date().toISOString(), read: false }], deletes: [] } }, custToken);
+ok('sapu hold basi: sync sukses & revisi bookings/payments/vouchers final',
+  res.ok === true &&
+  res.data.revisions.bookings === sweepBase + 1 &&
+  res.data.revisions.payments === sweepPayBase + 1 &&
+  res.data.revisions.vouchers === sweepVoucherBase + 1, res);
+const sweepDead = readRec('bookings', 'b_sweep_dead');
+ok('pesanan hold basi membalik: dibatalkan sistem, refund Rp0, cancelReason sesuai',
+  !!sweepDead && sweepDead.status === 'cancelled' && sweepDead.tripStatus === 'cancelled' &&
+  sweepDead.cancelReason === 'Hold kedaluwarsa (5 mnt)' && sweepDead.cancelledBy === 'sistem' &&
+  Number(sweepDead.refundAmount) === 0 && Number(sweepDead.refundPct) === 0 &&
+  sweepDead.refundStatus === 'none', sweepDead);
+const sweepLive = readRec('bookings', 'b_sweep_live');
+ok('pesanan hold hidup TIDAK disentuh sapuan',
+  !!sweepLive && sweepLive.status === 'pending' &&
+  new Date(sweepLive.holdExpiry).getTime() > Date.now(), sweepLive);
+const sweepPay = readRec('payments', 'p_sweep_dead');
+ok('payment pesanan basi ikut dibatalkan (mirror updatePaymentRefund refund 0)',
+  !!sweepPay && sweepPay.status === 'cancelled' && Number(sweepPay.refundAmount) === 0 &&
+  sweepPay.refundStatus === 'none', sweepPay);
+const sweepUsedAfter = (S.apiReadCollection_(spread, 'vouchers').find((x) => x.code === 'HEMAT20') || {}).used;
+ok('kuota voucher dikembalikan (used − 1)', sweepUsedAfter === sweepUsedBefore - 1,
+  { before: sweepUsedBefore, after: sweepUsedAfter });
+
+/* Idempoten: tanpa baris basi sapuan tidak menulis apa-apa — revisi
+   bookings/payments/vouchers tidak naik, batch pihak lain tak terganggu. */
+const settled = { bookings: revOf('bookings'), payments: revOf('payments'), vouchers: revOf('vouchers') };
+res = sync({ notifications: { baseRev: revOf('notifications'), upserts: [{
+  id: 'n_sweep_2', to: 'cust1@test.local', title: 'Sapu tunggu', msg: 'uji', ch: 'app',
+  time: new Date().toISOString(), read: false }], deletes: [] } }, custToken);
+ok('sapu idempoten: tanpa baris basi → no-op, revisi lain tidak naik',
+  res.ok === true && res.data.revisions.bookings === undefined &&
+  res.data.revisions.payments === undefined && res.data.revisions.vouchers === undefined &&
+  revOf('bookings') === settled.bookings && revOf('payments') === settled.payments &&
+  revOf('vouchers') === settled.vouchers, res);
 
 console.log('\n== Ringkasan ==');
 console.log('PASS: ' + passed + ', FAIL: ' + failed);

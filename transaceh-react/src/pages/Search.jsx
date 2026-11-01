@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useApp, freshBW } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { schedById, schedReady, takenSeats, seatsLeft, routeById, vehicleById, driverById, vehLayout, schedSeatCap, audit, notify, vehName, splitFare, fareCore, fareModelOf, servicePerSeat, scheduleDepartureMs, createLedger, routeBookable, isRouteSuspended, canPayBooking, scheduleIsPast, agencyById, routeGroupKey, groupRoutes, routesInRouteGroup, scheduleMaintenance, maintenancePeriodLabel } from '@/lib/domain.js';
+import { schedById, schedReady, takenSeats, seatsLeft, routeById, vehicleById, driverById, vehLayout, schedSeatCap, audit, notify, vehName, splitFare, fareCore, fareModelOf, servicePerSeat, scheduleDepartureMs, createLedger, routeBookable, isRouteSuspended, canPayBooking, scheduleIsPast, cancelBooking as cancelBookingDomain, agencyById, routeGroupKey, groupRoutes, routesInRouteGroup, scheduleMaintenance, maintenancePeriodLabel } from '@/lib/domain.js';
 import { IS_SHEETS } from '@/lib/runtime.js';
 import { seatInfo } from '@/lib/sheetsApi.js';
 import { refreshSnapshot } from '@/lib/remote.js';
@@ -92,17 +92,44 @@ export function PaymentModal({ booking, onDone }) {
   const { closeModal, go, toast, setBw, refresh } = useApp();
   const [now, setNow] = useState(Date.now());
   const [paying, setPaying] = useState(false);
+  /* Bayaran lokal diproses lewat simulatePay — denyut interval TIDAK boleh
+     mendahuluinya selama tulisan sedang berjalan (toast/navigasi kembar).
+     Ref dipakai karena interval membaca nilai termutakhir, bukan snapshot. */
+  const payingRef = useRef(false);
 
+  /* Denyut modal per detik. Prinsip alur baru: pesanan (hold) bukan tiket —
+     tiket baru "terbuat" saat simulasi lunas. Setiap pintu keluar modal
+     TETAP berada di langkah Ringkasan & Pembayaran karena wizard masih
+     utuh dan bisa langsung diulang; tidak pernah melompat ke Tiket Saya. */
   useEffect(() => {
     const iv = setInterval(() => {
       const b = DB.load('bookings', []).find((x) => x.id === booking.id);
-      if (!b) { clearInterval(iv); return; }
+      if (!b) {
+        /* Pesanan terkedor keluar cache — tulisan ditolak server (mis. revisi
+           berubah) lalu di-rollback. Tanpa penanganan ini modal membeku di
+           00:00. Tutup modal, tetap di langkah-5, klik Bayar lagi. */
+        clearInterval(iv);
+        closeModal();
+        toast('Pesanan gagal disimpan — ulangi pesananmu', 'err');
+        return;
+      }
+      if (b.status === 'paid' && !payingRef.current) {
+        /* Pelunasan terkonfirmasi dari jalur lain (mis. agen mengetuk
+           konfirmasi tunai di perangkatnya sendiri): tiket resmi terbuat. */
+        clearInterval(iv);
+        closeModal();
+        toast('Pembayaran terkonfirmasi — e-tiket terbit.', 'ok');
+        refresh();
+        clearCheckoutDraft();
+        setBw(freshBW());
+        go('ticket-detail:' + b.id);
+        return;
+      }
       if (b.status === 'cancelled' || b.maintenanceState) {
         clearInterval(iv);
         closeModal();
         toast(b.maintenanceState ? 'Jadwal maintenance — booking dibatalkan sesuai kebijakan.' : 'Pembayaran ditutup — booking sudah dibatalkan.', 'err');
         refresh();
-        go('tickets');
         return;
       }
       const s = schedById(b.scheduleId);
@@ -111,22 +138,24 @@ export function PaymentModal({ booking, onDone }) {
         closeModal();
         toast('Pembayaran ditutup — jadwal sudah berjalan/dibatalkan.', 'err');
         refresh();
-        go('tickets');
         return;
       }
       const ms = new Date(b.holdExpiry).getTime() - Date.now();
       if (ms <= 0) {
+        /* Hold 5 menit habis tanpa pelunasan: pesanan dibatalkan otomatis
+           (kursi lepas, voucher kembali — lewat sapuan server/cache). Tetap
+           di langkah-5: wizard utuh, klik Bayar lagi memulai pesanan baru
+           dengan waktu segar. */
         clearInterval(iv);
         closeModal();
-        toast('Hold kedaluwarsa — booking dibatalkan otomatis', 'err');
+        toast('Hold kedaluwarsa — pesanan batal otomatis. Klik Bayar untuk pesan ulang', 'err');
         refresh();
-        go('tickets');
         return;
       }
       setNow(Date.now());
     }, 1000);
     return () => clearInterval(iv);
-  }, [booking.id, closeModal, go, toast, refresh]);
+  }, [booking.id, closeModal, go, toast, refresh, setBw]);
 
   const ms = new Date(booking.holdExpiry).getTime() - now;
   const mm = String(Math.max(0, Math.floor(ms / 60000))).padStart(2, '0');
@@ -146,13 +175,16 @@ export function PaymentModal({ booking, onDone }) {
     if (paying) return;
     const arr = DB.load('bookings', []);
     const b = arr.find((x) => x.id === booking.id);
-    if (!b) return;
+    if (!b) {
+      closeModal();
+      toast('Pesanan gagal disimpan — ulangi pesananmu', 'err');
+      return;
+    }
     const s = schedById(b.scheduleId);
     if (!canPayBooking(b, s)) {
       closeModal();
       toast('Pembayaran ditutup — jadwal sudah berangkat/dibatalkan atau hold kedaluwarsa.', 'err');
       refresh();
-      go('tickets');
       return;
     }
     /* Mode Sheets menulis secara optimistis: cache berubah dulu, server
@@ -161,6 +193,7 @@ export function PaymentModal({ booking, onDone }) {
        berubah, atau sesi habis), cache di-rollback dan handler sync sudah
        menampilkan toast merah dengan alasan persisnya. */
     setPaying(true);
+    payingRef.current = true;
     b.status = 'paid';
     b.paidAt = new Date().toISOString();
     b.fare = fareCore(splitFare(s, (b.seats || []).length, b.discount || 0, 'pelanggan', fareModelOf(b) === 'B' ? 'B' : 'A'));
@@ -176,10 +209,13 @@ export function PaymentModal({ booking, onDone }) {
     refresh();
     const res = await DB.flush();
     setPaying(false);
+    payingRef.current = false;
     if (res && res.ok === false) {
+      /* Tulisan ditolak server dan cache di-rollback — penjelasan lengkap
+         sudah melayang sebagai toast dari handler sync. Tutup modal, tetap
+         di langkah-5: wizard utuh, pesanan bisa dibuat ulang. */
       closeModal();
       refresh();
-      go('tickets');
       return;
     }
     closeModal();
@@ -193,7 +229,7 @@ export function PaymentModal({ booking, onDone }) {
   return (
     <div className="p-6">
       <div className="flex items-center justify-between"><h3 className="font-extrabold text-[17px] flex items-center gap-2"><Icon name="wallet" className="w-5 h-5 text-sky-600" />Pembayaran {booking.payMethod}</h3>
-        <button onClick={() => { closeModal(); const b0 = DB.load('bookings', []).find((x) => x.id === booking.id); if (b0 && b0.status === 'pending') toast('Booking menunggu pembayaran — dibatalkan otomatis jika hold 5 menit habis.', 'info'); go('tickets'); }} className="text-slate-400 hover:text-slate-700"><Icon name="x" className="w-5 h-5" /></button></div>
+        <button onClick={() => { closeModal(); toast('Selesaikan pembayaran sebelum sisa waktu habis', 'info'); }} className="text-slate-400 hover:text-slate-700"><Icon name="x" className="w-5 h-5" /></button></div>
       <div className="text-center bg-amber-50 border border-amber-200 rounded-2xl py-2.5 mt-3 font-extrabold text-amber-800 text-[14px]">Sisa waktu bayar: <span className="font-mono">{mm}:{ss}</span></div>
       {_ps?.tripStatus === 'scheduled' && _ps.delayUntil && new Date(_ps.delayUntil).getTime() > Date.now() ? <div className="mt-2 bg-sky-50 border border-sky-200 rounded-2xl p-2.5 text-[12px] font-semibold text-sky-900">Jadwal delay {_ps.delayMinutes} menit • estimasi keberangkatan {fmtClock(_ps.delayUntil)}.</div> : null}
       {booking.payMethod === 'QRIS' ? (
@@ -250,6 +286,17 @@ export default function Search() {
   useEffect(() => { bwRef.current = bw; }, [bw]);
   useEffect(() => { if (bw.step !== 4) setSeatChecks({}); }, [bw.step]);
 
+  /* Kursi yang SAAT INI ditahan pesanan pending milik user pada jadwal ini
+     (apa pun kondisi hold-nya — hidup atau basi). Semua cek konflik di
+     wizard dan checkout memakai ini supaya hold milik sendiri tidak pernah
+     dianggap "kursi orang lain" — termasuk di mode Sheets, tempat proyeksi
+     takenSeats menyatukan hold sendiri ke daftar terisi sebelum diperbarui. */
+  const ownHeldSeats = (schedId) => new Set(
+    !user ? [] : DB.load('bookings', [])
+      .filter((x) => x.status === 'pending' && x.userEmail === user.email && x.scheduleId === schedId)
+      .flatMap((x) => x.seats || [])
+  );
+
   /* Satu request cek per jadwal berjalan (seatInfo dedupe in-flight). Jawaban
      segar dinilai terhadap SEMUA kursi terpilih — kursi yang baru diklik
      pun dijawab dari peta yang sama. Fail-open bila jaringan gagal.
@@ -265,7 +312,12 @@ export default function Search() {
       setBw((cur) => ({ ...cur, step: 3, scheduleId: null, seats: [], passengers: [], pickup: '', pickupAddr: '', pickupCoords: '', voucher: '', discount: 0 }));
       return { out, clash: [] };
     }
-    const taken = new Set([...(out.takenSeats || []), ...(out.blocked || []), ...(out.inactive || [])]);
+    const own = ownHeldSeats(schedId);
+    const taken = new Set(
+      [...(out.takenSeats || []), ...(out.blocked || []), ...(out.inactive || [])].filter((x) => !own.has(x))
+    );
+    /* server menjawab flat list termasuk hold milik sendiri; hold sendiri
+       bukan tabrakan — hanya kursi ORANG lain yang boleh menghapus pilihan. */
     const clash = (bwRef.current.seats || []).filter((x) => taken.has(x));
     if (clash.length) {
       setBw((cur) => ({ ...cur, seats: cur.seats.filter((x) => !taken.has(x)), passengers: cur.passengers.filter((p) => !taken.has(p.seat)) }));
@@ -312,7 +364,8 @@ export default function Search() {
          server saat Bayar (doCheckout + sync). Jendela tunggu antara
          cek lulus dan Bayar disengaja: tanpa request kedua. */
       const tk = takenSeats(bw.scheduleId);
-      const clash = bw.seats.find((s) => tk.paid.includes(s) || tk.hold.includes(s));
+      const own = ownHeldSeats(bw.scheduleId);
+      const clash = bw.seats.find((s) => !own.has(s) && (tk.paid.includes(s) || tk.hold.includes(s)));
       if (clash) return toast('Kursi ' + clash + ' baru saja terbooking orang lain. Pilih kursi lain.', 'err');
     }
     if (bw.step >= 5) return;
@@ -392,13 +445,36 @@ export default function Search() {
       refresh();
       return;
     }
+    /* Hold milik sendiri: klik Bayar berulang tidak menciptakan booking
+       kembar dan tidak memblokir dirinya sendiri. Cek konflik lebih dulu
+       dengan kursi milik sendiri DIKECUALIKAN — hold basi milik sendiri tidak
+       memblokir dirinya sendiri walau proyeksi takenSeats belum diperbarui,
+       dan tabrakan dengan kursi ORANG lain terdeteksi TANPA batalkan hold
+       sendiri dulu. Pesanan sama persis (jadwal + kursi + voucher) yang
+       masih hidup dipakai ulang — modal terbuka dan sisa waktu MELANJUTKAN
+       hitungan lama (bukan reset 5 menit). Bila pilihan berubah atau hold
+       sudah mati, semua pesanan tanggungan milik sendiri pada jadwal ini
+       dibatalkan dulu (kursi lepas, voucher kembali) sebelum pesanan baru
+       dibuat — setelah cek konflik, tidak ada cek ulang lagi. */
+    const owns = DB.load('bookings', []).filter(
+      (x) => x.status === 'pending' && x.userEmail === user.email && x.scheduleId === s.id
+    );
+    const own = new Set(owns.flatMap((x) => x.seats || []));
     const tk = takenSeats(s.id);
-    const clash = bw.seats.find((x) => tk.paid.includes(x) || tk.hold.includes(x));
-    if (clash) {
-      toast('Kursi ' + clash + ' sudah diambil. Silakan pilih ulang.', 'err');
-      setBw({ ...bw, seats: bw.seats.filter((x) => x !== clash), passengers: bw.passengers.filter((p) => p.seat !== clash) });
+    const clash = bw.seats.filter((x) => !own.has(x) && (tk.paid.includes(x) || tk.hold.includes(x)));
+    if (clash.length) {
+      toast('Kursi ' + clash.join(', ') + ' sudah diambil. Silakan pilih ulang.', 'err');
+      setBw({ ...bw, seats: bw.seats.filter((x) => !clash.includes(x)), passengers: bw.passengers.filter((p) => !clash.includes(p.seat)) });
       return;
     }
+    const reuse = owns.find((x) =>
+      x.seats.slice().sort().join(',') === bw.seats.slice().sort().join(',') &&
+      String(x.voucher || '').toUpperCase() === String(bw.voucher || '').toUpperCase() &&
+      canPayBooking(x, s)
+    );
+    if (reuse) { openModal(<PaymentModal booking={reuse} />); return; }
+    owns.forEach((st) => cancelBookingDomain(st.id, { reason: 'Pesanan diganti saat checkout', by: 'pelanggan' }));
+    if (owns.length) refresh();
     const discount = calcDiscount(bw.voucher, bw.scheduleId, bw.seats.length);
     /* Model B: subtotal = Tiket (harga rute) + Jasa − Diskon; total = subtotal + fee. */
     const fareCreate = splitFare(s, bw.seats.length, discount);
@@ -550,12 +626,18 @@ export default function Search() {
     const s = schedById(bw.scheduleId);
     if (!s) return (<><div className="text-center py-10 text-slate-400 font-bold">Jadwal tidak ditemukan — kembali pilih armada.</div>{wizNav(true, false)}</>);
     const tk = takenSeats(s.id);
+    const own = ownHeldSeats(s.id);
     /* Overlay hasil cek seatinfo (state lokal, bukan DB): kursi yang baru
        saja terambil orang tapi belum ada di cache ditampilkan kuning-hold —
-       peta diperbarui hanya dari jawaban server terakhir. */
+       peta diperbarui hanya dari jawaban server terakhir. Kursi milik sendiri
+       (pesanan pending) dikeluarkan dari daftar terisi & hold: tampil biru
+       bila terpilih, hijau bila tidak, jadi selalu bisa diketuk lagi. */
     const fresh = freshTaken && freshTaken.live ? freshTaken : null;
     const freshSet = fresh ? [...new Set([...(fresh.takenSeats || []), ...(fresh.blocked || []), ...(fresh.inactive || [])])] : [];
-    const holdShown = tk.hold.concat(freshSet.filter((x) => !tk.hold.includes(x) && !tk.paid.includes(x)));
+    const gridPaid = tk.paid.filter((x) => !own.has(x));
+    const holdShown = tk.hold
+      .filter((x) => !own.has(x))
+      .concat(freshSet.filter((x) => !own.has(x) && !tk.hold.includes(x) && !tk.paid.includes(x)));
     const v = vehicleById(s.vehicleId);
     const r = routeById(s.routeId);
     const layout = vehLayout(v);
@@ -569,7 +651,7 @@ export default function Search() {
             ))}
             {(tk.inactive || []).length ? <span className="flex items-center gap-1.5 text-slate-500"><Icon name="ban" className="w-3.5 h-3.5" />Nonaktif ({tk.inactive.join(', ')})</span> : null}
           </div>
-          <CabinGrid layout={layout} paid={tk.paid} hold={holdShown} inactive={tk.inactive} selected={bw.seats} checking={Object.keys(seatChecks)} onPick={toggleSeat} interactive plate={v.plate} vehName={vehName(v)} legend={false} />
+          <CabinGrid layout={layout} paid={gridPaid} hold={holdShown} inactive={tk.inactive} selected={bw.seats} checking={Object.keys(seatChecks)} onPick={toggleSeat} interactive plate={v.plate} vehName={vehName(v)} legend={false} />
         </div>
         <div ref={paxRef} className="scroll-mt-20"><h3 className="font-extrabold text-[16px]">Data Penumpang <span className="badge bg-sky-100 text-sky-700">{bw.seats.length} kursi</span></h3>
           {bw.seats.length === 0 ? (
