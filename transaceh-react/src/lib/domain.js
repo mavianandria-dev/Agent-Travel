@@ -1669,24 +1669,40 @@ function notifyScheduleStakeholders(s, title, msg) {
     .forEach((u) => notify(u.email, title, msg, 'app'));
 }
 
-/** Delay sebelum berangkat: menggeser batas jadwal dianggap terlewat. */
-export function setScheduleDelay(sid, minutes, reason, note, by = 'pengemudi') {
-  const schedules = DB.load('schedules', []);
-  const s = schedules.find((x) => x.id === sid);
-  if (!s) return { ok: false, msg: 'Jadwal tidak ditemukan' };
-  if (s.status !== 'open' || s.reviewedAt) return { ok: false, msg: 'Jadwal tidak aktif untuk delay' };
-  if (scheduleMaintenance(s)) return { ok: false, msg: 'Jadwal maintenance — delay tidak diperlukan' };
-  if (s.tripStatus && s.tripStatus !== 'scheduled') return { ok: false, msg: 'Delay hanya bisa dicatat sebelum berangkat' };
+/** Delay sebelum berangkat: menggeser batas jadwal dianggap terlewat.
+ *  Kebijakan: ≤ 180 mnt langsung diterapkan; > 180 mnt disimpan sebagai
+ *  permintaan (field delayReq*) yang menunggu persetujuan agen via
+ *  resolveDelayRequest() — server memagari field delay utama untuk peran
+ *  pengemudi (driverAllowed di code.gs) dan field delayReq* diizinkan. */
+function scheduleDelayGuardMsg_(s) {
+  if (!s) return 'Jadwal tidak ditemukan';
+  if (s.status !== 'open' || s.reviewedAt) return 'Jadwal tidak aktif untuk delay';
+  if (scheduleMaintenance(s)) return 'Jadwal maintenance — delay tidak diperlukan';
+  if (s.tripStatus && s.tripStatus !== 'scheduled') return 'Delay hanya bisa dicatat sebelum berangkat';
+  return null;
+}
 
-  const mins = Math.round(Number(minutes));
-  if (!Number.isFinite(mins) || mins < 1) return { ok: false, msg: 'Durasi delay minimal 1 menit' };
-  if (mins > MAX_DEPARTURE_DELAY_MINUTES) {
-    return { ok: false, msg: 'Tambahan delay maksimal ' + MAX_DEPARTURE_DELAY_MINUTES + ' menit' };
-  }
+function clearDelayReq_(s) {
+  s.delayReqMinutes = null;
+  s.delayReqReason = null;
+  s.delayReqNote = null;
+  s.delayReqBy = null;
+  s.delayReqAt = null;
+  s.delayReqStatus = null;
+  s.delayReqDriverId = null;
+}
 
-  const why = String(reason || '').trim();
-  if (!why) return { ok: false, msg: 'Alasan delay wajib diisi' };
+function notifyScheduleDriver_(s, driverId, title, msg) {
+  const dr = driverId ? driverById(driverId) : null;
+  const email = dr ? (dr.userEmail || dr.email) : '';
+  if (!email) return;
+  notify(email, title, msg, 'app');
+}
 
+/** Penulisan delay penuh — dipakai Simpan Delay (≤ batas) dan persetujuan
+ *  agen (approvedBy diberikan → boleh melampaui batas 180 mnt). Selalu
+ *  membersihkan permintaan delay yang menunggu agar status tak menggantung. */
+function writeDepartureDelay_(schedules, s, mins, why, whyNote, by, approvedBy) {
   const nowMs = Date.now();
   const nowIso = new Date(nowMs).toISOString();
   const original = scheduleDepartureMs(s);
@@ -1698,11 +1714,11 @@ export function setScheduleDelay(sid, minutes, reason, note, by = 'pengemudi') {
   );
   const until = base + mins * 60000;
   const total = Number.isFinite(original) ? Math.max(0, Math.round((until - original) / 60000)) : mins;
-  if (total > MAX_DEPARTURE_DELAY_MINUTES) {
-    return { ok: false, msg: 'Total delay maksimal ' + MAX_DEPARTURE_DELAY_MINUTES + ' menit. Hubungi admin untuk penundaan lebih lama.' };
+  if (total > MAX_DEPARTURE_DELAY_MINUTES && !approvedBy) {
+    return { ok: false, msg: 'Total delay maksimal ' + MAX_DEPARTURE_DELAY_MINUTES + ' menit.' };
   }
 
-  const delayNote = String(note || '').trim().slice(0, 200);
+  const delayNote = String(whyNote || '').trim().slice(0, 200);
   s.tripStatus = s.tripStatus || 'scheduled';
   s.delayUntil = new Date(until).toISOString();
   s.delayMinutes = total;
@@ -1711,13 +1727,16 @@ export function setScheduleDelay(sid, minutes, reason, note, by = 'pengemudi') {
   s.delayNote = delayNote;
   s.delayedAt = nowIso;
   s.delayedBy = by;
+  if (approvedBy) s.delayApprovedBy = approvedBy;
   s.delayHistory = [{
     type: 'departure', at: nowIso, minutes: mins, until: s.delayUntil, reason: why, note: delayNote, by,
+    ...(approvedBy ? { approvedBy } : {}),
   }, ...(Array.isArray(s.delayHistory) ? s.delayHistory : [])].slice(0, 20);
+  clearDelayReq_(s);
   DB.save('schedules', schedules);
 
   const label = delayTimeLabel(s.delayUntil);
-  notifyScheduleCustomers(sid, ['paid', 'pending'], (b) => ({
+  notifyScheduleCustomers(s.id, ['paid', 'pending'], (b) => ({
     title: 'Jadwal delay — ' + b.code,
     msg: 'Jadwal ' + s.date + ' ' + s.time + ' delay ' + total + ' menit. Estimasi keberangkatan ' + label + '. Alasan: ' + why + '.'
       + (b.status === 'paid' ? ' Mohon menunggu.' : ' Pembayaran masih dapat dilakukan sampai estimasi baru.'),
@@ -1725,10 +1744,194 @@ export function setScheduleDelay(sid, minutes, reason, note, by = 'pengemudi') {
   notifyScheduleStakeholders(
     s,
     'Jadwal delay — ' + s.date + ' ' + s.time,
-    'Pengemudi mencatat delay ' + total + ' menit (est. ' + label + '). Alasan: ' + why
+    'Pengemudi mencatat delay ' + total + ' menit (est. ' + label + ')' + (approvedBy ? ' — disetujui agen' : '') + '. Alasan: ' + why
   );
-  audit('schedule_delay', sid + ' • +' + mins + ' mnt • ' + why + ' • est ' + label);
+  audit('schedule_delay', s.id + ' • +' + mins + ' mnt • ' + why + ' • est ' + label + (approvedBy ? ' • approve oleh ' + approvedBy : ''));
   return { ok: true, until: s.delayUntil, total, added: mins };
+}
+
+export function setScheduleDelay(sid, minutes, reason, note, by = 'pengemudi', driverId = null) {
+  const schedules = DB.load('schedules', []);
+  const s = schedules.find((x) => x.id === sid);
+  const guard = scheduleDelayGuardMsg_(s);
+  if (guard) return { ok: false, msg: guard };
+
+  const mins = Math.round(Number(minutes));
+  if (!Number.isFinite(mins) || mins < 1) return { ok: false, msg: 'Durasi delay minimal 1 menit' };
+
+  const why = String(reason || '').trim();
+  if (!why) return { ok: false, msg: 'Alasan delay wajib diisi' };
+
+  const nowMs = Date.now();
+  const original = scheduleDepartureMs(s);
+  const currentUntil = s.delayUntil ? new Date(s.delayUntil).getTime() : NaN;
+  const base = Math.max(nowMs, Number.isFinite(original) ? original : 0, Number.isFinite(currentUntil) ? currentUntil : 0);
+  const previewTotal = Number.isFinite(original)
+    ? Math.max(0, Math.round((base + mins * 60000 - original) / 60000))
+    : mins;
+
+  if (mins > MAX_DEPARTURE_DELAY_MINUTES || previewTotal > MAX_DEPARTURE_DELAY_MINUTES) {
+    /* Melebihi batas bukan penolakan — jadi permintaan yang menunggu
+       persetujuan agen. Field delay utama tidak disentuh sampai disetujui. */
+    if (s.delayReqStatus === 'menunggu' && Number(s.delayReqMinutes) === mins && String(s.delayReqReason || '') === why) {
+      return { ok: false, msg: 'Permintaan delay ini sudah menunggu persetujuan agen.' };
+    }
+    s.delayReqMinutes = mins;
+    s.delayReqReason = why;
+    s.delayReqNote = String(note || '').trim().slice(0, 200);
+    s.delayReqBy = by;
+    s.delayReqAt = new Date(nowMs).toISOString();
+    s.delayReqStatus = 'menunggu';
+    s.delayReqDriverId = driverId || s.delayReqDriverId || null;
+    DB.save('schedules', schedules);
+    notifyScheduleStakeholders(
+      s,
+      'Permintaan delay — ' + s.date + ' ' + s.time,
+      'Pengemudi mengusulkan +' + mins + ' menit (est. ' + delayTimeLabel(new Date(base + mins * 60000).toISOString()) + '). Alasan: ' + why + '. Tinjau di halaman Jadwal.'
+    );
+    audit('schedule_delay_request', s.id + ' • +' + mins + ' mnt • ' + why + ' • oleh ' + by);
+    return { ok: true, request: true, msg: 'Permintaan delay dikirim ke agen — menunggu persetujuan.' };
+  }
+
+  return writeDepartureDelay_(schedules, s, mins, why, note, by, null);
+}
+
+/** Pengemudi menarik balik permintaan delay yang masih menunggu persetujuan. */
+export function cancelDelayRequest(sid, by = 'pengemudi') {
+  const schedules = DB.load('schedules', []);
+  const s = schedules.find((x) => x.id === sid);
+  if (!s) return { ok: false, msg: 'Jadwal tidak ditemukan' };
+  if (s.delayReqStatus !== 'menunggu') return { ok: false, msg: 'Permintaan delay sudah tidak ada' };
+  clearDelayReq_(s);
+  DB.save('schedules', schedules);
+  audit('schedule_delay_request', s.id + ' • ditarik oleh ' + by);
+  return { ok: true };
+}
+
+/** Keputusan agen atas permintaan delay > 180 menit. Guard domain dijalankan
+ *  ulang SAAT keputusan dibuat — jadwal yang sudah berangkat/terlewat/
+ *  dibatalkan/maintenance membuat permintaan gugur otomatis (tidak bisa
+ *  disetujui terlambat). 'setuju' boleh mengoreksi jumlah menit; karena
+ *  disetujui agen, hasilnya boleh melampaui batas 180 menit. */
+export function resolveDelayRequest(sid, decision, adjustMinutes, note, by = 'agen') {
+  const schedules = DB.load('schedules', []);
+  const s = schedules.find((x) => x.id === sid);
+  if (!s) return { ok: false, msg: 'Jadwal tidak ditemukan' };
+  if (s.delayReqStatus !== 'menunggu') return { ok: false, msg: 'Permintaan delay sudah tidak ada' };
+  if (decision !== 'setuju' && decision !== 'tolak') return { ok: false, msg: 'Keputusan tidak dikenal' };
+
+  const reqMinutes = Math.round(Number(s.delayReqMinutes)) || 0;
+  const reqWhy = String(s.delayReqReason || '');
+  const reqNote = String(s.delayReqNote || '');
+  const reqBy = String(s.delayReqBy || 'pengemudi');
+  const reqDriverId = s.delayReqDriverId || null;
+
+  const guard = scheduleDelayGuardMsg_(s);
+  if (guard) {
+    clearDelayReq_(s);
+    DB.save('schedules', schedules);
+    audit('schedule_delay_request', s.id + ' • gugur saat keputusan (' + guard + ') oleh ' + by);
+    return { ok: false, requestInvalid: true, msg: 'Permintaan gugur — ' + guard };
+  }
+
+  if (decision === 'tolak') {
+    clearDelayReq_(s);
+    DB.save('schedules', schedules);
+    notifyScheduleDriver_(s, reqDriverId, 'Permintaan delay ditolak',
+      'Jadwal ' + s.date + ' ' + s.time + ': permintaan delay ' + reqMinutes + ' menit tidak disetujui agen.'
+      + (note ? ' Catatan agen: ' + note : '')
+      + ' Jadwal asli tetap berlaku.');
+    audit('schedule_delay_request', s.id + ' • ditolak oleh ' + by + (note ? ' • ' + note : ''));
+    return { ok: true, rejected: true };
+  }
+
+  let mins = Math.round(Number(adjustMinutes));
+  if (!Number.isFinite(mins) || mins < 1) mins = reqMinutes || 1;
+  const res = writeDepartureDelay_(schedules, s, mins, reqWhy, reqNote, reqBy, by);
+  if (!res.ok) return res;
+  notifyScheduleDriver_(s, reqDriverId, 'Permintaan delay disetujui',
+    'Jadwal ' + s.date + ' ' + s.time + ': delay ' + res.total + ' menit disetujui. Estimasi keberangkatan ' + delayTimeLabel(res.until) + '.');
+  return res;
+}
+
+/** Agen menyunting jadwal dasar (armada/rute/jam/tanggal) dari halaman
+ *  Jadwal. Id dipertahankan → booking/manifest tetap menempel. HANYA
+ *  perubahan jam/tanggal yang mengosongkan estimasi delay aktif (jadwal
+ *  dasar baru = dasar hitung baru), dan permintaan delay yang menunggu
+ *  ikut gugur; mengganti armada/rute saja membiarkan delay pengemudi tetap
+ *  sah. Pemesan aktif diinformasikan. Field jam/tanggal memang milik agen —
+ *  server melarang pengemudi menyentuhnya. */
+export function editSchedule(sid, { vehicleId, routeId, date, time }, by = 'agen') {
+  const schedules = DB.load('schedules', []);
+  const s = schedules.find((x) => x.id === sid);
+  if (!s) return { ok: false, msg: 'Jadwal tidak ditemukan' };
+  if (s.status === 'cancelled') return { ok: false, msg: 'Jadwal sudah dibatalkan' };
+  if (['ontrip', 'arrived', 'missed'].includes(s.tripStatus)) return { ok: false, msg: 'Jadwal sudah berangkat/terlewat — tidak bisa diedit' };
+  if (scheduleMaintenance(s)) return { ok: false, msg: 'Armada maintenance — jadwal tidak bisa diedit sekarang' };
+
+  const veh = vehicleById(vehicleId);
+  if (!veh || String(veh.agencyId || '') !== String(s.agencyId || '')) return { ok: false, msg: 'Armada tidak valid untuk agensi ini' };
+  const route = DB.load('routes', []).find((r) => r.id === routeId);
+  if (!route) return { ok: false, msg: 'Rute tidak ditemukan' };
+  if (!routeOfferedTo(route, s.agencyId)) return { ok: false, msg: 'Rute tidak tersedia untuk agensi ini' };
+  const drvAuto = driverForVehicle(veh);
+  if (!drvAuto) return { ok: false, msg: 'Armada belum punya pengemudi yang valid' };
+  const backupDrv = backupDriverForVehicle(veh);
+  const price = priceForAgency(route, s.agencyId);
+  if (!(price > 0)) return { ok: false, msg: 'Rute belum punya harga — atur harga rute dulu' };
+
+  const newDate = String(date || '');
+  const newTime = String(time || '');
+  if (!newDate || !/^\d{2}:\d{2}$/.test(newTime)) return { ok: false, msg: 'Tanggal atau jam tidak valid' };
+
+  /* Bentrok diperiksa terhadap jadwal armada yang lain — jadwal ini sendiri
+     dikecualikan supaya tidak berbenturan dengan posisi lamanya. */
+  const st = scheduleDateStatus({ vehicleId, routeId, date: newDate, time: newTime, schedules: schedules.filter((x) => x.id !== sid) });
+  if (!['available', 'limited'].includes(st.state)) return { ok: false, msg: st.reason || 'Tanggal/jam bentrok dengan jadwal lain' };
+
+  const oldDate = s.date;
+  const oldTime = s.time;
+  const timeMoved = newDate !== oldDate || newTime !== oldTime;
+  s.vehicleId = vehicleId;
+  s.routeId = routeId;
+  s.date = newDate;
+  s.time = newTime;
+  s.driverId = drvAuto.id;
+  s.driverName = drvAuto.name;
+  s.backupDriverId = backupDrv ? backupDrv.id : null;
+  s.backupName = backupDrv ? backupDrv.name : '';
+  s.price = price;
+  if (timeMoved) {
+    s.delayUntil = null;
+    s.delayMinutes = null;
+    s.delayAddedMinutes = null;
+    s.delayReason = null;
+    s.delayNote = null;
+    s.delayedAt = null;
+    s.delayedBy = null;
+    s.tripDelayUpdatedAt = null;
+  }
+  clearDelayReq_(s);
+  DB.save('schedules', schedules);
+
+  const active = bookingsOf(s.id).filter((b) => ['pending', 'paid'].includes(b.status) && b.tripStatus !== 'cancelled');
+  if (active.length) {
+    const rute = route.from + ' → ' + route.to;
+    notifyScheduleCustomers(s.id, ['pending', 'paid'], (b) => ({
+      title: 'Jadwal berubah — ' + b.code,
+      msg: timeMoved
+        ? 'Jadwal ' + rute + ' berpindah dari ' + oldDate + ' ' + oldTime + ' ke ' + newDate + ' ' + newTime + '.'
+        : 'Armada/rute jadwal Anda diperbarui oleh agen. Jam keberangkatan tetap ' + newTime + '.',
+    }));
+    notifyScheduleStakeholders(
+      s,
+      'Jadwal diedit — ' + rute,
+      (oldDate + ' ' + oldTime + ' → ' + newDate + ' ' + newTime)
+      + ' • oleh ' + by + (active.length ? ' • ' + active.length + ' pemesan aktif diberi tahu' : '')
+    );
+  }
+  audit('schedule_edit', s.id + ' • ' + oldDate + ' ' + oldTime + ' → ' + newDate + ' ' + newTime + ' • oleh ' + by + (timeMoved ? '' : ' (armada/rute saja)'));
+  return { ok: true, timeMoved, notified: active.length };
 }
 
 /** Info keterlambatan saat perjalanan; tidak mengubah estimasi tiba maupun status. */

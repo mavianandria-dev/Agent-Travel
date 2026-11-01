@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { routeById, vehicleById, bookingsOf, vehName, vehLayout, schedSeatCap, takenSeats, seatsLeft, audit, setScheduleTripStatus, scheduleNeedsReview, scheduleInHistory, schedById, setScheduleDelay, reportTripDelay, createDriverBooking, confirmDriverBookingPayment, splitFare, tripProgress, bookedPassengers, departureTiming, scheduleIsPast, scheduleMaintenance, maintenancePeriodLabel, scheduleEffectiveDepartureMs, DRIVER_SALE_WINDOW_HOURS } from '@/lib/domain.js';
+import { routeById, vehicleById, bookingsOf, vehName, vehLayout, schedSeatCap, takenSeats, seatsLeft, audit, setScheduleTripStatus, scheduleNeedsReview, scheduleInHistory, schedById, setScheduleDelay, cancelDelayRequest, reportTripDelay, createDriverBooking, confirmDriverBookingPayment, splitFare, tripProgress, bookedPassengers, departureTiming, scheduleIsPast, scheduleMaintenance, maintenancePeriodLabel, scheduleEffectiveDepartureMs, DRIVER_SALE_WINDOW_HOURS } from '@/lib/domain.js';
 import { IS_SHEETS } from '@/lib/runtime.js';
 import { seatInfo } from '@/lib/sheetsApi.js';
 import { refreshSnapshot } from '@/lib/remote.js';
@@ -150,15 +150,26 @@ function DelayModal({ sid, mode = 'departure' }) {
   if (!s) return <div className="p-6 font-bold text-slate-500">Jadwal tidak ditemukan</div>;
 
   const departure = mode === 'departure';
+  /* Kebijakan: permintaan delay > 180 mnt menunggu persetujuan agen —
+     pengemudi bisa menariknya balik selama belum diputuskan. */
+  const pendReq = s.delayReqStatus === 'menunggu';
+  const pullback = () => {
+    const res = cancelDelayRequest(sid, user?.name || user?.email || 'pengemudi');
+    if (!res.ok) { toast(res.msg, 'err'); return; }
+    closeModal();
+    refresh();
+    toast('Permintaan delay ditarik', 'info');
+  };
   const submit = () => {
     const actor = user?.name || user?.email || 'pengemudi';
     const res = departure
-      ? setScheduleDelay(sid, Number(minutes), reason, note, actor)
+      ? setScheduleDelay(sid, Number(minutes), reason, note, actor, drvOfUser(user)?.id || null)
       : reportTripDelay(sid, reason, note, actor);
     if (!res.ok) { toast(res.msg, 'err'); return; }
     closeModal();
     refresh();
-    toast(departure ? `Delay ${minutes} menit dicatat` : 'Info keterlambatan dikirim');
+    if (res.request) toast(res.msg || 'Permintaan delay dikirim ke agen — menunggu persetujuan.', 'info');
+    else toast(departure ? `Delay ${minutes} menit dicatat` : 'Info keterlambatan dikirim');
   };
 
   return (
@@ -179,12 +190,23 @@ function DelayModal({ sid, mode = 'departure' }) {
         </div>
       ) : null}
 
+      {pendReq ? (
+        <div className="mt-3 bg-amber-50 border-2 border-amber-200 rounded-2xl p-3 text-[12px] font-semibold text-amber-900">
+          <b>Menunggu persetujuan agen:</b> +{s.delayReqMinutes} menit — {s.delayReqReason || '—'}.
+          <div className="flex items-center justify-between mt-2">
+            <span className="text-[11.5px] text-amber-700 font-bold">Diajukan {String(s.delayReqAt || '').slice(0, 16).replace('T', ' ')}</span>
+            <button onClick={pullback} className="text-[11.5px] font-extrabold bg-white text-amber-700 border border-amber-300 rounded-lg px-2 py-1 hover:bg-amber-100 active:scale-95 transition">Tarik Balik</button>
+          </div>
+        </div>
+      ) : null}
+
       {departure ? (
         <div className="mt-3">
           <label className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wide">Tambahan delay</label>
           <select value={minutes} onChange={(e) => setMinutes(Number(e.target.value))} className="mt-1 w-full text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring bg-white">
-            {[15, 30, 45, 60, 90, 120, 180].map((m) => <option key={m} value={m}>{m} menit</option>)}
+            {[15, 30, 45, 60, 90, 120, 180, 240, 300].map((m) => <option key={m} value={m}>{m} menit{m > 180 ? ' • perlu persetujuan agen' : ''}</option>)}
           </select>
+          <div className="text-[11px] text-slate-400 font-semibold mt-1">Sampai 180 menit langsung dicatat. Lebih dari itu jadi permintaan — agen yang menyetujui.</div>
         </div>
       ) : null}
 
@@ -790,6 +812,7 @@ export default function Tasks() {
           <button onClick={() => openModal(<ManifestModal sid={s.id} />)} className="badge bg-sky-100 text-sky-700 cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="users" className="w-3.5 h-3.5" /> Manifest ({bk.length})</button>
           {late && !mtActive ? <button onClick={finish} className="badge bg-blue-600 text-white cursor-pointer !text-[12px] py-1.5 active:scale-95 transition">Tandai Tiba</button> : null}
           {!late && !mtActive && (s.tripStatus === 'scheduled' || !s.tripStatus) ? <button onClick={() => openModal(<StartTripModal sid={s.id} />)} className="badge bg-green-500 text-white cursor-pointer !text-[12px] py-1.5 active:scale-95 transition">Berangkat →</button> : null}
+          {s.delayReqStatus === 'menunggu' && (s.tripStatus === 'scheduled' || !s.tripStatus) ? <button onClick={() => openModal(<DelayModal sid={s.id} mode="departure" />)} className="badge bg-amber-500 text-white cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="timer" className="w-3.5 h-3.5" /> Permintaan +{s.delayReqMinutes}m ⏳</button> : null}
           {!late && !mtActive && (s.tripStatus === 'scheduled' || !s.tripStatus) ? <button onClick={() => openModal(<DelayModal sid={s.id} mode="departure" />)} className="badge bg-amber-100 text-amber-700 cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="clock" className="w-3.5 h-3.5" /> Delay</button> : null}
           {!late && !mtActive && (s.tripStatus === 'scheduled' || !s.tripStatus) && bk.length ? <button onClick={() => openModal(<CancelTripModal sid={s.id} by="pengemudi" />)} className="badge bg-red-100 text-red-600 cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="calendar-x" className="w-3.5 h-3.5" /> Batalkan</button> : null}
           {!late && s.tripStatus === 'ontrip' ? <button onClick={finish} className="badge bg-blue-600 text-white cursor-pointer !text-[12px] py-1.5 active:scale-95 transition">Tiba di Tujuan</button> : null}

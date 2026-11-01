@@ -109,6 +109,18 @@ class MockSheet {
     }
     return this;
   }
+  /* Semantik Apps Script: kolom kosong disisipkan PADA posisi; kolom lama
+     bergeser ke kanan — dibutuhkan ensureSchema untuk migrasi sisip tengah. */
+  insertColumns(colPosition, howMany = 1) {
+    const idx = Math.max(0, Number(colPosition) - 1);
+    const n = Math.max(1, Math.round(Number(howMany) || 0) || 1);
+    const blanks = new Array(n).fill('');
+    for (let i = 0; i < this.rows.length; i++) {
+      const row = this.rows[i];
+      row.splice(Math.min(idx, row.length), 0, ...blanks);
+    }
+    return this;
+  }
   setNumberFormat() { return this; }
   setFrozenRows() { return this; }
   setColumnWidth() { return this; }
@@ -2652,6 +2664,88 @@ ok('sapu idempoten: tanpa baris basi → no-op, revisi lain tidak naik',
   res.data.revisions.payments === undefined && res.data.revisions.vouchers === undefined &&
   revOf('bookings') === settled.bookings && revOf('payments') === settled.payments &&
   revOf('vouchers') === settled.vouchers, res);
+
+/* ------------------------------------------------------------------ */
+/* 18) ensureSchema: sisip TENGAH kolom schedules (permintaan delay)   */
+/* ------------------------------------------------------------------ */
+
+console.log('\n== 18) ensureSchema sisip tengah kolom permintaan delay ==');
+const schedSheetMig = spread.getSheetByName('schedules');
+const migSchema = S.apiDescribeStore_().tables.find((t) => t.name === 'schedules');
+const INS_NAMES = ['delayReqMinutes', 'delayReqReason', 'delayReqNote', 'delayReqBy',
+  'delayReqAt', 'delayReqStatus', 'delayReqDriverId', 'delayApprovedBy'];
+const hdrNew = migSchema.headers;
+/* Header lama = skema baru dikurangi blok sisipan (urutan relatif utuh) —
+   kondisi persis seperti sheet produksi sebelum migrasi. */
+const hdrOld = hdrNew.filter((nm) => !INS_NAMES.includes(nm));
+const recOld = {
+  id: 's_mig', ord: 5, agencyId: 'ag1', routeId: 'r1', date: '2026-01-05',
+  time: '08:30', vehicleId: 'v1', price: 25000, status: 'open',
+  tripStatus: 'scheduled', createdAt: '2026-01-01T00:00:00.000Z',
+  delayedBy: 'BY_TAG', tripDelayUpdatedAt: 'TDU_TAG', departedAt: 'DEP_TAG',
+  cancelledBy: 'CXL_TAG', maintenanceReason: 'MT_TAG',
+};
+const rowOld = hdrOld.map((nm) => (recOld[nm] !== undefined ? recOld[nm] : ''));
+/* Baris header dilebarkan + 8 sel kosong di ujeung — jejak tulisan engine. */
+schedSheetMig.clearContents();
+schedSheetMig.rows = [hdrOld.concat(new Array(INS_NAMES.length).fill('')), rowOld];
+
+const ensureMid = S.ensureSchema_();
+ok('ensureSchema sisip tengah: terjalankan & tercatat',
+  ensureMid.ok === true &&
+  ensureMid.fixes.some((f) => f.indexOf('kolom tab schedules ditambah:') === 0), ensureMid);
+const hdrRow = schedSheetMig.getRange(1, 1, 1, hdrNew.length).getValues()[0];
+ok('header schedules sejajar penuh dengan skema baru',
+  JSON.stringify(hdrRow) === JSON.stringify(hdrNew), hdrRow);
+ok('blok sisipan persis setelah tripDelayUpdatedAt & sebelum departedAt',
+  hdrRow.indexOf('delayReqMinutes') === hdrRow.indexOf('tripDelayUpdatedAt') + 1 &&
+  hdrRow.indexOf('delayApprovedBy') === hdrRow.indexOf('departedAt') - 1,
+  { req: hdrRow.indexOf('delayReqMinutes'), dep: hdrRow.indexOf('departedAt') });
+const rowMid = schedSheetMig.rows[1];
+ok('data lama bergeser utuh mengikuti kolomnya',
+  rowMid[hdrNew.indexOf('departedAt')] === 'DEP_TAG' &&
+  rowMid[hdrNew.indexOf('cancelledBy')] === 'CXL_TAG' &&
+  rowMid[hdrNew.indexOf('delayedBy')] === 'BY_TAG' &&
+  rowMid[hdrNew.indexOf('tripDelayUpdatedAt')] === 'TDU_TAG' &&
+  rowMid[hdrNew.indexOf('maintenanceReason')] === 'MT_TAG' &&
+  rowMid[hdrNew.indexOf('price')] === 25000, rowMid);
+ok('kolom sisipan kosong pada baris data lama',
+  INS_NAMES.every((nm) => String(rowMid[hdrNew.indexOf(nm)]).trim() === ''));
+
+/* Idempoten: dipanggil ulang tidak menulis apa pun lagi. */
+const ensureMid2 = S.ensureSchema_();
+ok('ensureSchema sisip tengah idempoten (no-op)',
+  ensureMid2.ok === true &&
+  !ensureMid2.fixes.some((f) => f.indexOf('kolom tab schedules ditambah') === 0), ensureMid2);
+
+/* ------------------------------------------------------------------ */
+/* 19) ensureSchema: tambahan biasa di UJUNG skema (tanpa sisip)        */
+/* ------------------------------------------------------------------ */
+
+console.log('\n== 19) ensureSchema tambahan ujung kolom riwayat delay ==');
+const dhistSheet = spread.getSheetByName('schedule_delay_history');
+const dhistSchema = S.apiDescribeStore_().tables.find((t) => t.name === 'schedule_delay_history');
+const dhdrNew = dhistSchema.headers;
+const dhdrOld = dhdrNew.filter((nm) => nm !== 'approvedBy');
+const recChildOld = {
+  parent_id: 'sd_1', slot: 1, type: 'departure', at: '2026-01-05T00:00:00.000Z',
+  minutes: 30, until: '2026-01-05T08:30:00.000Z', reason: 'macet', note: '', by: 'sopir',
+};
+dhistSheet.clearContents();
+dhistSheet.rows = [dhdrOld, dhdrOld.map((nm) => (recChildOld[nm] !== undefined ? recChildOld[nm] : ''))];
+const ensureEnd = S.ensureSchema_();
+ok('ensureSchema tambahan ujung: kolom approvedBy ditulis',
+  ensureEnd.ok === true &&
+  ensureEnd.fixes.some((f) => f.indexOf('kolom tab schedule_delay_history ditambah: approvedBy') === 0), ensureEnd);
+ok('header riwayat delay sejajar skema',
+  JSON.stringify(dhistSheet.getRange(1, 1, 1, dhdrNew.length).getValues()[0]) ===
+  JSON.stringify(dhdrNew));
+const dRow = dhistSheet.rows[1];
+ok('isinya utuh, approvedBy kosong',
+  String(dRow[dhdrNew.indexOf('by')]) === 'sopir' &&
+  (dRow.length <= dhdrNew.length - 1 ||
+    String(dRow[dhdrNew.length - 1]).trim() === ''),
+  { row: dRow, hdr: dhdrNew });
 
 console.log('\n== Ringkasan ==');
 console.log('PASS: ' + passed + ', FAIL: ' + failed);

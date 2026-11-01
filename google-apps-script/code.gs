@@ -710,6 +710,9 @@ var API_MAIN_TABLES = {
       'tripStatus', 'createdAt',
       'delayUntil', 'n:delayMinutes', 'n:delayAddedMinutes', 'delayReason',
       'delayNote', 'delayedAt', 'delayedBy', 'tripDelayUpdatedAt',
+      /* Permintaan delay > 180 mnt (ditulis pengemudi) + persetujunya (agen). */
+      'n:delayReqMinutes', 'delayReqReason', 'delayReqNote', 'delayReqBy',
+      'delayReqAt', 'delayReqStatus', 'delayReqDriverId', 'delayApprovedBy',
       'departedAt', 'departedBy', 'earlyStartReason', 'arrivedAt',
       'b:lateCompletion',
       'cancelReason', 'cancelledBy', 'cancelledAt', 'reviewedAt',
@@ -721,7 +724,7 @@ var API_MAIN_TABLES = {
       { table: 'schedule_blocked_seats', path: 'blockedSeats', kind: 'list',
         scalar: true, cols: ['val'] },
       { table: 'schedule_delay_history', path: 'delayHistory', kind: 'list',
-        cols: ['type', 'at', 'n:minutes', 'until', 'reason', 'note', 'by'] },
+        cols: ['type', 'at', 'n:minutes', 'until', 'reason', 'note', 'by', 'approvedBy'] },
       { table: 'schedule_trip_delay_info', path: 'tripDelayInfo', kind: 'list',
         cols: ['type', 'at', 'reason', 'note', 'by'] },
       { table: 'schedule_seat_block_log', path: 'seatBlockLog', kind: 'list',
@@ -3844,6 +3847,10 @@ function apiSyncValidateSchedules_(ctx, target) {
     delayUntil: 1, delayReason: 1, delayNote: 1, delayMinutes: 1,
     delayAddedMinutes: 1, delayedAt: 1, delayedBy: 1, tripDelayUpdatedAt: 1,
     delayHistory: 1, tripDelayInfo: 1, seatBlockLog: 1, blockedSeats: 1,
+    /* Pengemudi boleh usulkan/tarik permintaan delay > 180 mnt. Hasilnya
+       (delayApprovedBy) milik agen — agen tak dibatasi field di atas. */
+    delayReqMinutes: 1, delayReqReason: 1, delayReqNote: 1, delayReqBy: 1,
+    delayReqAt: 1, delayReqStatus: 1, delayReqDriverId: 1,
     cancelReason: 1, cancelledAt: 1, cancelledBy: 1, reviewedAt: 1,
     reviewResult: 1, refundPct: 1
   };

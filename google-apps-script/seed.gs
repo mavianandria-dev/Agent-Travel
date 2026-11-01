@@ -109,6 +109,31 @@ function ensureSchema_() {
       var header = (sheet.getRange(1, 1, 1, lastCol).getDisplayValues()[0] || [])
         .slice(0, table.headers.length).join('|');
       if (header === table.headers.join('|')) return;
+      /* Kolom baru melintasi deploy tanpa reset data. Dua kasus dilayani:
+         (1) tambahan di UJUNG skema → cukup tulis nama yang belum ada;
+         (2) blok sisipan di TENGAH (mis. permintaan delay setelah
+         tripDelayUpdatedAt) → sisipkan kolom fisik via insertColumns()
+         supaya Google Sheet menggeser data lama otomatis ke kanan, lalu
+         tulis nama kolom baru di celahnya. Kolom kosong menyapu di ujung
+         (jejak tulisan berlebar) hanya diabaikan saat membandingkan. */
+      var real = (sheet.getRange(1, 1, 1, Math.max(1, sheet.getLastColumn())).getDisplayValues()[0] || [])
+        .map(function (v) { return String(v).trim(); });
+      while (real.length && real[real.length - 1] === '') real.pop();
+      if (real.length < table.headers.length) {
+        var d = 0;
+        while (d < real.length && real[d] === table.headers[d]) d++;
+        var remE = table.headers.slice(d);
+        var remR = real.slice(d);
+        var algn = remE.length > remR.length &&
+          remE.slice(remE.length - remR.length).join('|') === remR.join('|');
+        if (algn) {
+          var ins = remE.slice(0, remE.length - remR.length);
+          if (remR.length) sheet.insertColumns(d + 1, ins.length);
+          sheet.getRange(1, d + 1, 1, ins.length).setValues([ins]);
+          fixes.push('kolom tab ' + table.name + ' ditambah: ' + ins.join(', '));
+          return;
+        }
+      }
       if (table.name === 'agency_kyc_docs') {
         migrateDocsBlob_(ss, sheet, table, described.tables);
         fixes.push('agency_kyc_docs dimigrasi ke skema blob (dataUrl dipindah ke agency_kyc_doc_blob)');

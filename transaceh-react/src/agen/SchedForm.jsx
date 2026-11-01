@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { agencyById, routeById, vehicleById, vehName, driverForVehicle, backupDriverForVehicle, priceForAgency, routeOfferedTo, scheduleDateStatus, routeDurationMinutes, audit, DEFAULT_SERVICE } from '@/lib/domain.js';
+import { agencyById, routeById, vehicleById, vehName, driverForVehicle, backupDriverForVehicle, priceForAgency, routeOfferedTo, scheduleDateStatus, routeDurationMinutes, audit, editSchedule, DEFAULT_SERVICE } from '@/lib/domain.js';
 import { fmtRp, todayStr } from '@/lib/utils.js';
 import { Icon } from '@/components/ui.jsx';
 
@@ -122,8 +122,12 @@ function CalGrid({ cal, atCur, dates, today, statusFor, onShift, onToggle }) {
   );
 }
 
-export function SchedFormModal({ agId, onDone }) {
-  const { closeModal, toast, refresh } = useApp();
+export function SchedFormModal({ agId, onDone, sched }) {
+  /* Mode "Edit Jadwal": bila prop sched diberikan, form mengubah SATU
+     jadwal yang sudah ada (id tetap — booking menempel) alih-alih membuat
+     jadwal baru. Logika mutasi & notifikasi ada di domain.editSchedule(). */
+  const editing = !!sched;
+  const { closeModal, toast, refresh, user } = useApp();
   const routes = DB.load('routes', []).filter((r) => routeOfferedTo(r, agId));
   const allRoutes = DB.load('routes', []);
   const schedules = DB.load('schedules', []);
@@ -134,12 +138,17 @@ export function SchedFormModal({ agId, onDone }) {
   });
   const vehicleOptions = vs.filter((v) => routesForVehicle(v.id).length > 0);
 
-  const [vehicleId, setVehicleId] = useState('');
-  const [routeId, setRouteId] = useState('');
-  const [hh, setHh] = useState('07');
-  const [mm, setMm] = useState('00');
-  const [dates, setDates] = useState(() => new Set());
-  const [cal, setCal] = useState(() => { const t = new Date(); return { y: t.getFullYear(), m: t.getMonth() }; });
+  const [vehicleId, setVehicleId] = useState(editing ? sched.vehicleId : '');
+  const [routeId, setRouteId] = useState(editing ? sched.routeId : '');
+  const [hh, setHh] = useState(editing ? String(sched.time || '07:00').slice(0, 2) : '07');
+  const [mm, setMm] = useState(editing ? String(sched.time || '07:00').slice(3, 5) : '00');
+  const [dates, setDates] = useState(() => new Set(editing && sched.date ? [sched.date] : []));
+  /* Mode edit membuka kalender pada bulan jadwal, bukan bulan berjalan. */
+  const [cal, setCal] = useState(() => {
+    if (editing && sched.date) return { y: Number(sched.date.slice(0, 4)), m: Number(sched.date.slice(5, 7)) - 1 };
+    const t = new Date();
+    return { y: t.getFullYear(), m: t.getMonth() };
+  });
   const [nowMs] = useState(() => Date.now());
 
   const today = todayStr(0);
@@ -164,7 +173,9 @@ export function SchedFormModal({ agId, onDone }) {
     routeId,
     date,
     time,
-    schedules,
+    /* Jadwal yang diedit dikecualikan dari pembanding — tidak boleh
+       berbenturan dengan posisi lamanya sendiri. */
+    schedules: editing ? schedules.filter((x) => x.id !== sched.id) : schedules,
     routes: allRoutes,
     selectedDates: selSorted,
     now: at,
@@ -173,15 +184,18 @@ export function SchedFormModal({ agId, onDone }) {
   const invalidSelected = selStatuses.filter((x) => !['available', 'limited'].includes(x.st.state));
   const okCount = selStatuses.length - invalidSelected.length;
 
+  /* Saat mengganti armada/rute di mode edit, tanggal jadwal lama tetap
+     terpilih — umumnya yang berubah hanya armada/rutenya. */
+  const resetDates = () => setDates(new Set(editing && sched.date ? [sched.date] : []));
   const changeVehicle = (id) => {
     const first = routesForVehicle(id)[0];
     setVehicleId(id);
     setRouteId(first?.id || '');
-    setDates(new Set());
+    resetDates();
   };
   const changeRoute = (id) => {
     setRouteId(id);
-    setDates(new Set());
+    resetDates();
   };
   /* Ganti jam: cek ulang tanggal terpilih, lepas yang jadi tidak valid. */
   const applyTime = (nextHh, nextMm) => {
@@ -217,6 +231,9 @@ export function SchedFormModal({ agId, onDone }) {
       toast(st.reason || 'Tanggal tidak bisa dipilih', 'err');
       return;
     }
+    /* Mode edit: satu jadwal = satu tanggal — memilih tanggal menggantikan
+       pilihan sebelumnya, bukan menambah. */
+    if (editing) { setDates(new Set([key])); return; }
     setDates((prev) => { const n = new Set(prev); n.add(key); return n; });
   };
 
@@ -249,9 +266,36 @@ export function SchedFormModal({ agId, onDone }) {
     if (onDone) onDone();
   };
 
+  /* Mutasi satu jadwal yang sudah ada — validasi bentrok, reset delay
+     kondisional (hanya saat jam/tanggal berubah), pemberitahuan pemesan
+     aktif: semua di domain.editSchedule(). */
+  const saveEdit = () => {
+    if (!vehicleId) { toast('Pilih armada dulu', 'err'); return; }
+    if (!vs.some((v) => v.id === vehicleId)) { toast('Armada tidak valid untuk agen ini', 'err'); return; }
+    if (veh?.driverConflict) { toast('Data pengemudi armada ini bentrok - perbaiki data armada dulu', 'err'); return; }
+    if (!drvAuto) { toast('Armada belum punya pengemudi yang valid - lengkapi data armada dulu', 'err'); return; }
+    if (!route) { toast('Pilih rute dulu', 'err'); return; }
+    if (!routeOfferedTo(route, agId)) { toast('Rute tidak valid untuk agen ini', 'err'); return; }
+    if ((route.vehicleIds || []).length && !(route.vehicleIds || []).includes(vehicleId)) { toast('Armada tidak terdaftar di rute ini', 'err'); return; }
+    if (!selSorted.length) { toast('Pilih tanggal jadwal dulu', 'err'); return; }
+    const activeCount = DB.load('bookings', []).filter((b) => b.scheduleId === sched.id && ['pending', 'paid'].includes(b.status) && b.tripStatus !== 'cancelled').length;
+    if (activeCount > 0 && !window.confirm('Jadwal ini punya ' + activeCount + ' pemesan aktif. Perubahan akan menyertakan mereka dan penumpang diberi tahu. Lanjut?')) return;
+    const res = editSchedule(sched.id, { vehicleId, routeId, date: selSorted[0], time }, user?.name || user?.email || 'agen');
+    if (!res.ok) { toast(res.msg, 'err'); return; }
+    closeModal();
+    refresh();
+    toast('Jadwal diperbarui' + (res.notified ? ' • ' + res.notified + ' pemesan diberi tahu' : ''), 'ok');
+    if (onDone) onDone();
+  };
+
   return (
     <div className="p-6">
-      <h3 className="font-extrabold text-[17px]">Tambah Jadwal</h3>
+      <h3 className="font-extrabold text-[17px]">{editing ? 'Edit Jadwal' : 'Tambah Jadwal'}</h3>
+      {editing ? (
+        <div className="text-[11.5px] text-slate-500 font-semibold mt-0.5">
+          Mengubah satu jadwal ({fmtShort(sched.date)} • {sched.time}). Booking yang menempel ikut jadwal ini; mengubah jam/tanggal akan menginfokan pemesan aktif dan mereset estimasi delay lama.
+        </div>
+      ) : null}
 
       <div className="mt-3">
         <label className="text-[12px] font-extrabold">ARMADA <span className="text-sky-600">• pilih dulu</span></label>
@@ -351,7 +395,7 @@ export function SchedFormModal({ agId, onDone }) {
             </div>
           ) : null}
 
-          <button onClick={saveSched} className="mt-4 w-full bg-sky-600 text-white font-extrabold text-[14px] py-3 rounded-2xl">{!selSorted.length ? 'Simpan Jadwal' : okCount ? 'Simpan ' + okCount + ' Jadwal' : 'Tidak Ada Tanggal Valid'}</button>
+          <button onClick={editing ? saveEdit : saveSched} className="mt-4 w-full bg-sky-600 text-white font-extrabold text-[14px] py-3 rounded-2xl">{editing ? 'Simpan Perubahan' : (!selSorted.length ? 'Simpan Jadwal' : okCount ? 'Simpan ' + okCount + ' Jadwal' : 'Tidak Ada Tanggal Valid')}</button>
         </>
       ) : null}
     </div>

@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { agencyOf, routeById, vehicleById, vehName, driverById, takenSeats, schedSeatCap, schedReady, scheduleInHistory, scheduleHasTransactions, bookingsOf, audit, scheduleMaintenance, maintenancePeriodLabel } from '@/lib/domain.js';
-import { fmtRp } from '@/lib/utils.js';
+import { agencyOf, routeById, vehicleById, vehName, driverById, takenSeats, schedSeatCap, schedReady, scheduleInHistory, scheduleHasTransactions, bookingsOf, audit, scheduleMaintenance, maintenancePeriodLabel, schedById, scheduleDepartureMs, resolveDelayRequest } from '@/lib/domain.js';
+import { fmtRp, fmtClock } from '@/lib/utils.js';
 import { Icon, BadgeStatus, fmtDate } from '@/components/ui.jsx';
 import { ManifestModal } from './Bookings.jsx';
 import { SchedFormModal } from './SchedForm.jsx';
@@ -21,9 +21,13 @@ export default function Schedules({ ag }) {
   const upcoming = all.filter((s) => !scheduleInHistory(s));
   const history = all.filter(scheduleInHistory);
   const missed = all.filter((s) => s.tripStatus === 'missed' && !s.reviewedAt);
+  /* Permintaan delay > 180 mnt dari pengemudi yang menunggu keputusan agen. */
+  const reqList = all.filter((s) => s.delayReqStatus === 'menunggu');
   const list = tab === 'upcoming' ? upcoming : history;
 
   const schedForm = () => openModal(<SchedFormModal agId={agency.id} />);
+  /* Edit jadwal dasar: id dipertahankan di SchedFormModal mode sched. */
+  const editSched = (sid) => openModal(<SchedFormModal agId={agency.id} sched={schedById(sid)} />);
   const manifest = (sid) => openModal(<ManifestModal sid={sid} />);
   const blockSeat = (sid) => openModal(<BlockSeatModal sid={sid} by="agen" />);
   const cancelTrip = (sid) => openModal(<CancelTripModal sid={sid} by="agen" />);
@@ -47,6 +51,12 @@ export default function Schedules({ ag }) {
         <button onClick={() => setTab('history')} className="text-[12px] font-extrabold text-amber-700 hover:text-amber-900">Lihat Riwayat</button>
       </div> : null}
 
+      {reqList.length ? <div className="mt-3 bg-amber-500 rounded-2xl px-3.5 py-2.5 flex items-center gap-2 text-white">
+        <Icon name="timer" className="w-4 h-4 shrink-0" />
+        <span className="text-[12.5px] font-extrabold flex-1">{reqList.length} permintaan delay keberangkatan menunggu persetujuan agen.</span>
+        <button onClick={() => setTab('upcoming')} className="text-[12px] font-extrabold bg-white/15 hover:bg-white/25 rounded-xl px-3 py-1.5 outline outline-white/40">Tinjau</button>
+      </div> : null}
+
       <div className="flex gap-2 mt-3">
         <button onClick={() => setTab('upcoming')} className={`text-[12px] font-extrabold px-3.5 py-2 rounded-xl ${tab === 'upcoming' ? 'bg-[#0b2447] text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>Akan Datang ({upcoming.length})</button>
         <button onClick={() => setTab('history')} className={`text-[12px] font-extrabold px-3.5 py-2 rounded-xl ${tab === 'history' ? 'bg-[#0b2447] text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>Riwayat ({history.length})</button>
@@ -66,12 +76,14 @@ export default function Schedules({ ag }) {
           const mt = scheduleMaintenance(s);
           const historical = tab === 'history' || ['ontrip', 'arrived', 'missed'].includes(s.tripStatus);
           return (
-            <tr key={s.id}><td className="font-bold">{fmtDate(s.date)}<br /><span className="text-sky-600">{s.time}</span> {!bookedIds.has(s.id) ? <span className="badge bg-slate-200 text-slate-700 ml-1">Tidak ada pemesan</span> : null} {mt ? <span className="badge bg-red-100 text-red-700 italic ml-1">{mt.legacy ? 'MAINTENANCE' : 'MAINTENANCE ' + maintenancePeriodLabel(mt)}</span> : null} {s.tripStatus !== 'scheduled' ? <BadgeStatus st={s.tripStatus} /> : null}{s.tripStatus === 'scheduled' && s.delayUntil && new Date(s.delayUntil).getTime() > Date.now() ? <span className="badge bg-amber-100 text-amber-700 ml-1" title={'Estimasi ' + s.delayUntil}>Delay {s.delayMinutes}m</span> : null}</td>
+            <tr key={s.id}><td className="font-bold">{fmtDate(s.date)}<br /><span className="text-sky-600">{s.time}</span> {!bookedIds.has(s.id) ? <span className="badge bg-slate-200 text-slate-700 ml-1">Tidak ada pemesan</span> : null} {mt ? <span className="badge bg-red-100 text-red-700 italic ml-1">{mt.legacy ? 'MAINTENANCE' : 'MAINTENANCE ' + maintenancePeriodLabel(mt)}</span> : null} {s.tripStatus !== 'scheduled' ? <BadgeStatus st={s.tripStatus} /> : null}{s.tripStatus === 'scheduled' && s.delayUntil && new Date(s.delayUntil).getTime() > Date.now() ? <span className="badge bg-amber-100 text-amber-700 ml-1" title={'Estimasi ' + s.delayUntil}>Delay {s.delayMinutes}m</span> : null}{s.delayReqStatus === 'menunggu' ? <span className="badge bg-amber-500 text-white ml-1" title={'Permintaan +' + s.delayReqMinutes + ' mnt oleh ' + (s.delayReqBy || 'pengemudi')}><Icon name="timer" className="w-3 h-3 inline pointer-events-none" /> Permintaan {s.delayReqMinutes}m</span> : null}</td>
               <td className="font-semibold">{r?.from} → {r?.to}</td>
               <td className="text-[12.5px] font-medium">{vehName(v)}{v?.plate ? <span className="text-slate-400"> • {v.plate}</span> : null}<br /><span className="text-slate-500">{drvNama}</span><br /><span className="text-[11.5px] text-slate-400">Pengganti: {back || '—'}</span></td>
               <td className="font-extrabold">{fmtRp(s.price)}</td>
               <td><div className="flex items-center gap-1.5"><div className="w-16 h-2 bg-slate-100 rounded-full"><div className="h-full bg-sky-500 rounded-full" style={{ width: (tk.booked.length / capN) * 100 + '%' }}></div></div><b className="text-[12px]">{tk.booked.length}/{capN}</b>{tk.blocked.length ? <span className="badge bg-amber-100 text-amber-700" title="Kursi ditutup">{tk.blocked.length} tutup</span> : null}</div></td>
               <td><div className="flex gap-1.5"><button onClick={() => manifest(s.id)} title="Manifest" className="bg-sky-100 text-sky-700 p-2 rounded-lg"><Icon name="users" className="w-4 h-4" /></button>
+                {!historical && !mt ? <button onClick={() => editSched(s.id)} title="Edit jadwal (jam/tanggal/armada/rute)" className="bg-sky-50 text-sky-600 p-2 rounded-lg"><Icon name="pencil" className="w-4 h-4" /></button> : null}
+                {s.delayReqStatus === 'menunggu' && !historical ? <button onClick={() => openModal(<DelayRequestModal sid={s.id} />)} title="Tinjau permintaan delay" className="bg-amber-500 text-white p-2 rounded-lg"><Icon name="timer" className="w-4 h-4" /></button> : null}
                 {!historical && !mt ? <button onClick={() => blockSeat(s.id)} title="Tutup/buka kursi" className="bg-amber-100 text-amber-700 p-2 rounded-lg"><Icon name="ban" className="w-4 h-4" /></button> : null}
                 {!historical && hasBooking && !mt ? <button onClick={() => cancelTrip(s.id)} title="Batalkan jadwal (refund 100%)" className="bg-red-50 text-red-600 p-2 rounded-lg"><Icon name="calendar-x" className="w-4 h-4" /></button> : null}
                 {!historical && !hasBooking && !mt ? (hasTransactions
@@ -81,6 +93,63 @@ export default function Schedules({ ag }) {
         })}
       </tbody></table></div>
       {list.length === 0 ? <div className="text-center text-[13px] font-semibold text-slate-400 py-7">{tab === 'upcoming' ? 'Belum ada jadwal mendatang.' : 'Belum ada riwayat jadwal.'}</div> : null}
+    </div>
+  );
+}
+
+/* Modal keputusan atas permintaan delay keberangkatan > 180 menit.
+   Agen boleh mengoreksi jumlah menit saat menyetujui; menolak memakai
+   catatan opsional yang diteruskan ke pengemudi. Guard domain dijalankan
+   ulang pada saat keputusan dibuat (resolveDelayRequest). */
+function DelayRequestModal({ sid }) {
+  const { closeModal, toast, refresh, user } = useApp();
+  const [mins, setMins] = useState('');
+  const [note, setNote] = useState('');
+  const s = schedById(sid);
+  if (!s || s.delayReqStatus !== 'menunggu') return <div className="p-6 font-bold text-slate-500">Permintaan delay sudah tidak ada</div>;
+  const reqM = Number(s.delayReqMinutes) || 0;
+  const value = Number(mins) > 0 ? Number(mins) : reqM;
+  /* Estimasi baru: dasar = max(sekarang, jam dasar, delay aktif) + menit. */
+  const original = scheduleDepartureMs(s);
+  const curUntil = s.delayUntil ? new Date(s.delayUntil).getTime() : NaN;
+  const base = Math.max(Date.now(), Number.isFinite(original) ? original : 0, Number.isFinite(curUntil) ? curUntil : 0);
+  const decide = (d) => {
+    const res = resolveDelayRequest(sid, d, value, note, user?.name || user?.email || 'agen');
+    if (!res.ok) {
+      toast(res.msg, res.requestInvalid ? 'warn' : 'err');
+      closeModal();
+      refresh();
+      return;
+    }
+    closeModal();
+    refresh();
+    toast(res.rejected ? 'Permintaan delay ditolak' : 'Delay ' + value + ' menit diterapkan', res.rejected ? 'info' : 'ok');
+  };
+  return (
+    <div className="p-6">
+      <div className="flex items-center justify-between">
+        <h3 className="font-extrabold text-[16px] flex items-center gap-2"><Icon name="timer" className="w-5 h-5 text-amber-600" />Permintaan Delay</h3>
+        <button onClick={closeModal} className="text-slate-400"><Icon name="x" className="w-5 h-5" /></button>
+      </div>
+      <div className="mt-3 bg-amber-50 border-2 border-amber-200 rounded-2xl p-3.5 text-[12.5px] font-semibold space-y-1">
+        <div><span className="text-slate-400">Diajukan oleh</span><br /><b>{s.delayReqBy || 'pengemudi'}</b> • {String(s.delayReqAt || '').slice(0, 16).replace('T', ' ')}</div>
+        <div><span className="text-slate-400">Jadwal dasar</span> <b>{fmtDate(s.date)} • {s.time}</b></div>
+        <div><span className="text-slate-400">Diminta</span> <b className="text-amber-700">+{reqM} menit</b> → estimasi <b>{fmtClock(new Date(base + value * 60000).toISOString())}</b></div>
+        <div><span className="text-slate-400">Alasan</span> <b>{s.delayReqReason || '—'}</b></div>
+        {s.delayReqNote ? <div><span className="text-slate-400">Catatan</span> {s.delayReqNote}</div> : null}
+      </div>
+      <div className="mt-3">
+        <label className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wide">Koreksi menit (opsional)</label>
+        <input type="number" min="1" value={mins} onChange={(e) => setMins(e.target.value)} placeholder={'Pakai ' + reqM + ' menit'} className="mt-1 w-full text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" />
+      </div>
+      <div className="mt-3">
+        <label className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wide">Catatan keputusan (opsional)</label>
+        <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Contoh: tolak, penumpang sudah dijemput" className="mt-1 w-full text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" />
+      </div>
+      <div className="flex gap-2 mt-4">
+        <button onClick={() => decide('setuju')} className="flex-1 bg-green-500 text-white font-extrabold text-[13px] py-3 rounded-2xl">Setuju (+{value} mnt)</button>
+        <button onClick={() => decide('tolak')} className="flex-1 bg-red-50 text-red-600 font-extrabold text-[13px] py-3 rounded-2xl">Tolak</button>
+      </div>
     </div>
   );
 }
