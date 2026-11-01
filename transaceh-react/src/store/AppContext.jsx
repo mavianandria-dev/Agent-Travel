@@ -6,7 +6,7 @@ import { clearCheckoutDraft } from '@/lib/checkoutDraft.js';
 import { IS_SHEETS } from '@/lib/runtime.js';
 import { signOutRemote, loadSnapshot } from '@/lib/remote.js';
 import { DB } from '@/lib/db.js';
-import { clearToken, getToken } from '@/lib/sheetsApi.js';
+import { SESSION_EXPIRED_KEY, clearToken, getToken } from '@/lib/sheetsApi.js';
 
 const AppCtx = createContext(null);
 export const useApp = () => useContext(AppCtx);
@@ -82,6 +82,28 @@ export function AppProvider({ children }) {
     }, 420);
     return () => clearTimeout(t);
   }, []);
+
+  /* "Tidak logout diam-diam": getToken membuang kartu sesi yang tamat tanpa
+     pesan. Dua pintu menampilkannya sebagai pemberitahuan jelas — (1) saat
+     kode masih hidup, sheetsApi menembak event 'at_session_expired';
+     (2) saat token tamat ketika aplikasi tertutup dibanding saat dibuka
+     berikutnya, penanda di penyimpanan dibaca pembukaan ini. Berlaku juga
+     untuk build mobile/apk karena memakai kode ini — memberi sekali per
+     kejadian, lalu penanda dihapus. */
+  useEffect(() => {
+    if (!IS_SHEETS) return undefined;
+    const notify = () => {
+      try {
+        if (localStorage.getItem(SESSION_EXPIRED_KEY) === '1') {
+          localStorage.removeItem(SESSION_EXPIRED_KEY);
+          toast('Sesi berakhir. Silakan masuk lagi.', 'warn');
+        }
+      } catch { /* penyimpanan tak tersedia — abaikan */ }
+    };
+    window.addEventListener('at_session_expired', notify);
+    notify();
+    return () => window.removeEventListener('at_session_expired', notify);
+  }, [toast]);
 
   const openModal = useCallback((node) => setModal(node), []);
   const closeModal = useCallback(() => setModal(null), []);

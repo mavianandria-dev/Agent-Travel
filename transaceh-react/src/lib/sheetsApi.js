@@ -8,6 +8,10 @@ import { SHEETS_URL, assertSheetsConfig } from './runtime.js';
 
 const TOKEN_KEY = 'at_sheets_token';
 const TOKEN_EXP_KEY = 'at_sheets_token_exp';
+/* Penanda "sesi tamat": getToken membuang kartu kedaluwarsa tanpa pesan,
+   jadi antarmuka perlu penanda untuk menampilkan pemberitahuan sekali —
+   jangan membiarkan pengguna (mobile/apk nantinya) dibuang tanpa penjelasan. */
+export const SESSION_EXPIRED_KEY = 'at_session_expired';
 const TIMEOUT_MS = 30000;
 
 export class ApiError extends Error {
@@ -28,6 +32,12 @@ export function getToken() {
       const n = Number(rawExp);
       const expMs = Number.isFinite(n) ? (n < 1e12 ? n * 1000 : n) : Date.parse(rawExp);
       if (Number.isFinite(expMs) && expMs <= Date.now()) {
+        /* Tandai agar antarmuka menampilkan pemberitahuan "Sesi berakhir" —
+           jatuh ke tamu tidak lagi diam-diam. */
+        try {
+          localStorage.setItem(SESSION_EXPIRED_KEY, '1');
+          window.dispatchEvent(new Event('at_session_expired'));
+        } catch { /* penyimpanan tak tersedia — abaikan */ }
         clearToken();
         return '';
       }
@@ -94,6 +104,14 @@ export async function call(action, payload = {}) {
     const err = body && body.error ? body.error : {};
     throw new ApiError(err.code || 'UNKNOWN', err.message || 'Permintaan gagal.', res.status);
   }
+  /* Sesi berluncur: bila server menerbitkan ulang kartu di jawaban ini,
+     salin begitu diterima — seluruh pemanggilan call() ikut patuh tanpa
+     jalur khusus; jawaban login/register efeknya sama dengan penulisan
+     kartu eksplisit milik pemanggilnya. */
+  try {
+    const d = body.data;
+    if (d && d.token && d.expiresAt) setToken(d.token, d.expiresAt);
+  } catch { /* penyimpanan penuh / mode privat — abaikan */ }
   return body.data;
 }
 

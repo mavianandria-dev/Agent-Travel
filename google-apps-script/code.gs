@@ -459,6 +459,23 @@ function apiTokenVerify_(token, secret) {
   return json;
 }
 
+/* Sesi berluncur: token stateless tidak bisa "dipanjangkan" di tempat, jadi
+   bila sisa umurnya kurang dari setengah TTL, terbitkan ULANG kartu lalu
+   simpan di req._renew — apiDispatch_ menggabungkannya ke payload jawaban
+   dan klien menyalinnya begitu diterima. Efeknya pemakai rutin tidak lagi
+   ke-logout diam-diam (sesi tamat 12 jam); kartu hanya mati bila akun
+   dibiarkan lama. Keamanan tetap: verifikasi tanda tangan full dan pv
+   diterbitkan ulang dari catatan user, bukan dari kartu lama. */
+function apiSlidingRenewal_(req, payload, user, cfg) {
+  try {
+    var now = apiNowSeconds_();
+    if (Number(payload.exp || 0) - now < Number(cfg.ttl || 0) / 2) {
+      var issued = apiIssueToken_(user, cfg);
+      req._renew = { token: issued.token, expiresAt: issued.exp };
+    }
+  } catch (err) { /* best effort — jangan menggagalkan aksi */ }
+}
+
 /* ------------------------------------------------------------------ */
 /* Parsing request                                                     */
 /* ------------------------------------------------------------------ */
@@ -1728,6 +1745,8 @@ function apiAuthedUser_(req, cfg) {
   if (accountStatus !== 'active' && !(user.role === 'agen' && accountStatus === 'pending')) {
     throw apiError_('ACCOUNT_BLOCKED', 'Akun tidak aktif.');
   }
+  /* Kartu sah + akun aktif → berpas cukup untuk berluncur. */
+  apiSlidingRenewal_(req, payload, user, cfg);
   return user;
 }
 
@@ -1815,6 +1834,19 @@ function apiDispatch_(req) {
     // tetap harus benar (mencegah salah konfigurasi yang membingungkan).
     throw apiError_('PROXY_FORBIDDEN', 'Proxy key tidak valid.');
   }
+  var result = apiDispatchAction_(req, cfg);
+  /* Sesi berluncur: bila aksi terautentikasi tadi menerbitkan ulang kartu
+     (req._renew), satukan ke payload jawaban — jawaban yang sudah mengirim
+     kartu sendiri (login/register) TIDAK ditimpa. */
+  if (result && result.ok && result.data && typeof result.data === 'object' &&
+      req._renew && result.data.token == null) {
+    result.data.token = req._renew.token;
+    result.data.expiresAt = req._renew.expiresAt;
+  }
+  return result;
+}
+
+function apiDispatchAction_(req, cfg) {
   switch (req.action) {
     case 'login': return apiLogin_(req, cfg);
     case 'register': return apiRegister_(req, cfg);
@@ -2046,6 +2078,9 @@ function apiBootstrap_(req, cfg) {
     if (bootStatus !== 'active' && !(user.role === 'agen' && bootStatus === 'pending')) {
       throw apiError_('ACCOUNT_BLOCKED', 'Akun tidak aktif.');
     }
+    /* Sesi berluncur juga di sini — bootstrap adalah panggilan paling rutin
+       saat aplikasi dibuka; kartu pemakai aktif ikut segar tiap pembukaan. */
+    apiSlidingRenewal_(req, tokenPayload, user, cfg);
   }
   var role = user ? String(user.role || '') : 'publik';
   if (['publik', 'pelanggan', 'agen', 'pengemudi', 'superadmin'].indexOf(role) < 0) {
