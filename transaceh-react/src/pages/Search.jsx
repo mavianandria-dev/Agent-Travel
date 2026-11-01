@@ -141,15 +141,20 @@ export function PaymentModal({ booking, onDone }) {
         return;
       }
       const ms = new Date(b.holdExpiry).getTime() - Date.now();
-      if (ms <= 0) {
-        /* Hold 5 menit habis tanpa pelunasan: pesanan dibatalkan otomatis
-           (kursi lepas, voucher kembali — lewat sapuan server/cache). Tetap
-           di langkah-5: wizard utuh, klik Bayar lagi memulai pesanan baru
-           dengan waktu segar. */
+      if (ms <= 0 && !payingRef.current) {
+        /* Hold 5 menit habis tanpa pelunasan: pesanan dibatalkan SEKETIKA
+           (kursi lepas di proyeksi, voucher kembali, Tiket Saya menampilkan
+           batal) dan pelanggan WAJIB memilih kursi kembali — wizard dibawa
+           balik ke langkah Pilih Kursi dengan pilihan dikosongkan. Bayar
+           ulang otomatis di kursi yang sama tidak lagi mungkin: kursi bisa
+           saja sudah ditalap orang lain selama jeda. */
         clearInterval(iv);
         closeModal();
-        toast('Hold kedaluwarsa — pesanan batal otomatis. Klik Bayar untuk pesan ulang', 'err');
+        cancelBookingDomain(b.id, { reason: 'Hold kedaluwarsa — pesanan dibatalkan otomatis', by: 'sistem' });
+        clearCheckoutDraft();
+        toast('Hold kedaluwarsa — pesanan batal. Pilih kursi kembali', 'err');
         refresh();
+        setBw((cur) => ({ ...cur, step: 4, seats: [], passengers: [] }));
         return;
       }
       setNow(Date.now());
@@ -183,8 +188,20 @@ export function PaymentModal({ booking, onDone }) {
     const s = schedById(b.scheduleId);
     if (!canPayBooking(b, s)) {
       closeModal();
-      toast('Pembayaran ditutup — jadwal sudah berangkat/dibatalkan atau hold kedaluwarsa.', 'err');
-      refresh();
+      /* Penyebab dibedakan: hold kedaluwarsa → perlakuan sama dengan denyut
+         waktu — balik langkah Pilih Kursi, pilihan dikosongkan wajib dipilih
+         ulang. Jadwal berangkat/dibatalkan/maintenance → perilaku lama. */
+      const holdDead = b.holdExpiry && new Date(b.holdExpiry).getTime() <= Date.now();
+      if (holdDead) {
+        cancelBookingDomain(b.id, { reason: 'Hold kedaluwarsa — pesanan dibatalkan otomatis', by: 'sistem' });
+        clearCheckoutDraft();
+        toast('Hold kedaluwarsa — pesanan batal. Pilih kursi kembali', 'err');
+        refresh();
+        setBw((cur) => ({ ...cur, step: 4, seats: [], passengers: [] }));
+      } else {
+        toast('Pembayaran ditutup — jadwal sudah berangkat/dibatalkan atau hold kedaluwarsa.', 'err');
+        refresh();
+      }
       return;
     }
     /* Mode Sheets menulis secara optimistis: cache berubah dulu, server
@@ -212,10 +229,15 @@ export function PaymentModal({ booking, onDone }) {
     payingRef.current = false;
     if (res && res.ok === false) {
       /* Tulisan ditolak server dan cache di-rollback — penjelasan lengkap
-         sudah melayang sebagai toast dari handler sync. Tutup modal, tetap
-         di langkah-5: wizard utuh, pesanan bisa dibuat ulang. */
+         sudah melayang sebagai toast dari handler sync (alasan persisnya
+         bisa hold kedaluwarsa menurut jam server, revisi koleksi, atau
+         sesi habis). Pesanan tetap belum lunas: wizard dibawa balik ke
+         langkah Pilih Kursi dengan pilihan dikosongkan — wajib memilih
+         ulang, jangan ditinggal di layar ringkasan yang basi. */
       closeModal();
+      clearCheckoutDraft();
       refresh();
+      setBw((cur) => ({ ...cur, step: 4, seats: [], passengers: [] }));
       return;
     }
     closeModal();

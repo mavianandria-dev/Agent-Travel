@@ -2339,8 +2339,37 @@ export function createDriverBooking(sid, { passengers = [], seats = [], driverId
     return { ok: false, msg: 'Penjualan tiket pengemudi dibuka ' + DRIVER_SALE_WINDOW_HOURS + ' jam sebelum keberangkatan — jadwal ini baru bisa dijual ' + openAt + ' WIB.' };
   }
 
+  /* Guard milik-sendiri — menjenguk doCheckout pelanggan: booking driver
+     selalu userEmail:null, satu-satunya identitasnya createdBy = driver.id.
+     1. Konflik kursi ORANG lain dicek DULU dengan milik sendiri DIKECUALIKAN
+        — tabrakan terdeteksi tanpa membatalkan hold sendiri terlebih dulu.
+     2. Pesanan pending sendiri yang kursinya SAMA dan hold-nya masih sah
+        dipakai ulang → langsung layar bayar dengan hitungan hold lama
+        (tidak reset, tidak booking kembar).
+     3. Pilihan berbeda / hold basi → semua pending tanpa batas tiruan
+        milik pengemudi pada jadwal ini dibatalkan dulu (kursi lepas),
+        lalu pesanan baru dibuat tanpa cek ulang.
+     4. taken/available dikeluarkan kursi milik sendiri → ghost-hold basi
+        milik sendiri (belum tergali dari proyeksi Sheets) tidak memblokir
+        pembeli dirinya sendiri. */
+  const drvOwn = driverId ? DB.load('bookings', []).filter(
+    (x) => x.status === 'pending' && String(x.createdBy || '') === String(driverId) && String(x.scheduleId) === String(s.id)
+  ) : [];
+  const ownSeats = new Set(drvOwn.flatMap((x) => x.seats || []));
+  const seatsReq = [...new Set(seats)];
   const tk = takenSeats(s.id);
-  const taken = new Set([...tk.paid, ...tk.hold, ...(s.blockedSeats || []), ...tk.inactive]);
+  const otherTaken = [...tk.paid, ...tk.hold, ...(s.blockedSeats || [])].filter((x) => !ownSeats.has(x));
+  const clashSeats = seatsReq.filter((st) => otherTaken.includes(st));
+  if (clashSeats.length) return { ok: false, msg: 'Kursi ' + clashSeats.join(', ') + ' sudah diambil orang lain — pilih ulang' };
+  const reuse = drvOwn.find((x) =>
+    (x.seats || []).slice().sort().join(',') === seatsReq.slice().sort().join(',') &&
+    canPayBooking(x, s)
+  );
+  if (reuse) return { ok: true, booking: reuse, reuse: true };
+  drvOwn.forEach((x) => cancelBooking(x.id, { reason: 'Pesanan diganti saat penjualan langsung pengemudi', by: 'pengemudi' }));
+  const taken = new Set(
+    [...tk.paid, ...tk.hold, ...(s.blockedSeats || []), ...tk.inactive].filter((x) => !ownSeats.has(x))
+  );
   const layout = vehLayout(vehicleById(s.vehicleId));
   const available = layout.filter((c) => c.type === 'seat' && c.sid && !taken.has(c.sid)).map((c) => c.sid);
 

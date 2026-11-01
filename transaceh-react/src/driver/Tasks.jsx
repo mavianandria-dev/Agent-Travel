@@ -4,6 +4,7 @@ import { DB } from '@/lib/db.js';
 import { routeById, vehicleById, bookingsOf, vehName, vehLayout, schedSeatCap, takenSeats, seatsLeft, audit, setScheduleTripStatus, scheduleNeedsReview, scheduleInHistory, schedById, setScheduleDelay, reportTripDelay, createDriverBooking, confirmDriverBookingPayment, splitFare, tripProgress, bookedPassengers, departureTiming, scheduleIsPast, scheduleMaintenance, maintenancePeriodLabel, scheduleEffectiveDepartureMs, DRIVER_SALE_WINDOW_HOURS } from '@/lib/domain.js';
 import { IS_SHEETS } from '@/lib/runtime.js';
 import { seatInfo } from '@/lib/sheetsApi.js';
+import { refreshSnapshot } from '@/lib/remote.js';
 import { fmtClock, fmtRp } from '@/lib/utils.js';
 import { Icon, Empty, BadgeStatus, fmtDate, CabinGrid } from '@/components/ui.jsx';
 import { FareChain } from '@/components/FareChain.jsx';
@@ -268,12 +269,15 @@ function DriverBookingModal({ sid }) {
   const v = vehicleById(s?.vehicleId ?? null);
   const r = routeById(s?.routeId ?? null);
   const tk = takenSeats(s?.id ?? '');
-  /* Kursi milik sendiri: pesanan pending akun pengemudi ini pada jadwal itu —
-     cek server & peta memperlakukannya bukan "kursi orang lain" (sama dengan
-     wizard pelanggan; hold basi milik sendiri tidak memblokir dirinya). */
+  /* Kursi milik sendiri: pesanan pending PENJUALAN LANGSUNG pengemudi ini
+     pada jadwal itu. Booking driver selalu userEmail:null — satu-satunya
+     identitasnya adalah createdBy = driver.id (BUKAN email), jadi kunci
+     milik-sendiri WAJIB lewat createdBy; cek server & peta memperlakukan
+     hasilnya bukan "kursi orang lain" (hold basi milik sendiri pun tidak
+     memblokir dirinya sendiri — dibersihkan createDriverBooking). */
   const own = new Set(
     DB.load('bookings', [])
-      .filter((x) => x.status === 'pending' && x.userEmail === user.email && String(x.scheduleId) === String(s?.id ?? ''))
+      .filter((x) => x.status === 'pending' && String(x.createdBy || '') === String(driver?.id || '') && String(x.scheduleId) === String(s?.id ?? ''))
       .flatMap((x) => x.seats || [])
   );
   /* Overlay hasil cek seatinfo (state, bukan DB): jawaban segar MEMISAHKAN
@@ -288,7 +292,11 @@ function DriverBookingModal({ sid }) {
     (!freshPay || !freshPay.includes(x)) && (!freshHold || !freshHold.includes(x)));
   /* Terisi (abu) = lunas murni saja — fallback proyeksi gabungan lama. */
   const gridPaid = (freshPay ? freshPay : tk.paid).filter((x) => !own.has(x));
-  const taken = new Set([...tk.paid, ...tk.hold, ...freshAll, ...(s?.blockedSeats || []), ...tk.inactive]);
+  /* taken untuk hitungan kursi kosong (bukan pencekalan klik): hold sendiri
+     dikeluarkan — penumpang sendiri tidak mengurangi kursi yang bisa dijual. */
+  const taken = new Set(
+    [...tk.paid, ...tk.hold, ...freshAll, ...(s?.blockedSeats || []), ...tk.inactive].filter((x) => !own.has(x))
+  );
   const layout = vehLayout(v);
   const seatOrder = layout.filter((c) => c.type === 'seat' && c.sid).map((c) => c.sid);
   const available = seatOrder.filter((st) => !taken.has(st));
@@ -308,19 +316,83 @@ function DriverBookingModal({ sid }) {
   const [freshTaken, setFreshTaken] = useState(null);
   const seatsRef = useRef(seats);
   useEffect(() => { seatsRef.current = seats; }, [seats]);
+  /* Tarikan pasca-tabrakan — pola sama dengan wizard pelanggan: seatinfo
+     sudah menjawab peta (overlay kuning), snapshot penuh mengikuti di
+     belakang supaya proyeksi terisi & kuota segar juga. Dijaring paling 1x
+     per 15 dtk. Ref hook di atas early-return (aturan hooks). */
+  const clashPullRef = useRef(0);
+  /* Peta berjalan sendiri (mode Sheets): cek PERTAMA langsung saat modal
+     terbuka lalu penyapuan 20 dtk (quiet) — selama pengemudi mengetik, peta
+     tidak basi; kursi terpilih yang baru ditalap orang disapu otomatis.
+     Interval dibersihkan saat modal unmount; tab tersembunyi diskip. */
+  useEffect(() => {
+    if (!s || !IS_SHEETS) return undefined;
+    runSeatCheck({ quiet: true });
+    const iv = setInterval(() => {
+      if (document.hidden) return;
+      runSeatCheck({ quiet: true });
+    }, 20000);
+    return () => clearInterval(iv);
+  }, [s?.id]);
+  /* Layar bayar dikendalikan denyut per detik — pola sama dengan modal
+     pembayaran pelanggan: pesanan hilang dari cache atau hold kedaluwarsa
+     (belum lunas) → layar bayar dibalik ke langkah Pilih Kursi dengan
+     pilihan dikosongkan — wajib memilih kursi kembali, tak ada layar bayar
+     yang basi. Status lunas ('paid'/'done') diabaikan: keberhasilan
+     ditangani pay() sendiri. Hook di atas early-return (aturan hooks). */
+  useEffect(() => {
+    if (step !== 2 || !made) return undefined;
+    const backToSeatPick = (why) => {
+      setMade(null);
+      setStep(1);
+      setSeats([]);
+      setPax([]);
+      refresh();
+      toast(why, 'err');
+    };
+    const iv = setInterval(() => {
+      const b = DB.load('bookings', []).find((x) => x.id === made.id);
+      if (!b) { backToSeatPick('Pesanan gagal disimpan — pilih kursi kembali'); return; }
+      if (b.status === 'cancelled') { backToSeatPick('Pesanan dibatalkan — pilih kursi kembali'); return; }
+      if (b.status !== 'pending') return;
+      if (new Date(b.holdExpiry).getTime() - Date.now() <= 0) {
+        backToSeatPick('Hold kedaluwarsa — pilih kursi kembali');
+      }
+    }, 1000);
+    return () => clearInterval(iv);
+  }, [step, made?.id]);
   const rows = [...pax].sort((a, b) => seatOrder.indexOf(a.seat) - seatOrder.indexOf(b.seat));
   if (!s) return <div className="p-6 font-bold text-slate-500">Jadwal tidak ditemukan</div>;
 
   const checkBusy = Object.keys(seatChecks).length > 0;
 
+  /* Tarikan pasca-tabrakan: refreshSnapshot membilas antrean tulis lokal
+     lebih dulu, lalu bootstrap penuh — pesanan tanggungan milik sendiri
+     ikut terdorong ke server. Dijaring 1x per 15 dtk. */
+  const pullLatestAfterClash = () => {
+    const t = Date.now();
+    if (t - clashPullRef.current < 15000) return;
+    clashPullRef.current = t;
+    refreshSnapshot().then(refresh).catch(() => {});
+  };
+
   /* Jawab cek server: seatInfo dedupe in-flight per jadwal; jawaban segar
-     dinilai terhadap SEMUA kursi terpilih. Fail-open bila jaringan gagal —
-     hakim final tetap validasi `sync` di domain (perisai saat Bayar).
+     dinilai terhadap SEMUA kursi terpilih. Jaringan gagal = FAIL-CLOSED:
+     kursi terpilih ditandai 'fail' — baris data menutup field dan tombol
+     Lanjut terblokir sampai cek ulang lulus, tidak ada "lulus palsu".
+     { quiet: true } mematikan toast gagal (dipakai putaran polling 20 dtk).
      Ini SATU-SATUNYA cek server di modal (tidak diulang saat Lanjut Bayar);
      mengembalikan { out, clash } bila pemanggil perlu hasilnya. */
-  const runSeatCheck = async () => {
+  const runSeatCheck = async (opts = {}) => {
     const out = await seatInfo(s.id);
-    if (!out) { setSeatChecks({}); return { out: null, clash: [] }; }
+    if (!out) {
+      /* Kegagalan cek JANGAN terlihat seperti lulus — seluruh kursi terpilih
+         ditandai 'fail' supaya tidak ada kursi "lulus palsu" meski server
+         tidak tergali: timeout, jaringan, malah rate limit. */
+      setSeatChecks(Object.fromEntries((seatsRef.current || []).map((x) => [x, 'fail'])));
+      if (!opts.quiet) toast('Cek kursi ke server gagal — pastikan internet aktif, lalu cek ulang.', 'err');
+      return { out: null, clash: [] };
+    }
     if (out.live === false) {
       setSeatChecks({});
       setFreshTaken(null);
@@ -338,6 +410,9 @@ function DriverBookingModal({ sid }) {
       setSeats((cur) => cur.filter((x) => !takenOut.has(x)));
       setPax((cur) => cur.filter((p) => !takenOut.has(p.seat)));
       toast('Kursi ' + clash.join(', ') + ' sudah diambil — peta diperbarui.', 'err');
+      /* selangkah lebih baik: tarik snapshot penuh di belakang — proyeksi
+         terisi & kuota ikut segar, bukan hanya peta (dijaring 15 dtk). */
+      pullLatestAfterClash();
     }
     setFreshTaken(out);
     setSeatChecks({});
@@ -384,6 +459,12 @@ function DriverBookingModal({ sid }) {
     }
     /* Cek server TIDAK diulang di sini — sudah berlaku tiap klik kursi di
        denah; hakim final tetap validasi server saat pembayaran. */
+    if (IS_SHEETS) {
+      const checking = seats.filter((st) => seatChecks[st] === 'checking');
+      if (checking.length) { toast('Memeriksa kursi ' + checking.join(', ') + ' di server…', 'warn'); return; }
+      const failed = seats.filter((st) => seatChecks[st] === 'fail');
+      if (failed.length) { toast('Kursi ' + failed.join(', ') + ' belum terkonfirmasi server — ketuk Cek Ulang.', 'err'); return; }
+    }
     const res = createDriverBooking(sid, {
       passengers: rows,
       seats,
@@ -408,7 +489,18 @@ function DriverBookingModal({ sid }) {
     setPaying(true);
     const fl = await DB.flush();
     setPaying(false);
-    if (fl && fl.ok === false) { closeModal(); refresh(); return; }
+    if (fl && fl.ok === false) {
+      /* Tulisan ditolak server, cache di-rollback — pesanan belum lunas dan
+         penjelasan alasan sudah melayang dari handler sync. Layar bayar yang
+         basi dibalik ke langkah Pilih Kursi dengan pilihan dikosongkan
+         (modal tetap terbuka) — wajib memilih kursi kembali. */
+      setMade(null);
+      setStep(1);
+      setSeats([]);
+      setPax([]);
+      refresh();
+      return;
+    }
     toast('Pembayaran berhasil. Tiket ' + res.booking.code, 'ok');
     closeModal();
     refresh();
@@ -493,6 +585,18 @@ function DriverBookingModal({ sid }) {
                        setelah cek lulus — tak ada ketikan yang bisa hilang. */
                     <div className="flex items-center gap-2 mt-2 text-[12.5px] font-bold text-slate-500 bg-white border border-slate-200 rounded-xl px-3 py-2">
                       <Icon name="timer" className="w-4 h-4 shrink-0 animate-spin" />Memeriksa kursi {p.seat} di server…
+                    </div>
+                  ) : seatChecks[p.seat] === 'fail' ? (
+                    /* Cek server gagal (jaringan / timeout / rate limit):
+                       field tetap tertutup — "lulus palsu" tidak mungkin.
+                       Lanjut terblokir sampai cek ulang lulus; polling
+                       mencoba otomatis tiap 20 dtk, atau ketuk Cek Ulang. */
+                    <div className="flex items-center justify-between gap-2 mt-2 text-[12.5px] font-bold text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+                      <span className="min-w-0">
+                        <span className="flex items-center gap-1.5 truncate"><Icon name="triangle-alert" className="w-4 h-4 shrink-0" />Belum terkonfirmasi server</span>
+                        <span className="block text-[11px] font-semibold text-red-500 mt-0.5">Server tidak menjawab — mencoba otomatis tiap 20 dtk</span>
+                      </span>
+                      <button onClick={() => { setSeatChecks((c) => ({ ...c, [p.seat]: 'checking' })); runSeatCheck(); }} className="shrink-0 bg-white border border-red-300 text-red-600 rounded-lg px-2.5 py-1 hover:bg-red-100 active:scale-[.97] transition">Cek Ulang</button>
                     </div>
                   ) : (
                     <div className="grid grid-cols-2 gap-2 mt-2">
