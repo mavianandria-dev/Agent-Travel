@@ -280,10 +280,26 @@ function DriverBookingModal({ sid }) {
       .filter((x) => x.status === 'pending' && String(x.createdBy || '') === String(driver?.id || '') && String(x.scheduleId) === String(s?.id ?? ''))
       .flatMap((x) => x.seats || [])
   );
+  const [seats, setSeats] = useState([]);
+  const [pax, setPax] = useState([]);
+  const [pickup, setPickup] = useState(pickupOptions(r)[0] || '-');
+  const [payMethod, setPayMethod] = useState('QRIS');
+  const [step, setStep] = useState(1);
+  const [made, setMade] = useState(null);
+  const [paying, setPaying] = useState(false);
+  /* Cek server deteksi dini, pola sama dengan wizard pelanggan: kursi yang
+     baru diklik ditandai 'checking'; baris datanya menampilkan indikator
+     sampai cek lulus, baru field [Nama]/[No. HP] muncul. Overlay hasil cek
+     disimpan di state saja — JANGAN ditulis ke DB (schedules milik server). */
+  const [seatChecks, setSeatChecks] = useState({});
+  const [freshTaken, setFreshTaken] = useState(null);
   /* Overlay hasil cek seatinfo (state, bukan DB): jawaban segar MEMISAHKAN
      GRUP server — paidSeats lunas murni (abu "Terisi"), holds hold hidup
      (kuning "Ditahan"), bukan satu proyeksi gabungan. Kursi milik sendiri
-     dikeluarkan; tanpa jawaban segar memakai fallback proyeksi lama. */
+     dikeluarkan; tanpa jawaban segar memakai fallback proyeksi lama.
+     Kalkulasi ini WAJIB berdiri SETELAH deklarasi state freshTaken —
+     digeser ke atas deklarasi = ReferenceError (TDZ) saat modal
+     dipasang → seluruh halaman React kosong. */
   const fresh = freshTaken && freshTaken.live ? freshTaken : null;
   const freshAll = fresh ? [...new Set([...(fresh.takenSeats || []), ...(fresh.blocked || []), ...(fresh.inactive || [])])] : [];
   const freshPay = fresh && Array.isArray(fresh.paidSeats) ? fresh.paidSeats : null;
@@ -301,19 +317,6 @@ function DriverBookingModal({ sid }) {
   const seatOrder = layout.filter((c) => c.type === 'seat' && c.sid).map((c) => c.sid);
   const available = seatOrder.filter((st) => !taken.has(st));
   const left = available.length;
-  const [seats, setSeats] = useState([]);
-  const [pax, setPax] = useState([]);
-  const [pickup, setPickup] = useState(pickupOptions(r)[0] || '-');
-  const [payMethod, setPayMethod] = useState('QRIS');
-  const [step, setStep] = useState(1);
-  const [made, setMade] = useState(null);
-  const [paying, setPaying] = useState(false);
-  /* Cek server deteksi dini, pola sama dengan wizard pelanggan: kursi yang
-     baru diklik ditandai 'checking'; baris datanya menampilkan indikator
-     sampai cek lulus, baru field [Nama]/[No. HP] muncul. Overlay hasil cek
-     disimpan di state saja — JANGAN ditulis ke DB (schedules milik server). */
-  const [seatChecks, setSeatChecks] = useState({});
-  const [freshTaken, setFreshTaken] = useState(null);
   const seatsRef = useRef(seats);
   useEffect(() => { seatsRef.current = seats; }, [seats]);
   /* Tarikan pasca-tabrakan — pola sama dengan wizard pelanggan: seatinfo
@@ -321,69 +324,25 @@ function DriverBookingModal({ sid }) {
      belakang supaya proyeksi terisi & kuota segar juga. Dijaring paling 1x
      per 15 dtk. Ref hook di atas early-return (aturan hooks). */
   const clashPullRef = useRef(0);
-  /* Peta berjalan sendiri (mode Sheets): cek PERTAMA langsung saat modal
-     terbuka lalu penyapuan 20 dtk (quiet) — selama pengemudi mengetik, peta
-     tidak basi; kursi terpilih yang baru ditalap orang disapu otomatis.
-     Interval dibersihkan saat modal unmount; tab tersembunyi diskip. */
-  useEffect(() => {
-    if (!s || !IS_SHEETS) return undefined;
-    runSeatCheck({ quiet: true });
-    const iv = setInterval(() => {
-      if (document.hidden) return;
-      runSeatCheck({ quiet: true });
-    }, 20000);
-    return () => clearInterval(iv);
-  }, [s?.id]);
-  /* Layar bayar dikendalikan denyut per detik — pola sama dengan modal
-     pembayaran pelanggan: pesanan hilang dari cache atau hold kedaluwarsa
-     (belum lunas) → layar bayar dibalik ke langkah Pilih Kursi dengan
-     pilihan dikosongkan — wajib memilih kursi kembali, tak ada layar bayar
-     yang basi. Status lunas ('paid'/'done') diabaikan: keberhasilan
-     ditangani pay() sendiri. Hook di atas early-return (aturan hooks). */
-  useEffect(() => {
-    if (step !== 2 || !made) return undefined;
-    const backToSeatPick = (why) => {
-      setMade(null);
-      setStep(1);
-      setSeats([]);
-      setPax([]);
-      refresh();
-      toast(why, 'err');
-    };
-    const iv = setInterval(() => {
-      const b = DB.load('bookings', []).find((x) => x.id === made.id);
-      if (!b) { backToSeatPick('Pesanan gagal disimpan — pilih kursi kembali'); return; }
-      if (b.status === 'cancelled') { backToSeatPick('Pesanan dibatalkan — pilih kursi kembali'); return; }
-      if (b.status !== 'pending') return;
-      if (new Date(b.holdExpiry).getTime() - Date.now() <= 0) {
-        backToSeatPick('Hold kedaluwarsa — pilih kursi kembali');
-      }
-    }, 1000);
-    return () => clearInterval(iv);
-  }, [step, made?.id]);
-  const rows = [...pax].sort((a, b) => seatOrder.indexOf(a.seat) - seatOrder.indexOf(b.seat));
-  if (!s) return <div className="p-6 font-bold text-slate-500">Jadwal tidak ditemukan</div>;
-
-  const checkBusy = Object.keys(seatChecks).length > 0;
-
-  /* Tarikan pasca-tabrakan: refreshSnapshot membilas antrean tulis lokal
-     lebih dulu, lalu bootstrap penuh — pesanan tanggungan milik sendiri
-     ikut terdorong ke server. Dijaring 1x per 15 dtk. */
+  /* Tarikan pasca-tabrakan (dipakai runSeatCheck): refreshSnapshot membilas
+     antrean tulis lokal lebih dulu, lalu bootstrap penuh — pesanan
+     tanggungan milik sendiri ikut terdorong ke server. Dijaring 1x per 15 dtk. */
   const pullLatestAfterClash = () => {
     const t = Date.now();
     if (t - clashPullRef.current < 15000) return;
     clashPullRef.current = t;
     refreshSnapshot().then(refresh).catch(() => {});
   };
-
   /* Jawab cek server: seatInfo dedupe in-flight per jadwal; jawaban segar
      dinilai terhadap SEMUA kursi terpilih. Jaringan gagal = FAIL-CLOSED:
      kursi terpilih ditandai 'fail' — baris data menutup field dan tombol
      Lanjut terblokir sampai cek ulang lulus, tidak ada "lulus palsu".
      { quiet: true } mematikan toast gagal (dipakai putaran polling 20 dtk).
      Ini SATU-SATUNYA cek server di modal (tidak diulang saat Lanjut Bayar);
-     mengembalikan { out, clash } bila pemanggil perlu hasilnya. */
-  const runSeatCheck = async (opts = {}) => {
+     mengembalikan { out, clash } bila pemanggil perlu hasilnya.
+     Function DECLARATION yang dideklarasi SEBELUM efek polling memangnya —
+     urutan teks benar, tanpa TDZ dan tanpa ref. */
+  async function runSeatCheck(opts = {}) {
     const out = await seatInfo(s.id);
     if (!out) {
       /* Kegagalan cek JANGAN terlihat seperti lulus — seluruh kursi terpilih
@@ -417,7 +376,46 @@ function DriverBookingModal({ sid }) {
     setFreshTaken(out);
     setSeatChecks({});
     return { out, clash };
-  };
+  }
+
+  /* Peta berjalan sendiri (mode Sheets): cek PERTAMA langsung saat modal
+     terbuka lalu penyapuan 20 dtk (quiet) — selama pengemudi mengetik, peta
+     tidak basi; kursi terpilih yang baru ditalap orang disapu otomatis.
+     Interval dibersihkan saat modal unmount; tab tersembunyi diskip. */
+  useEffect(() => {
+    if (!s || !IS_SHEETS) return undefined;
+    runSeatCheck({ quiet: true });
+    const iv = setInterval(() => {
+      if (document.hidden) return;
+      runSeatCheck({ quiet: true });
+    }, 20000);
+    return () => clearInterval(iv);
+  }, [s?.id]);
+  useEffect(() => {
+    if (step !== 2 || !made) return undefined;
+    const backToSeatPick = (why) => {
+      setMade(null);
+      setStep(1);
+      setSeats([]);
+      setPax([]);
+      refresh();
+      toast(why, 'err');
+    };
+    const iv = setInterval(() => {
+      const b = DB.load('bookings', []).find((x) => x.id === made.id);
+      if (!b) { backToSeatPick('Pesanan gagal disimpan — pilih kursi kembali'); return; }
+      if (b.status === 'cancelled') { backToSeatPick('Pesanan dibatalkan — pilih kursi kembali'); return; }
+      if (b.status !== 'pending') return;
+      if (new Date(b.holdExpiry).getTime() - Date.now() <= 0) {
+        backToSeatPick('Hold kedaluwarsa — pilih kursi kembali');
+      }
+    }, 1000);
+    return () => clearInterval(iv);
+  }, [step, made?.id]);
+  const rows = [...pax].sort((a, b) => seatOrder.indexOf(a.seat) - seatOrder.indexOf(b.seat));
+  if (!s) return <div className="p-6 font-bold text-slate-500">Jadwal tidak ditemukan</div>;
+
+  const checkBusy = Object.keys(seatChecks).length > 0;
 
   const fare = splitFare(s, seats.length, 0, 'driver');
   /* Modal-Pengemudi Model B: Tiket = harga rute PENUH dengan jasa agen utuh
