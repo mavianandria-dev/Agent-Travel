@@ -256,7 +256,7 @@ export function PaymentModal({ booking, onDone }) {
 }
 
 export default function Search() {
-  const { bw, setBw, user, go, toast, refresh, tick, payMethod, setPayMethod, openModal } = useApp();
+  const { bw, setBw, user, go, toast, refresh, tick, payMethod, setPayMethod, openModal, modal } = useApp();
   void tick;
   /* Bulan yang dipandang pada langkah "Pilih Tanggal" (kunci y*12+m).
      null = turunkan dari tanggal yang sudah terpilih supaya kartu yang
@@ -282,9 +282,14 @@ export default function Search() {
   const [seatChecks, setSeatChecks] = useState({});
   const [freshTaken, setFreshTaken] = useState(null);
   const checkBusy = Object.keys(seatChecks).length > 0;
+  /* Tanda cek yang sudah dijawab server (jadwal|kursi) — mencegah
+     jaring-jaring do-check mengulang cek untuk kumpulan yang persis sama. */
+  const lastCheckSigRef = useRef('');
   const bwRef = useRef(bw);
   useEffect(() => { bwRef.current = bw; }, [bw]);
-  useEffect(() => { if (bw.step !== 4) setSeatChecks({}); }, [bw.step]);
+  /* Keluar dari peta kursi = status cek kedaluwarsa: kosongkan hasil cek
+     DAN tandanya, agar saat kembali semua kursi dijawab cek segar. */
+  useEffect(() => { if (bw.step !== 4) { setSeatChecks({}); lastCheckSigRef.current = ''; } }, [bw.step]);
 
   /* Kursi yang SAAT INI ditahan pesanan pending milik user pada jadwal ini
      (apa pun kondisi hold-nya — hidup atau basi). Semua cek konflik di
@@ -299,12 +304,22 @@ export default function Search() {
 
   /* Satu request cek per jadwal berjalan (seatInfo dedupe in-flight). Jawaban
      segar dinilai terhadap SEMUA kursi terpilih — kursi yang baru diklik
-     pun dijawab dari peta yang sama. Fail-open bila jaringan gagal.
+     pun dijawab dari peta yang sama. Jaringan gagal = FAIL-CLOSED: kursi
+     terpilih ditandai 'fail' — baris data menutup field dan Lanjut
+     terblokir sampai cek ulang lulus. { quiet: true } mematikan toast
+     gagal (dipakai putaran polling yang mencoba lagi tiap 20 dtk).
      Ini SATU-SATUNYA cek server di alur pilih kursi (tidak diulang saat
      Lanjut); mengembalikan { out, clash } bila pemanggil perlu hasilnya. */
-  const runSeatCheck = async (schedId) => {
+  const runSeatCheck = async (schedId, opts = {}) => {
     const out = await seatInfo(schedId);
-    if (!out) { setSeatChecks({}); return { out: null, clash: [] }; }
+    if (!out) {
+      /* Kegagalan cek JANGAN terlihat seperti lulus — seluruh kursi terpilih
+         ditandai 'fail' supaya tidak ada kursi "lulus palsu" meski server
+         tidak tergali: timeout, jaringan, malah rate limit. */
+      setSeatChecks(Object.fromEntries((bwRef.current.seats || []).map((x) => [x, 'fail'])));
+      if (!opts.quiet) toast('Cek kursi ke server gagal — pastikan internet aktif, lalu cek ulang.', 'err');
+      return { out: null, clash: [] };
+    }
     if (out.live === false) {
       setSeatChecks({});
       setFreshTaken(null);
@@ -325,8 +340,41 @@ export default function Search() {
     }
     setFreshTaken(out);
     setSeatChecks({});
+    /* Tanda jawaban untuk jaring-jaring do-check: daftar kursi HASIL putaran
+       ini (kursi yang baru saja terburst disapu ikut dianggap dijawab). */
+    const finalSeats = (bwRef.current.seats || []).filter((x) => !taken.has(x));
+    lastCheckSigRef.current = schedId + '|' + finalSeats.join(',');
     return { out, clash };
   };
+
+  /* Jaring-jaring do-check: kursi tanpa status cek — contoh: kursi yang
+     dipulihkan dari draft-resume yang melewati jalur klik — otomatis diberi
+     'checking' dan dijawab server sekali. Baris data tak lagi "dianggap
+     ok" tanpa jawaban server; tanda sig mencegah cek berulang. */
+  useEffect(() => {
+    if (!IS_SHEETS || bw.step !== 4 || !bw.seats.length) return;
+    const unchecked = bw.seats.filter((st) => !seatChecks[st]);
+    if (!unchecked.length) return;
+    if (lastCheckSigRef.current === bw.scheduleId + '|' + bw.seats.join(',')) return;
+    setSeatChecks((c) => ({ ...c, ...Object.fromEntries(unchecked.map((st) => [st, 'checking'])) }));
+    runSeatCheck(bw.scheduleId);
+  }, [bw.step, bw.seats, bw.scheduleId, seatChecks]);
+
+  /* Peta kursi berjalan sendiri (mode Sheets): Apps Script tidak punya kanal
+     push, jadi kondisi kursi disegarkan dengan putaran 20 dtk lewat aksi
+     seatinfo yang membaca server WAKTU-ITU. Hold pelanggan lain muncul
+     kuning di peta tanpa refresh; kursi terpilih yang baru ditalap orang
+     disapu otomatis + notifikasi. Hanya hidup di halaman peta kursi; diam
+     saat tab tersembunyi atau modal full-screen terbuka (dedupe in-flight
+     mencegah tumpang tindih dengan cek klik kursi). */
+  useEffect(() => {
+    if (!IS_SHEETS || bw.step !== 4 || !bw.scheduleId || modal) return undefined;
+    const iv = setInterval(() => {
+      if (document.hidden) return;
+      runSeatCheck(bwRef.current.scheduleId, { quiet: true });
+    }, 20000);
+    return () => clearInterval(iv);
+  }, [bw.step, bw.scheduleId, modal]);
 
   const allRoutes = DB.load('routes', []);
   const routes = allRoutes.filter(routeBookable);
@@ -352,6 +400,14 @@ export default function Search() {
     }
     if (bw.step === 4) {
       if (!bw.seats.length) return toast('Pilih minimal 1 kursi', 'warn');
+      if (IS_SHEETS) {
+        const gate = bw.seats.find((st) => seatChecks[st] === 'checking' || seatChecks[st] === 'fail');
+        if (gate) {
+          return toast(seatChecks[gate] === 'checking'
+            ? 'Masih memeriksa kursi di server — tunggu sebentar'
+            : 'Cek kursi ' + gate + ' belum lulus — ketuk Cek Ulang', 'warn');
+        }
+      }
       const bad = bw.seats.some((st) => { const p = bw.passengers.find((x) => x.seat === st); return !p || !p.name || !p.phone; });
       if (bad) return toast('Lengkapi nama & HP semua penumpang', 'warn');
       if (bw.pickup === HOME_PICKUP) {
@@ -667,6 +723,15 @@ export default function Search() {
                        saat hasil mengembalikan kursi tutup otomatis. */
                     <div className="flex items-center gap-2 mt-2 text-[12.5px] font-bold text-slate-500 bg-white border border-slate-200 rounded-xl px-3 py-2.5">
                       <Icon name="timer" className="w-4 h-4 shrink-0 animate-spin" />Memeriksa kursi {st} di server…
+                    </div>
+                  ) : seatChecks[st] === 'fail' ? (
+                    /* Cek server gagal (jaringan / timeout / rate limit):
+                       field tetap tertutup — "lulus palsu" tidak mungkin.
+                       Lanjut terblokir sampai cek ulang lulus; polling
+                       mencoba otomatis tiap 20 dtk, atau ketuk Cek Ulang. */
+                    <div className="flex items-center justify-between gap-2 mt-2 text-[12.5px] font-bold text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5">
+                      <span className="flex items-center gap-1.5 truncate"><Icon name="triangle-alert" className="w-4 h-4 shrink-0" />Belum terkonfirmasi server</span>
+                      <button onClick={() => { setSeatChecks((c) => ({ ...c, [st]: 'checking' })); runSeatCheck(bwRef.current.scheduleId); }} className="shrink-0 bg-white border border-red-300 text-red-600 rounded-lg px-2.5 py-1 hover:bg-red-100 active:scale-[.97] transition">Cek Ulang</button>
                     </div>
                   ) : (
                     <div className="grid grid-cols-2 gap-2 mt-2">
