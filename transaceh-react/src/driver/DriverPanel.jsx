@@ -5,11 +5,13 @@ import Trips from './Trips.jsx';
 import Wallet from './Wallet.jsx';
 import DriverProfile from './Profile.jsx';
 import Maintenance from './Maintenance.jsx';
+import TugasAktif from './TugasAktif.jsx';
 
 /* Panel driver's: satu halaman dengan tab (pola sama dengan Panel Agen & Panel Admin).
    Tab ditentukan oleh view, jadi link lama (driver-trips, driver-wallet, driver-profile) tetap bekerja. */
 const TABS = [
   ['driver', 'car-front', 'Tugas Saya'],
+  ['driver-aktif', 'navigation', 'Tugas Saat Ini'],
   ['driver-maintenance', 'wrench', 'Maintenance'],
   ['driver-trips', 'route', 'Trip'],
   ['driver-wallet', 'wallet', 'Dompet'],
@@ -19,7 +21,8 @@ const TABS = [
 export default function DriverPanel() {
   const { view, go } = useApp();
   let body = null;
-  if (view === 'driver-trips') body = <Trips />;
+  if (view === 'driver-aktif') body = <TugasAktif />;
+  else if (view === 'driver-trips') body = <Trips />;
   else if (view === 'driver-wallet') body = <Wallet />;
   else if (view === 'driver-profile') body = <DriverProfile />;
   else if (view === 'driver-maintenance') body = <Maintenance />;

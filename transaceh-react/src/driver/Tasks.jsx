@@ -12,6 +12,7 @@ import { TicketView } from '@/components/TicketView.jsx';
 import { pickupArea, pickupOptions, pickupOf } from '@/lib/pickups.js';
 import CancelTripModal from '@/components/CancelTripModal.jsx';
 import BlockSeatModal from '@/components/BlockSeatModal.jsx';
+import { ArriveGeoModal, AckArriveModal, GeoTagPanel } from './GeoTag.jsx';
 
 export function drvOfUser(u) {
   if (!u) return null;
@@ -34,11 +35,13 @@ function fmtGap(minutes) {
   return m + ' menit';
 }
 
-/** Konfirmasi sebelum berangkat. Berangkat >60 menit lebih awal wajib alasan. */
-function StartTripModal({ sid }) {
+/** Konfirmasi sebelum berangkat. Wajib tagging lokasi di daerah keberangkatan
+ *  (kabupaten/kota hasil rute DARI) + alasan bila >60 menit lebih awal. */
+export function StartTripModal({ sid }) {
   const { closeModal, toast, refresh, user } = useApp();
   const s = schedById(sid);
   const [reason, setReason] = useState('');
+  const [tag, setTag] = useState(null);
   if (!s) return <div className="p-6 font-bold text-slate-500">Jadwal tidak ditemukan</div>;
   const r = routeById(s.routeId);
   const v = vehicleById(s.vehicleId);
@@ -49,14 +52,16 @@ function StartTripModal({ sid }) {
   const early = timing.state === 'early';
   const late = timing.state === 'late';
   const pending = bk.filter((b) => b.status === 'pending').length;
+  const tagOk = !!(tag && tag.ok);
 
   const submit = () => {
+    if (!tagOk) { toast('Tagging lokasi dulu — syarat berangkat di daerah ' + (r?.from || 'keberangkatan') + '.', 'err'); return; }
     const why = reason.trim();
     if (early && why.length < 10) {
       toast('Alasan berangkat lebih awal wajib diisi minimal 10 karakter.', 'err');
       return;
     }
-    const ok = setScheduleTripStatus(sid, 'ontrip', { reason: why, by: user?.name || user?.email || 'pengemudi' });
+    const ok = setScheduleTripStatus(sid, 'ontrip', { reason: why, by: user?.name || user?.email || 'pengemudi', geo: tag });
     if (!ok) { toast('Status perjalanan tidak bisa diubah.', 'err'); return; }
     closeModal();
     refresh();
@@ -79,6 +84,10 @@ function StartTripModal({ sid }) {
             : 'Setelah berangkat, semua penjualan tiket ditutup dan booking yang belum dibayar dibatalkan otomatis. Pastikan penumpang dan armada sudah siap.'}
       </div>
 
+      <div className="mt-3">
+        <GeoTagPanel target={r?.from || 'keberangkatan'} tag={tag} setTag={setTag} />
+      </div>
+
       {early ? (
         <label className="block mt-3">
           <span className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wide">Alasan berangkat lebih awal</span>
@@ -88,8 +97,9 @@ function StartTripModal({ sid }) {
 
       <div className="flex gap-2 mt-4">
         <button onClick={closeModal} className="flex-1 bg-slate-100 font-bold text-[13px] py-2.5 rounded-xl">Batal</button>
-        <button onClick={submit} className={'flex-1 text-white font-extrabold text-[13px] py-2.5 rounded-xl ' + (early ? 'bg-amber-500' : 'bg-green-500')}>Ya, Berangkat</button>
+        <button onClick={submit} disabled={!tagOk} className={'flex-1 text-white font-extrabold text-[13px] py-2.5 rounded-xl ' + (early ? 'bg-amber-500' : 'bg-green-500') + (tagOk ? ' active:scale-[.98] transition' : ' opacity-50 cursor-not-allowed')}>Ya, Berangkat</button>
       </div>
+      <div className="mt-1.5 text-center text-[11px] text-slate-400">Tombol aktif setelah tag lokasi keberangkatan tercocok.</div>
     </div>
   );
 }
@@ -726,7 +736,7 @@ function DriverSaleCutoffModal({ sid }) {
 }
 
 export default function Tasks() {
-  const { go, user, toast, refresh, openModal, modal } = useApp();
+  const { go, user, refresh, openModal, modal } = useApp();
   const me = drvOfUser(user);
   const [, setClock] = useState(0);
   const [now, setNow] = useState(() => Date.now());
@@ -802,11 +812,11 @@ export default function Tasks() {
       return [...map.values()].sort((a, b) => a.order - b.order);
     })();
     const finish = () => {
-      const msg = late
-        ? 'Tandai trip ini sebagai Tiba? Pastikan perjalanan benar-benar sudah terjadi.'
-        : 'Tandai trip ini sudah tiba di tujuan?';
-      if (!window.confirm(msg)) return;
-      tripUpdate(s.id, 'arrived', toast, refresh);
+      /* Tiba dalam perjalanan: syarat tag lokasi di daerah tujuan (modal).
+         Tandai Tiba jadwal lewat yang tak pernah berangkat: modal pengakuan
+         ber-alasan — satu klik ini melepas dana, jadi harus berjejak kuat. */
+      if (s.tripStatus === 'ontrip') openModal(<ArriveGeoModal sid={s.id} />);
+      else openModal(<AckArriveModal sid={s.id} />);
     };
     return (
       <div key={s.id} data-sid={s.id} className="bg-white rounded-3xl shadow-card p-4">
@@ -877,7 +887,7 @@ export default function Tasks() {
         <div className="bg-gradient-to-r from-[#0b2447] to-sky-700 text-white rounded-3xl p-5 shadow-card flex items-center gap-4">
           <div className="w-14 h-14 rounded-2xl bg-white/15 flex items-center justify-center font-extrabold text-2xl">{((me?.name || user?.name || 'P')[0])}</div>
           <div><div className="font-extrabold text-[17px]">Halo, {me?.name || user?.name}!</div><div className="text-[12.5px] opacity-80 font-medium">{overdue.length ? overdue.length + ' perlu diselesaikan • ' : ''}{upcoming.length} tugas ke depan • standby 30 mnt sebelum jam</div></div>
-          <div className="flex-1"></div><button onClick={() => go('driver-trips')} className="bg-white/15 text-[12px] font-extrabold px-4 py-2 rounded-xl">Riwayat</button>
+          <div className="flex-1"></div><button onClick={() => go('driver-aktif')} className="bg-white/15 text-[12px] font-extrabold px-4 py-2 rounded-xl flex items-center gap-1.5"><Icon name="navigation" className="w-3.5 h-3.5" /> Tugas Saat Ini</button><button onClick={() => go('driver-trips')} className="bg-white/15 text-[12px] font-extrabold px-4 py-2 rounded-xl">Riwayat</button>
         </div>
 
         {overdue.length ? <div className="bg-amber-50 border-2 border-amber-200 rounded-3xl p-4">

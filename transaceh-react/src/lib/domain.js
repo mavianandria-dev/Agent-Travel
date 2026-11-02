@@ -2748,7 +2748,60 @@ export function toggleScheduleSeatBlock(sid, seat, { reason = '', by = 'agen' } 
 }
 
 /** Ubah status trip jadwal; dipakai pengemudi maupun admin. */
-export function setScheduleTripStatus(sid, st, { reason = '', by = '' } = {}) {
+/**Nama kabupaten/kota siap dibanding: huruf kecil + prefiks wilayah dilepas. */
+export function cleanAreaName_(x) {
+  return String(x || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .split(/\s+/).filter((w) => w && w !== 'kabupaten' && w !== 'kota' && w !== 'kab')
+    .join(' ').trim();
+}
+
+/** Kecocokan kabupaten/kota untuk tagging pengemudi: cocok HANYA bila salah
+ *  satu penanda wilayah sama persis dengan target (abaikan prefiks
+ *  "Kabupaten/Kota/Kab."). Sengaja bukan potongan-loose: "Aceh Barat" tak boleh
+ *  lolos di "Aceh Barat Daya". `place` boleh string alamat penuh ATAU daftar
+ *  bidang/segmen alamat (county, city, segmen display_name, dst). */
+export function areaNameMatches(area, place) {
+  const want = cleanAreaName_(area);
+  if (!want) return false;
+  const cands = Array.isArray(place) ? place : String(place).split(',');
+  return cands.some((seg) => cleanAreaName_(seg) === want);
+}
+
+/** Buka tag lokasi perjalanan (kolom teks JSON teramankan) → objek atau null.
+ *  kind: 'depart' | 'arrive'. */
+export function geoTagOf(s, kind) {
+  if (!s) return null;
+  const raw = kind === 'arrive' ? s.arriveGeo : s.departGeo;
+  if (!raw) return null;
+  try {
+    const o = typeof raw === 'string' ? JSON.parse(raw) : (typeof raw === 'object' ? raw : null);
+    if (!o || !Number.isFinite(Number(o.lat)) || !Number.isFinite(Number(o.lng))) return null;
+    return { lat: Number(o.lat), lng: Number(o.lng), acc: Number(o.acc) || 0, addr: String(o.addr || ''), area: String(o.area || ''), at: o.at || '', ok: true };
+  } catch { return null; }
+}
+
+/** Tag lokasi sah bila koordinatnya utuh — dipakai sebelum menulis jadwal. */
+function geoTagValid_(g) {
+  if (!g || typeof g !== 'object') return false;
+  const lat = Number(g.lat), lng = Number(g.lng);
+  return Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+}
+
+/** Simpan tag lokasi sebagai STRING JSON — kolom sheet bertipe teks dan
+ *  jalur sinkronisasi paling aman lewat satu kolom utuh. */
+function geoTagStorable_(g) {
+  return JSON.stringify({
+    lat: Math.round(Number(g.lat) * 1e6) / 1e6,
+    lng: Math.round(Number(g.lng) * 1e6) / 1e6,
+    acc: Math.round(Number(g.acc) || 0),
+    addr: String(g.addr || '').slice(0, 200),
+    area: String(g.area || '').slice(0, 80),
+    ok: true,
+    at: new Date().toISOString()
+  });
+}
+
+export function setScheduleTripStatus(sid, st, { reason = '', by = '', geo = null } = {}) {
   if (!['ontrip', 'arrived'].includes(st)) return false;
   const arr = DB.load('schedules', []);
   const s = arr.find((x) => x.id === sid);
@@ -2763,10 +2816,16 @@ export function setScheduleTripStatus(sid, st, { reason = '', by = '' } = {}) {
     s.departedAt = now;
     if (by) s.departedBy = by;
     if (String(reason || '').trim()) s.earlyStartReason = String(reason).trim();
+    if (geoTagValid_(geo)) s.departGeo = geoTagStorable_(geo);
   }
   if (st === 'arrived') {
     s.arrivedAt = now;
-    if (prev === 'missed' || scheduleIsPast(s, SCHEDULE_GRACE_HOURS)) s.lateCompletion = true;
+    /* Tanda penyelesaian terlambat: perjalanan tak tercatat berangkat ATAU
+       selesai lewat tenggang → pengemudi menekan "Tandai Tiba" dari jadwal
+       yang lewat. Ini juga tanda pengakuan yang hakim server wajibkan. */
+    if (prev === 'missed' || (prev !== 'ontrip' && !s.departedAt) || scheduleIsPast(s, SCHEDULE_GRACE_HOURS)) s.lateCompletion = true;
+    if (prev !== 'ontrip' && String(reason || '').trim()) s.arriveAckReason = String(reason).trim().slice(0, 200);
+    if (geoTagValid_(geo)) s.arriveGeo = geoTagStorable_(geo);
   }
   DB.save('schedules', arr);
   if (st === 'arrived') releaseLedger(sid);

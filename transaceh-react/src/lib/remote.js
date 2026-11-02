@@ -29,10 +29,11 @@ export async function pullSnapshotSoft() {
   return job;
 }
 
-export async function loadSnapshot(token) {
+export async function loadSnapshot(token, force = false) {
   lastSnapshotPull = Date.now();
   const snap = await sheetsApi.bootstrap(token || null);
-  DB.hydrate(snap.records, snap.revisions);
+  /* force: ganti sesi (login/daftar/guest-reset) — abaikan garang umur. */
+  DB.hydrate(snap.records, snap.revisions, force);
   return snap;
 }
 
@@ -56,7 +57,7 @@ export async function signInRemote(email, password) {
   try { await DB.flush(); } catch { /* tulisan gagal ditangani sync error handler */ }
   setToken(data.token, data.expiresAt);
   try {
-    const snap = await loadSnapshot(data.token);
+    const snap = await loadSnapshot(data.token, true);
     const user = snap.user || data.user;
     setSession(user);
     return user;
@@ -71,7 +72,7 @@ export async function registerRemote(payload) {
   if (data.token) {
     setToken(data.token, data.expiresAt);
     try {
-      const snap = await loadSnapshot(data.token);
+      const snap = await loadSnapshot(data.token, true);
       setSession(snap.user || data.user);
     } catch (e) {
       clearToken();
@@ -89,6 +90,7 @@ export async function signOutRemote() {
   setSession(null);
   DB.clear();
   const snap = await sheetsApi.bootstrap(null);
-  DB.hydrate(snap.records, snap.revisions);
+  /* Sesi publik baru — ganti apa adanya (force). */
+  DB.hydrate(snap.records, snap.revisions, true);
   return snap;
 }

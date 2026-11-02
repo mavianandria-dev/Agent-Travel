@@ -12,6 +12,7 @@
 
 import { IS_SHEETS } from './runtime.js';
 import { sheetsApi, getToken } from './sheetsApi.js';
+import { selectFreshCollections } from './hydrateGuard.js';
 
 const LOCAL_KEYS = new Set(['session', 'lang', 'checkout_draft', 'guest_support_tickets']);
 const cache = Object.create(null);
@@ -265,17 +266,40 @@ export const DB = {
     localStorage.setItem('at_' + k, JSON.stringify(v));
   },
 
-  /** Isi cache dari respons bootstrap. Mengganti seluruh snapshot, bukan merge. */
-  hydrate(records, revs) {
+  /** Isi cache dari respons bootstrap. Mengganti seluruh snapshot, bukan merge.
+   *  Kekurangannya dijaga: koleksi dengan revisi lebih RENDAH daripada yang
+   *  lokal sudah tahu DITOLAK — tarikan yang berangkat sebelum tulisan
+   *  optimistis sampai ke server tak boleh memutar balik layar (mis. "Tiba"
+   *  muncul lagi selama satu putaran polling). Ganti sesi (login/logout/boot)
+   *  memanggil dengan force=true untuk mengganti apa adanya. */
+  hydrate(records, revs, force = false) {
     if (!IS_SHEETS) return;
     generation += 1;
-    this.clearCache();
-    Object.keys(records || {}).forEach((k) => {
-      cache[k] = records[k];
-      serverSnapshot[k] = clone(records[k]);
+    if (force) {
+      this.clearCache();
+      Object.keys(records || {}).forEach((k) => {
+        cache[k] = records[k];
+        serverSnapshot[k] = clone(records[k]);
+      });
+      Object.keys(revs || {}).forEach((k) => {
+        revisions[k] = Number(revs[k] || 0) || 0;
+      });
+      return;
+    }
+    const fresh = selectFreshCollections(records, revs, revisions);
+    /* Koleksi yang diterima diganti penuh; koleksi yang ditolak TIDAK disentuh
+       — lokal tetap memakai kepastian terbaik yang dia miliki saat ini. */
+    Object.keys(cache).forEach((k) => {
+      if (!fresh.accepted.has(k)) return;
+      delete cache[k];
+      delete serverSnapshot[k];
     });
-    Object.keys(revs || {}).forEach((k) => {
-      revisions[k] = Number(revs[k] || 0) || 0;
+    Object.keys(fresh.records).forEach((k) => {
+      cache[k] = fresh.records[k];
+      serverSnapshot[k] = clone(fresh.records[k]);
+    });
+    Object.keys(fresh.revs).forEach((k) => {
+      revisions[k] = fresh.revs[k];
     });
   },
 

@@ -143,8 +143,8 @@ export function AppProvider({ children }) {
         setModal(null);
         setView('home');
         try {
-          const snap = await loadSnapshot(null);
-          DB.hydrate(snap.records, snap.revisions);
+          const snap = await loadSnapshot(null, true);
+          DB.hydrate(snap.records, snap.revisions, true);
         } catch { /* data publik akan dimuat ulang saat refresh */ }
         setTick((x) => x + 1);
         toast('Sesi berakhir. Silakan masuk lagi.', 'err');

@@ -78,6 +78,9 @@ var API_DRIVER_SALE_WINDOW_MS = 12 * 60 * 60 * 1000;
  *  booking pending yang sedang berjalan tetap dihakimi aturan hold masing-masing. */
 var API_CUSTOMER_BOOK_CUTOFF_MS = 60 * 60 * 1000;
 var API_DRIVER_SALE_CUTOFF_MS = 30 * 60 * 1000;
+/* Berangkat >60 mnt sebelum keberangkatan efektif = berangkat awal:
+   hakim server wajibkan alasan seperti modal pengemudi. */
+var API_TRIP_EARLY_REASON_MS = 60 * 60 * 1000;
 
 /** Kunci koleksi harus sama persis dengan seed.gs. */
 var API_COLLECTION_KEYS = [
@@ -729,6 +732,10 @@ var API_MAIN_TABLES = {
       'delayReqAt', 'delayReqStatus', 'delayReqDriverId', 'delayApprovedBy',
       'departedAt', 'departedBy', 'earlyStartReason', 'arrivedAt',
       'b:lateCompletion',
+      /* Tagging lokasi perjalanan pengemudi (string JSON): koordinat, alamat,
+         daerah, jam, akurasi + alasan pengakuan "Tandai Tiba" jadwal yang tak
+         tercatat berangkat. */
+      'departGeo', 'arriveGeo', 'arriveAckReason',
       'cancelReason', 'cancelledBy', 'cancelledAt', 'reviewedAt',
       'reviewResult', 'n:refundPct',
       'maintenanceRequestId', 'maintenanceFrom', 'maintenanceUntil',
@@ -3858,6 +3865,8 @@ function apiSyncValidateSchedules_(ctx, target) {
   var driverAllowed = {
     status: 1, tripStatus: 1, departedAt: 1, departedBy: 1, earlyStartReason: 1,
     arrivedAt: 1, lateCompletion: 1,
+    /* Tagging lokasi wajib: berangkat & tiba ber-bukti + alasan pengakuan. */
+    departGeo: 1, arriveGeo: 1, arriveAckReason: 1,
     delayUntil: 1, delayReason: 1, delayNote: 1, delayMinutes: 1,
     delayAddedMinutes: 1, delayedAt: 1, delayedBy: 1, tripDelayUpdatedAt: 1,
     delayHistory: 1, tripDelayInfo: 1, seatBlockLog: 1, blockedSeats: 1,
@@ -3888,6 +3897,42 @@ function apiSyncValidateSchedules_(ctx, target) {
       for (var c = 0; c < changed.length; c++) {
         if (!driverAllowed[changed[c]]) {
           throw apiError_('FORBIDDEN', 'Field jadwal "' + changed[c] + '" tidak boleh diubah pengemudi.');
+        }
+      }
+      /* Pagar URUTAN transisi (bukan cuma daftar field): tiba harus setelah
+         berangkat atau lewat pengakuan beralasan; berangkat sangat awal wajib
+         alasan; jadwal batal tidak boleh dihidupkan kembali pengemudi. */
+      if (String(old.status || '') === 'cancelled' && String(rec.status || '') !== 'cancelled') {
+        throw apiError_('FORBIDDEN', 'Jadwal sudah dibatalkan — pengemudi tidak bisa mengubahnya.');
+      }
+      var oldTs = String(old.tripStatus || 'scheduled');
+      var newTs = String(rec.tripStatus || oldTs);
+      if (newTs !== oldTs) {
+        var NEXT_TS = {
+          scheduled: ['ontrip', 'arrived', 'cancelled'],
+          ontrip: ['arrived', 'cancelled'],
+          missed: ['arrived', 'cancelled']
+        };
+        if (NEXT_TS[oldTs] !== undefined && NEXT_TS[oldTs].indexOf(newTs) < 0) {
+          throw apiError_('FORBIDDEN', 'Urutan status perjalanan tidak sah: ' + oldTs + ' → ' + newTs + '.');
+        }
+        if (NEXT_TS[oldTs] === undefined) {
+          throw apiError_('FORBIDDEN', 'Status perjalanan "' + oldTs + '" tidak bisa diubah pengemudi.');
+        }
+        if (newTs === 'ontrip') {
+          var depEff = apiSyncScheduleDepartureMs_({
+            date: String(rec.date || old.date || ''),
+            time: String(rec.time || old.time || ''),
+            delayUntil: rec.delayUntil || old.delayUntil || ''
+          });
+          if (isFinite(depEff) && depEff - Date.now() > API_TRIP_EARLY_REASON_MS &&
+              !String(rec.earlyStartReason || '').trim()) {
+            throw apiError_('VALIDATION', 'Berangkat lebih dari 1 jam sebelum jadwal wajib bawa alasan berangkat awal.');
+          }
+        }
+        if (newTs === 'arrived' && oldTs !== 'ontrip' &&
+            rec.lateCompletion !== true && String(rec.lateCompletion) !== 'true') {
+          throw apiError_('FORBIDDEN', 'Tiba harus setelah berangkat — jadwal tak tercatat berangkat hanya boleh lewat pengakuan beralasan.');
         }
       }
     } else if (ctx.role !== 'superadmin') {

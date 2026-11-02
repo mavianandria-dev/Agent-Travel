@@ -37,7 +37,8 @@ async function runBoot() {
     }
   }
 
-  const snap = await loadSnapshot(null);
+  /* Sesi publik (tanpa token): ganti apa adanya. */
+  const snap = await loadSnapshot(null, true);
   return { mode: 'sheets', user: null, role: snap.role || 'publik' };
 }
 

@@ -1361,7 +1361,8 @@ ok('sync agen update jadwal sendiri sukses', res.ok === true && res.data.revisio
 const s1Now = readRec('schedules', 's_1');
 const driverSchedBase = revOf('schedules');
 res = sync({ schedules: { baseRev: driverSchedBase, upserts: [Object.assign({}, s1Now, {
-  tripStatus: 'ontrip', status: 'closed', departedAt: '2026-10-24T05:10:00.000Z'
+  tripStatus: 'ontrip', status: 'closed', departedAt: '2026-10-24T05:10:00.000Z',
+  earlyStartReason: 'Penumpang sudah lengkap'
 })], deletes: [] } }, driverToken);
 ok('sync pengemudi update status jadwal yang ditugaskan sukses', res.ok === true && res.data.revisions.schedules === driverSchedBase + 1, res);
 
@@ -2765,6 +2766,86 @@ ok('sapu idempoten: tanpa baris basi → no-op, revisi lain tidak naik',
   res.data.revisions.payments === undefined && res.data.revisions.vouchers === undefined &&
   revOf('bookings') === settled.bookings && revOf('payments') === settled.payments &&
   revOf('vouchers') === settled.vouchers, res);
+
+/* ------------------------------------------------------------------ */
+/* 17c) Pagar urutan transisi pengemudi + tagging lokasi wajib         */
+/* ------------------------------------------------------------------ */
+
+console.log('\n== 17c) pagar transisi pengemudi & tagging lokasi ==');
+
+/* Tiga jadwal khusus uji, milik d_1 (driverToken):
+   s_g1 → 90 mnt ke depan (berangkat-awal memicu wajib alasan + tag);
+   s_g2 → urut jadwal, untuk tes "tiba" TANPA berangkat;
+   s_g3 → sudah dibatalkan, untuk tes hidupkan-kembali. */
+res = sync({ schedules: { baseRev: revOf('schedules'), upserts: [
+  { id: 's_g1', agencyId: 'ag_1', routeId: 'rt_1', vehicleId: 'v_1', driverId: 'd_1', driverName: 'Bang Jamil', backupDriverId: '', backupName: '', date: nearDateMin(90).date, time: nearDateMin(90).time, price: 150000, status: 'open', tripStatus: 'scheduled', blockedSeats: [], createdAt: '2026-10-20T00:00:00.000Z' },
+  { id: 's_g2', agencyId: 'ag_1', routeId: 'rt_1', vehicleId: 'v_1', driverId: 'd_1', driverName: 'Bang Jamil', backupDriverId: '', backupName: '', date: nearDateMin(60).date, time: nearDateMin(60).time, price: 150000, status: 'open', tripStatus: 'scheduled', blockedSeats: [], createdAt: '2026-10-20T00:00:00.000Z' },
+  { id: 's_g3', agencyId: 'ag_1', routeId: 'rt_1', vehicleId: 'v_1', driverId: 'd_1', driverName: 'Bang Jamil', backupDriverId: '', backupName: '', date: nearDateMin(90).date, time: nearDateMin(90).time, price: 150000, status: 'cancelled', tripStatus: 'cancelled', cancelReason: 'Uji batching', cancelledAt: '2026-10-21T00:00:00.000Z', cancelledBy: 'agen', blockedSeats: [], createdAt: '2026-10-20T00:00:00.000Z' }
+], deletes: [] } }, adminToken);
+ok('superadmin menyiapkan jadwal uji pagar transisi', res.ok === true, res);
+
+const g1old = readRec('schedules', 's_g1');
+const g2old = readRec('schedules', 's_g2');
+const g3old = readRec('schedules', 's_g3');
+
+/* 1) Berangkat sangat awal (90 mnt) tanpa alasan — SIGAP ditolak server. */
+res = sync({ schedules: { baseRev: revOf('schedules'), upserts: [
+  Object.assign({}, g1old, { tripStatus: 'ontrip', departedAt: new Date().toISOString(), departedBy: 'Bang Jamil', status: 'closed' })
+], deletes: [] } }, driverToken);
+ok('berangkat >1 jam awal tanpa alasan ditolak server',
+  res.ok === false && String(res.error.message || '').indexOf('alasan') >= 0, res);
+
+/* 2) Dengan alasan + tag lokasi berangkat (JSON string) — LOLOS & tersimpan. */
+const tagDep = JSON.stringify({ lat: 5.548290, lng: 95.323753, acc: 22, addr: 'Terminal Batoh, Kecamatan Kota, Banda Aceh', area: 'Aceh Jaya', ok: true, at: new Date().toISOString() });
+res = sync({ schedules: { baseRev: revOf('schedules'), upserts: [
+  Object.assign({}, g1old, { tripStatus: 'ontrip', departedAt: new Date().toISOString(), departedBy: 'Bang Jamil', earlyStartReason: 'Penumpang sudah lengkap', status: 'closed', departGeo: tagDep })
+], deletes: [] } }, driverToken);
+ok('berangkat awal beralasan + tag lokasi LOLOS', res.ok === true, res);
+const g1Tag = JSON.parse(String(readRec('schedules', 's_g1').departGeo || '{}'));
+ok('tag berangkat tersimpan utuh (lat/area/akurasi)',
+  g1Tag.lat === 5.54829 && g1Tag.area === 'Aceh Jaya' && g1Tag.acc === 22, g1Tag);
+
+/* 3) Tiba tanpa berangkat & tanpa pengakuan — pagar urutan menolak. */
+res = sync({ schedules: { baseRev: revOf('schedules'), upserts: [
+  Object.assign({}, g2old, { tripStatus: 'arrived', arrivedAt: new Date().toISOString(), status: 'closed' })
+], deletes: [] } }, driverToken);
+ok('tiba tanpa berangkat ditolak: haru lewat pengakuan beralasan',
+  res.ok === false && res.error.code === 'FORBIDDEN' &&
+  String(res.error.message || '').indexOf('Tiba harus setelah berangkat') >= 0, res);
+
+/* 4) Dan pengakuan beralasan (lateCompletion) — sah, harus tersimpan. */
+const ackArr = JSON.stringify({ lat: 4.140001, lng: 96.126999, acc: 40, addr: 'Sigli, Kabupaten Pidie', area: 'Aceh Jaya', ok: true, at: new Date().toISOString() });
+res = sync({ schedules: { baseRev: revOf('schedules'), upserts: [
+  Object.assign({}, g2old, { tripStatus: 'arrived', arrivedAt: new Date().toISOString(), status: 'closed', lateCompletion: true, arriveAckReason: 'Perjalanan benar berjalan, saya lupa menekan berangkat karena sinyal', arriveGeo: ackArr })
+], deletes: [] } }, driverToken);
+ok('tiba lewat pengakuan beralasan LOLOS', res.ok === true, res);
+const g2Now = readRec('schedules', 's_g2');
+ok('pengakuan tersimpan: alasan + tag tiba + tanda terlambat',
+  String(g2Now.arriveAckReason || '').indexOf('lupa menekan berangkat') >= 0 &&
+  JSON.parse(String(g2Now.arriveGeo || '{}')).ok === true && g2Now.lateCompletion === true, g2Now);
+
+/* 5) Maju-mundur: ontrip diputar balik jadi scheduled — ditolak. */
+res = sync({ schedules: { baseRev: revOf('schedules'), upserts: [
+  Object.assign({}, readRec('schedules', 's_g1'), { tripStatus: 'scheduled', status: 'open' })
+], deletes: [] } }, driverToken);
+ok('ontrip diputar balik ke scheduled ditolak',
+  res.ok === false && res.error.code === 'FORBIDDEN' &&
+  String(res.error.message || '').indexOf('Urutan status') >= 0, res);
+
+/* 6) Hidupkan jadwal yang sudah dibatalkan — ditolak. */
+res = sync({ schedules: { baseRev: revOf('schedules'), upserts: [
+  Object.assign({}, g3old, { status: 'open' })
+], deletes: [] } }, driverToken);
+ok('jadwal batal tidak bisa dihidupkan pengemudi',
+  res.ok === false && res.error.code === 'FORBIDDEN' &&
+  String(res.error.message || '').indexOf('sudah dibatalkan') >= 0, res);
+
+/* 7) Tiba dari ontrip (perjalanan nyata) + tag lokasi tujuan — LOLOS. */
+res = sync({ schedules: { baseRev: revOf('schedules'), upserts: [
+  Object.assign({}, readRec('schedules', 's_g1'), { tripStatus: 'arrived', arrivedAt: new Date().toISOString(), arriveGeo: ackArr })
+], deletes: [] } }, driverToken);
+ok('tiba dari perjalanan nyata + tag tujuan LOLOS', res.ok === true, res);
+ok('tag tiba tersimpan di jadwal', !!JSON.parse(String(readRec('schedules', 's_g1').arriveGeo || '{}')).ok, null);
 
 /* ------------------------------------------------------------------ */
 /* 18) ensureSchema: sisip TENGAH kolom schedules (permintaan delay)   */
