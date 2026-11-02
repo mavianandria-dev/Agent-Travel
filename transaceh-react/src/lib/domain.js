@@ -1376,6 +1376,20 @@ export function departureMinutesLeft(s, now = Date.now()) {
   return Math.floor((t - now) / 60000);
 }
 
+/** Gerbang pemesanan online PELANGGAN (kalender, kartu armada, doCheckout):
+ *  sisa ≥60 mnt dari keberangkatan efektif, ATAU jadwal sedang didelay AKTIF
+ *  dengan TOTAL delay ≥60 mnt — delay besar itu memang kegunaannya membuka
+ *  kembali pintu pesanan sampai jam estimasi (contoh: delay-total 90 saat sisa
+ *  tinggal 45 = masih bisa pesan). Delay total <60 tetap menutup pintu
+ *  pelanggan (hanya pengemudi yang menjual). */
+export function customerBookable(s, now = Date.now()) {
+  if (departureMinutesLeft(s, now) >= CUSTOMER_BOOK_CUTOFF_MIN) return true;
+  const delayUntil = s && s.delayUntil ? new Date(s.delayUntil).getTime() : NaN;
+  const statusOk = ['ontrip', 'arrived', 'missed', 'cancelled'].indexOf(String((s && s.tripStatus) || 'scheduled')) < 0;
+  const delayActive = Number.isFinite(delayUntil) && statusOk && delayUntil > now;
+  return delayActive && Number(s && s.delayMinutes) >= CUSTOMER_BOOK_CUTOFF_MIN;
+}
+
 /** Waktu keberangkatan jadwal dalam milidetik (zona waktu lokal). */
 export function scheduleDepartureMs(s) {
   if (!s || !s.date) return NaN;

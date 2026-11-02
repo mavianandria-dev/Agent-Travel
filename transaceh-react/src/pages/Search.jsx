@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useApp, freshBW } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { schedById, schedReady, takenSeats, seatsLeft, routeById, vehicleById, driverById, vehLayout, schedSeatCap, audit, notify, vehName, splitFare, fareCore, fareModelOf, servicePerSeat, scheduleEffectiveDepartureMs, departureMinutesLeft, CUSTOMER_BOOK_CUTOFF_MIN, createLedger, routeBookable, isRouteSuspended, canPayBooking, scheduleIsPast, cancelBooking as cancelBookingDomain, agencyById, routeGroupKey, groupRoutes, routesInRouteGroup, scheduleMaintenance, maintenancePeriodLabel } from '@/lib/domain.js';
+import { schedById, schedReady, takenSeats, seatsLeft, routeById, vehicleById, driverById, vehLayout, schedSeatCap, audit, notify, vehName, splitFare, fareCore, fareModelOf, servicePerSeat, scheduleEffectiveDepartureMs, customerBookable, createLedger, routeBookable, isRouteSuspended, canPayBooking, scheduleIsPast, cancelBooking as cancelBookingDomain, agencyById, routeGroupKey, groupRoutes, routesInRouteGroup, scheduleMaintenance, maintenancePeriodLabel } from '@/lib/domain.js';
 import { IS_SHEETS } from '@/lib/runtime.js';
 import { seatInfo } from '@/lib/sheetsApi.js';
 import { refreshSnapshot, pullSnapshotSoft } from '@/lib/remote.js';
@@ -597,12 +597,12 @@ export default function Search() {
       canPayBooking(x, s)
     );
     if (reuse) { openModal(<PaymentModal booking={reuse} />); return; }
-    /* Cut-off pemesanan baru: <60 mnt ke keberangkatan efektif pesanan BARU
-       ditutup (jam estimasi delay ikut dihitung). Pesanan tanggungan yang
-       masih berlaku (reuse di atas) tetap boleh dilunasi sampai berangkat —
+    /* Cut-off pesanan BARU memakai gerbang yang sama dengan tampilan
+       (customerBookable): <60 mnt ditutup, KECUALI delay aktif total ≥60 mnt
+       yang membuka kembali pintu sampai keberangkatan efektif. Pesanan
+       tanggungan yang masih berlaku (reuse di atas) tetap boleh dilunasi —
        hanya pembuatan booking baru yang dipagari; hakim final tetap server. */
-    const mntLeft = departureMinutesLeft(s);
-    if (Number.isFinite(mntLeft) && mntLeft < CUSTOMER_BOOK_CUTOFF_MIN) {
+    if (!customerBookable(s)) {
       toast('Pesanan baru ditutup 60 menit sebelum keberangkatan — pilih jadwal berikutnya', 'warn');
       setBw({ ...bw, step: 3, scheduleId: null });
       refresh();
@@ -666,9 +666,10 @@ export default function Search() {
       const d = todayStr(i);
       const list = allSchedules.filter((x) => selectedRouteIds.has(x.routeId) && x.date === d && routeBookable(routeById(x.routeId)) && !isRouteSuspended(routeById(x.routeId), x.agencyId));
       /* Hitung hanya jadwal yang pelanggan memang masih bisa pesan — kursi
-         ≥1 DAN sisa waktu ≥ cut-off 60 mnt (dari jam efektif). Tanpa ini,
+         ≥1 DAN gerbang cut-off 60 mnt (ATAU delay aktif dengan total ≥60 mnt
+         yang membuka kembali pintu pesan sampai jam estimasi). Tanpa ini,
          kalender menipu "1 tersedia" yang setelahnya selalu gagal aturan. */
-      const avail = list.filter((s) => schedReady(s) && seatsLeft(s.id) > 0 && departureMinutesLeft(s) >= CUSTOMER_BOOK_CUTOFF_MIN).length;
+      const avail = list.filter((s) => schedReady(s) && seatsLeft(s.id) > 0 && customerBookable(s)).length;
       const dt = new Date(d + 'T12:00'); /* label tengah-hari: hari/bulan kapak tidak bergeser di zona waktu mana pun */
       dayMap[d] = {
         d, avail,
@@ -731,14 +732,13 @@ export default function Search() {
           const sel = bw.scheduleId === s.id;
           const ready = schedReady(s);
           const mt = scheduleMaintenance(s);
-          /* Cut-off 60 mnt: pesanan online ditutup mendekati keberangkatan
-             efektif (merapat ikut jam estimasi delay) — kartu dengan sisa
-             waktu <60 mnt tidak lagi boleh dipilih walau kursinya masih ada.
-             Badge delay tetap memakai delayUntil efektif yang disaring server. */
-          const mntLeft = departureMinutesLeft(s);
-          const cutoffPass = mntLeft >= CUSTOMER_BOOK_CUTOFF_MIN;
+          /* Cut-off pelanggan (customerBookable): ditutup <60 mnt ke
+             keberangkatan efektif, KECUALI delay aktif dengan TOTAL ≥60 mnt —
+             delay besar membuka kembali pintu pesan sampai jam estimasi.
+             Kartu yang tertutup tetap tampak dengan badge penjelasnya. */
           const delayActive = s.tripStatus === 'scheduled' && s.delayUntil && new Date(s.delayUntil).getTime() > Date.now();
           const effMs = scheduleEffectiveDepartureMs(s);
+          const cutoffPass = customerBookable(s);
           const selectable = ready && left > 0 && !mt && cutoffPass;
           const why = mt ? 'Armada maintenance' : !ready ? ((v && v.status !== 'aktif') ? 'Armada maintenance' : (dr && dr.status !== 'aktif') ? 'Pengemudi nonaktif' : 'Jadwal ditutup') : (!cutoffPass ? 'Pesanan tutup' : '');
           const cardCls = mt

@@ -4124,9 +4124,16 @@ function apiSyncValidateBookings_(ctx, target) {
           throw apiError_('FORBIDDEN', 'Booking pelanggan tidak boleh bertanda driver.');
         }
         /* Cut-off pemesanan online: ditutup di <60 mnt sebelum keberangkatan
-           efektif — delay menggeser pintu ikut jam estimasinya, bukan menutup. */
+           EFETIF, KECUALI jadwal sedang didelay aktif dengan TOTAL delay
+           ≥60 mnt — delay besar itu kegunaannya membuka kembali pintu pesanan
+           (menunggu pemesan online) sampai jam estimasinya. Delay total <60
+           tetap menutup pintu pelanggan: hanya pengemudi yang menjual. */
         var cusDepMs = apiSyncScheduleDepartureMs_(schedule);
-        if (isFinite(cusDepMs) && cusDepMs - Date.now() < API_CUSTOMER_BOOK_CUTOFF_MS) {
+        var cusDelayOpen = schedule.delayUntil &&
+          new Date(schedule.delayUntil).getTime() > Date.now() &&
+          ['ontrip', 'arrived', 'missed', 'cancelled'].indexOf(String(schedule.tripStatus || 'scheduled')) < 0 &&
+          Number(schedule.delayMinutes) >= 60;
+        if (isFinite(cusDepMs) && cusDepMs - Date.now() < API_CUSTOMER_BOOK_CUTOFF_MS && !cusDelayOpen) {
           throw apiError_('VALIDATION', 'Pesanan online ditutup 60 menit sebelum keberangkatan — pilih jadwal berikutnya.');
         }
       } else if (ctx.role === 'pengemudi') {

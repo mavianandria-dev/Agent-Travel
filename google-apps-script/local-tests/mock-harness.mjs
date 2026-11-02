@@ -299,6 +299,14 @@ function nearDateMin(minutes) {
 const CUTOFF_DEP_90 = nearDateMin(90);
 const CUTOFF_DEP_45 = nearDateMin(45);
 const CUTOFF_DEP_25 = nearDateMin(25);
+/* Jadwal delay-total: jam dasarnya sengaja di masa LAMPAU supaya cabang
+   "sisa ≥60 mnt" mustahil menghitung — pintu pesanan hanya bisa terbuka
+   lewat cabang bengkel kecil delay-total. DelayMinutes = selisih base↔until
+   (mengikuti cara tulisan delay menghitung total). */
+const DEP_BASE_90 = nearDateMin(-45); /* jam dasar 45 mnt lalu */
+const DELAY_UNTIL_90 = new Date(Date.now() + 45 * 60000).toISOString(); /* efektif: 45 mnt lagi (sisa <60) */
+const DEP_BASE_30 = nearDateMin(-5);  /* jam dasar 5 mnt lalu */
+const DELAY_UNTIL_30 = new Date(Date.now() + 25 * 60000).toISOString(); /* efektif: 25 mnt lagi (sisa <30) */
 
 /* Semua tab (utama + anak) dibuat dari skema backend supaya bentuk kolom
    identik dengan spreadsheet produksi yang di-seed lewat setup. */
@@ -1716,6 +1724,36 @@ ok('pengemudi ditolak di 25 mnt (cut-off 30)',
   res.ok === false && res.error.code === 'VALIDATION' &&
   String(res.error.message || '').indexOf('30 menit') >= 0, res);
 
+/* Delay-TOTAL membuka kembali pintu pelanggan. Dua jadwal dengan jam dasar
+   di masa lalu (cabang "sisa ≥60" mustahil lulus): A) delay total 90 mnt,
+   efektif 45 mnt lagi → pelanggan LOLOS lewat cabang delay; B) delay total
+   30 mnt, efektif 25 mnt lagi → pelanggan TOLAK dan pengemudi TOLAK. */
+res = sync({ schedules: { baseRev: revOf('schedules'), upserts: [
+  { id: 's_d90', agencyId: 'ag_1', routeId: 'rt_1', vehicleId: 'v_1', driverId: 'd_1', driverName: 'Bang Jamil', backupDriverId: '', backupName: '', date: DEP_BASE_90.date, time: DEP_BASE_90.time, price: 150000, status: 'open', tripStatus: 'scheduled', blockedSeats: [], createdAt: '2026-10-20T00:00:00.000Z', delayUntil: DELAY_UNTIL_90, delayMinutes: 90, delayReason: 'kurang penumpang' },
+  { id: 's_d30', agencyId: 'ag_1', routeId: 'rt_1', vehicleId: 'v_1', driverId: 'd_1', driverName: 'Bang Jamil', backupDriverId: '', backupName: '', date: DEP_BASE_30.date, time: DEP_BASE_30.time, price: 150000, status: 'open', tripStatus: 'scheduled', blockedSeats: [], createdAt: '2026-10-20T00:00:00.000Z', delayUntil: DELAY_UNTIL_30, delayMinutes: 30, delayReason: 'macet' }
+], deletes: [] } }, adminToken);
+ok('superadmin menyiapkan jadwal delay-total (90/30)', res.ok === true, res);
+
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, syncBooking, {
+  id: 'b_d90', code: 'TA-D90', scheduleId: 's_d90', seats: ['A1'],
+  passengers: [{ name: 'Delay Total 90', seat: 'A1' }]
+})], deletes: [] } }, custToken);
+ok('pelanggan LOLOS lewat delay total 90 meski sisa <60', res.ok === true, res);
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, syncBooking, {
+  id: 'b_d30', code: 'TA-D30', scheduleId: 's_d30', seats: ['A2'],
+  passengers: [{ name: 'Delay Total 30', seat: 'A2' }]
+})], deletes: [] } }, custToken);
+ok('pelanggan ditolak padahal delay 30 aktif (butuh total ≥60)',
+  res.ok === false && res.error.code === 'VALIDATION' &&
+  String(res.error.message || '').indexOf('60 menit') >= 0, res);
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, driverBooking, {
+  id: 'b_d30drv', code: 'TA-D3D', scheduleId: 's_d30', seats: ['A6'],
+  passengers: [{ name: 'Sopir D30', seat: 'A6' }]
+})], deletes: [] } }, driverToken);
+ok('pengemudi ditolak di sisa 25 mnt meski delay 30 aktif',
+  res.ok === false && res.error.code === 'VALIDATION' &&
+  String(res.error.message || '').indexOf('30 menit') >= 0, res);
+
 /* Ekonomi Model B — fee platform dari subtotal:
    jadwal s_dekat (harga 150000, TANPA maintenance di blok imajiner s_1/s_2),
    kursi A8, voucher HEMAT20 (20% max 30000) → diskon 30000. Voucher
@@ -2469,9 +2507,10 @@ schedRawRows.forEach((r) => {
   if (String(r[0]) === 's_1') { r[idxDrv] = 'd_2'; r[idxDnm] = 'Teuku Rizal'; }
   if (String(r[0]) === 's_2') { r[idxBd] = ''; r[idxBn] = ''; }
   if (String(r[0]) === 's_dekat') { r[idxDrv] = 'd_2'; r[idxDnm] = 'Teuku Rizal'; }
-  /* Jadwal uji cut-off (12b) ikut dilepas — d_1 harus bebas jadwal saat uji
-     tautan (17) menilai kehadiran armada murni karena driverId, bukan jadwal. */
-  if (String(r[0]).indexOf('s_cof') === 0) { r[idxDrv] = 'd_2'; r[idxDnm] = 'Teuku Rizal'; }
+  /* Jadwal uji cut-off (12b: s_cof* & s_d90/s_d30) ikut dilepas — d_1 harus
+     bebas jadwal saat uji tautan (17) menilai kehadiran armada murni karena
+     driverId, bukan jadwal. */
+  if (String(r[0]).indexOf('s_cof') === 0 || String(r[0]).indexOf('s_d90') === 0 || String(r[0]).indexOf('s_d30') === 0) { r[idxDrv] = 'd_2'; r[idxDnm] = 'Teuku Rizal'; }
 });
 res = dispatch(bodyOf({}, { action: 'bootstrap', token: driverToken }));
 ok('bootstrap pengemudi tanpa jadwal tetap memuat baris sendiri',
