@@ -4,7 +4,7 @@ import { DB } from '@/lib/db.js';
 import { routeById, vehicleById, bookingsOf, vehName, vehLayout, schedSeatCap, takenSeats, seatsLeft, audit, setScheduleTripStatus, scheduleNeedsReview, scheduleInHistory, schedById, setScheduleDelay, cancelDelayRequest, reportTripDelay, createDriverBooking, confirmDriverBookingPayment, splitFare, tripProgress, bookedPassengers, departureTiming, scheduleIsPast, scheduleMaintenance, maintenancePeriodLabel, scheduleEffectiveDepartureMs, DRIVER_SALE_WINDOW_HOURS } from '@/lib/domain.js';
 import { IS_SHEETS } from '@/lib/runtime.js';
 import { seatInfo } from '@/lib/sheetsApi.js';
-import { refreshSnapshot } from '@/lib/remote.js';
+import { refreshSnapshot, pullSnapshotSoft } from '@/lib/remote.js';
 import { fmtClock, fmtRp } from '@/lib/utils.js';
 import { Icon, Empty, BadgeStatus, fmtDate, CabinGrid } from '@/components/ui.jsx';
 import { FareChain } from '@/components/FareChain.jsx';
@@ -728,6 +728,19 @@ export default function Tasks() {
     const iv = setInterval(pull, 30000);
     return () => clearInterval(iv);
   }, [me?.id, modal]);
+  /* Kembali ke layar = kemungkinan besar keputusan agen (persetujuan/tolak
+     permintaan delay) atau perubahan jadwal sudah turun di server. Tarik
+     lembut lewat pullSnapshotSoft (rem 8 dtk bersama halaman lain) supaya
+     tidak menunggu putaran 30 dtk berikutnya; hormati modal terbuka. */
+  useEffect(() => {
+    if (!IS_SHEETS || !me?.id) return undefined;
+    const onFocus = () => {
+      if (document.hidden || modal) return;
+      pullSnapshotSoft().then((pulled) => { if (pulled) refresh(); });
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [me?.id, modal, refresh]);
   const mySched = DB.load('schedules', []).filter((s) => !me || s.driverId === me.id).sort((a, b) => (a.date + b.time).localeCompare(b.date + b.time));
   const overdue = mySched.filter(scheduleNeedsReview);
   const upcoming = mySched.filter((s) => !scheduleInHistory(s) && !scheduleNeedsReview(s) && s.status !== 'cancelled' && !['arrived', 'missed', 'cancelled'].includes(s.tripStatus));

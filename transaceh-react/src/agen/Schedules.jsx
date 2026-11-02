@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
 import { agencyOf, routeById, vehicleById, vehName, driverById, takenSeats, schedSeatCap, schedReady, scheduleInHistory, scheduleHasTransactions, bookingsOf, audit, scheduleMaintenance, maintenancePeriodLabel, schedById, scheduleDepartureMs, resolveDelayRequest } from '@/lib/domain.js';
@@ -8,12 +8,25 @@ import { ManifestModal } from './Bookings.jsx';
 import { SchedFormModal } from './SchedForm.jsx';
 import CancelTripModal from '@/components/CancelTripModal.jsx';
 import BlockSeatModal from '@/components/BlockSeatModal.jsx';
+import { IS_SHEETS } from '@/lib/runtime.js';
+import { pullSnapshotSoft } from '@/lib/remote.js';
 
 export default function Schedules({ ag }) {
   const { user, openModal, toast, refresh, tick } = useApp();
   const [tab, setTab] = useState('upcoming');
   void tick;
   void schedReady;
+  /* Tarik snapshot segar saat halaman dibuka dan tiap kembali ke layar:
+     permintaan delay pengemudi, jadwal baru, dan pembatalan hanya hidup di
+     server — tanpa ini banner & daftar menampilkan kondisi saat login.
+     pullSnapshotSoft memagari rem 8 dtk; gagal jaringan dibungkam. */
+  useEffect(() => {
+    if (!IS_SHEETS) return undefined;
+    const pull = () => pullSnapshotSoft().then((pulled) => { if (pulled) refresh(); });
+    pull();
+    window.addEventListener('focus', pull);
+    return () => window.removeEventListener('focus', pull);
+  }, [refresh]);
   const agency = ag || agencyOf(user);
   if (!agency) return <div className="bg-white rounded-3xl shadow-card p-5 text-center font-bold text-slate-400">Data travel tidak ditemukan</div>;
   const all = DB.load('schedules', []).filter((s) => s.agencyId === agency.id).sort((a, b) => (a.date + b.time).localeCompare(b.date + b.time));

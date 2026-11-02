@@ -4,7 +4,7 @@ import { DB } from '@/lib/db.js';
 import { schedById, schedReady, takenSeats, seatsLeft, routeById, vehicleById, driverById, vehLayout, schedSeatCap, audit, notify, vehName, splitFare, fareCore, fareModelOf, servicePerSeat, scheduleDepartureMs, createLedger, routeBookable, isRouteSuspended, canPayBooking, scheduleIsPast, cancelBooking as cancelBookingDomain, agencyById, routeGroupKey, groupRoutes, routesInRouteGroup, scheduleMaintenance, maintenancePeriodLabel } from '@/lib/domain.js';
 import { IS_SHEETS } from '@/lib/runtime.js';
 import { seatInfo } from '@/lib/sheetsApi.js';
-import { refreshSnapshot } from '@/lib/remote.js';
+import { refreshSnapshot, pullSnapshotSoft } from '@/lib/remote.js';
 import { fmtRp, todayStr, uid, fmtClock } from '@/lib/utils.js';
 import { Icon, CabinGrid, fmtDate } from '@/components/ui.jsx';
 import { FareChain, discLabelOf } from '@/components/FareChain.jsx';
@@ -294,6 +294,28 @@ export default function Search() {
     settingsPulledOnce = true;
     refreshSnapshot().then(refresh).catch(() => {});
   }, []);
+
+  /* Langkah "Pilih Tanggal" adalah permukaan yang paling mudah basi:
+     hapus/edit jadwal oleh agen dan delay pengemudi (langsung maupun hasil
+     persetujuan) hanya hidup di server, sedangkan cache lokal hanya diisi
+     saat login. Tarik snapshot segar tiap MASUK langkah ini, tiap kembali ke
+     layar (window focus), DAN tiap 15 dtk selama masih di langkah ini —
+     pelanggan kerap menatap halaman tanpa satu pun klik, dan tanpa timer
+     perubahan agen tak akan terantes sampailah mereka memencet sesuatu.
+     Semua soft pull dijaring rem 8 dtk di pullSnapshotSoft (dan tarikan lain
+     menunda rem lewat loadSnapshot), jadi putaran ini tidak membanjiri
+     bootstrap. Gagal jaringan dibungkam — cache lama tetap tampil. */
+  useEffect(() => {
+    if (!IS_SHEETS || bw.step !== 2) return undefined;
+    const pull = () => {
+      if (document.hidden) return;
+      pullSnapshotSoft().then((pulled) => { if (pulled) refresh(); });
+    };
+    pull();
+    window.addEventListener('focus', pull);
+    const iv = setInterval(pull, 15000);
+    return () => { clearInterval(iv); window.removeEventListener('focus', pull); };
+  }, [bw.step, refresh]);
 
   /* Cek server saat memilih kursi (deteksi dini — BUKAN kunci): kursi yang
      baru diklik ditandai 'checking'; baris [Nama]/[No. HP] kursi itu baru
