@@ -1359,6 +1359,23 @@ export const MAX_DEPARTURE_DELAY_MINUTES = 180;
  *  jendela memunculkan peringatan — dan server menegakkan aturan yang sama. */
 export const DRIVER_SALE_WINDOW_HOURS = 12;
 
+/** Cut-off pemesanan berdasar sisa waktu ke keberangkatan EFEKTIF (menit):
+ *  booking online pelanggan ≥60, penjualan langsung pengemudi ≥30. Delay ≥60
+ *  mnt otomatis membuka kembali pesanan online (sisa waktu dihitung ulang dari
+ *  jam estimasi). Berlaku hanya untuk pembuatan booking BARU. */
+export const CUSTOMER_BOOK_CUTOFF_MIN = 60;
+export const DRIVER_SALE_CUTOFF_MIN = 30;
+
+/** Sisa waktu ke keberangkatan efektif dalam menit (dibulatkan ke BAWAH).
+ *  Floor supaya gerbang frontend sanding dengan hakim server (penolakan di
+ *  menit ke-60): sisa 59 mnt 59 dtk dianggap 59 — bukan dibulatkan jadi 60.
+ *  NaN bila jadwal tak bertanggal; negatif = sudah lewat. */
+export function departureMinutesLeft(s, now = Date.now()) {
+  const t = scheduleEffectiveDepartureMs(s);
+  if (!Number.isFinite(t)) return NaN;
+  return Math.floor((t - now) / 60000);
+}
+
 /** Waktu keberangkatan jadwal dalam milidetik (zona waktu lokal). */
 export function scheduleDepartureMs(s) {
   if (!s || !s.date) return NaN;
@@ -2540,6 +2557,10 @@ export function createDriverBooking(sid, { passengers = [], seats = [], driverId
   if (Number.isFinite(dep) && dep - Date.now() > DRIVER_SALE_WINDOW_HOURS * 3600000) {
     const openAt = new Date(dep - DRIVER_SALE_WINDOW_HOURS * 3600000).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
     return { ok: false, msg: 'Penjualan tiket pengemudi dibuka ' + DRIVER_SALE_WINDOW_HOURS + ' jam sebelum keberangkatan — jadwal ini baru bisa dijual ' + openAt + ' WIB.' };
+  }
+  /* Cut-off penjualan: ditutup <30 mnt sebelum keberangkatan efektif. */
+  if (Number.isFinite(dep) && dep - Date.now() < DRIVER_SALE_CUTOFF_MIN * 60000) {
+    return { ok: false, msg: 'Penjualan tiket ditutup ' + DRIVER_SALE_CUTOFF_MIN + ' menit sebelum keberangkatan' };
   }
 
   /* Guard milik-sendiri — menjenguk doCheckout pelanggan: booking driver

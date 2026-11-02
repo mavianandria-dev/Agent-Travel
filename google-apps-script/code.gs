@@ -70,6 +70,15 @@ var API_HOLD_MS = 5 * 60 * 1000;
 /** Jendela penjualan tiket langsung pengemudi: dibuka 12 jam sebelum keberangkatan. */
 var API_DRIVER_SALE_WINDOW_MS = 12 * 60 * 60 * 1000;
 
+/** Cut-off pemesanan berdasar sisa waktu ke keberangkatan EFEKTIF (jam dasar
+ *  atau delayUntil — mana lebih lambat): booking online pelanggan ditutup
+ *  <60 mnt; penjualan langsung pengemudi ditutup <30 mnt. Delay ≥60 mnt justru
+ *  MEMBUKA kembali pintu pesanan online karena sisa waktu dihitung ulang dari
+ *  jam estimasi yang baru. Gate ini hanya untuk booking BARU — pembayaran
+ *  booking pending yang sedang berjalan tetap dihakimi aturan hold masing-masing. */
+var API_CUSTOMER_BOOK_CUTOFF_MS = 60 * 60 * 1000;
+var API_DRIVER_SALE_CUTOFF_MS = 30 * 60 * 1000;
+
 /** Kunci koleksi harus sama persis dengan seed.gs. */
 var API_COLLECTION_KEYS = [
   'users', 'agencies', 'routes', 'routeRequests', 'vehicles', 'drivers',
@@ -108,7 +117,12 @@ var API_PUBLIC_FIELDS = {
     'id', 'agencyId', 'routeId', 'vehicleId', 'date', 'time', 'price',
     'status', 'tripStatus', 'blockedSeats', 'createdAt',
     'maintenanceRequestId', 'maintenanceFrom', 'maintenanceUntil',
-    'maintenanceStatus', 'maintenanceReason'
+    'maintenanceStatus', 'maintenanceReason',
+    /* Proyeksi delay untuk tampilan pelanggan/tamu: badge kartu armada,
+       baner pembayaran, dan tiket. delayNote & delayReq* TIDAK ikut — catatan
+       internal pengemudi dan status permintaan delay adalah urusan
+       pengemudi-agen, bukan konsumsi publik. */
+    'delayUntil', 'delayMinutes', 'delayReason'
   ]
 };
 
@@ -4109,6 +4123,12 @@ function apiSyncValidateBookings_(ctx, target) {
         if (String(rec.source || '') === 'driver') {
           throw apiError_('FORBIDDEN', 'Booking pelanggan tidak boleh bertanda driver.');
         }
+        /* Cut-off pemesanan online: ditutup di <60 mnt sebelum keberangkatan
+           efektif — delay menggeser pintu ikut jam estimasinya, bukan menutup. */
+        var cusDepMs = apiSyncScheduleDepartureMs_(schedule);
+        if (isFinite(cusDepMs) && cusDepMs - Date.now() < API_CUSTOMER_BOOK_CUTOFF_MS) {
+          throw apiError_('VALIDATION', 'Pesanan online ditutup 60 menit sebelum keberangkatan — pilih jadwal berikutnya.');
+        }
       } else if (ctx.role === 'pengemudi') {
         if (String(rec.userEmail || '')) {
           throw apiError_('FORBIDDEN', 'Booking driver tidak boleh memakai email pelanggan.');
@@ -4124,6 +4144,11 @@ function apiSyncValidateBookings_(ctx, target) {
         var saleDepMs = apiSyncScheduleDepartureMs_(schedule);
         if (isFinite(saleDepMs) && saleDepMs - Date.now() > API_DRIVER_SALE_WINDOW_MS) {
           throw apiError_('VALIDATION', 'Penjualan tiket pengemudi dibuka 12 jam sebelum keberangkatan.');
+        }
+        /* Cut-off penjualan langsung: ditutup di <30 mnt sebelum keberangkatan
+           efektif — bus yang tinggal menyala tidak lagi disiapkan tiket. */
+        if (isFinite(saleDepMs) && saleDepMs - Date.now() < API_DRIVER_SALE_CUTOFF_MS) {
+          throw apiError_('VALIDATION', 'Penjualan tiket ditutup 30 menit sebelum keberangkatan.');
         }
       }
       if (status !== 'pending') {

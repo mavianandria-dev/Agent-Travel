@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useApp, freshBW } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { schedById, schedReady, takenSeats, seatsLeft, routeById, vehicleById, driverById, vehLayout, schedSeatCap, audit, notify, vehName, splitFare, fareCore, fareModelOf, servicePerSeat, scheduleDepartureMs, createLedger, routeBookable, isRouteSuspended, canPayBooking, scheduleIsPast, cancelBooking as cancelBookingDomain, agencyById, routeGroupKey, groupRoutes, routesInRouteGroup, scheduleMaintenance, maintenancePeriodLabel } from '@/lib/domain.js';
+import { schedById, schedReady, takenSeats, seatsLeft, routeById, vehicleById, driverById, vehLayout, schedSeatCap, audit, notify, vehName, splitFare, fareCore, fareModelOf, servicePerSeat, scheduleEffectiveDepartureMs, departureMinutesLeft, CUSTOMER_BOOK_CUTOFF_MIN, createLedger, routeBookable, isRouteSuspended, canPayBooking, scheduleIsPast, cancelBooking as cancelBookingDomain, agencyById, routeGroupKey, groupRoutes, routesInRouteGroup, scheduleMaintenance, maintenancePeriodLabel } from '@/lib/domain.js';
 import { IS_SHEETS } from '@/lib/runtime.js';
 import { seatInfo } from '@/lib/sheetsApi.js';
 import { refreshSnapshot, pullSnapshotSoft } from '@/lib/remote.js';
@@ -15,7 +15,9 @@ import { MapPicker } from '@/components/MapPicker.jsx';
 
 /* Label sisa waktu menuju keberangkatan jadwal (hitung saat render kartu). */
 const sisaWaktuBerangkat = (s) => {
-  const ms = scheduleDepartureMs(s) - Date.now();
+  /* Basisnya jam keberangkatan EFEKTIF — jadwal didelay tidak berlabel
+     "Berangkat terlewat" selama jam estimasinya masih di depan. */
+  const ms = scheduleEffectiveDepartureMs(s) - Date.now();
   if (!Number.isFinite(ms) || ms <= 0) return 'Berangkat terlewat';
   const mnt = Math.ceil(ms / 60000);
   if (mnt < 60) return mnt + ' mnt lagi';
@@ -295,18 +297,20 @@ export default function Search() {
     refreshSnapshot().then(refresh).catch(() => {});
   }, []);
 
-  /* Langkah "Pilih Tanggal" adalah permukaan yang paling mudah basi:
-     hapus/edit jadwal oleh agen dan delay pengemudi (langsung maupun hasil
-     persetujuan) hanya hidup di server, sedangkan cache lokal hanya diisi
-     saat login. Tarik snapshot segar tiap MASUK langkah ini, tiap kembali ke
-     layar (window focus), DAN tiap 15 dtk selama masih di langkah ini —
-     pelanggan kerap menatap halaman tanpa satu pun klik, dan tanpa timer
-     perubahan agen tak akan terantes sampailah mereka memencet sesuatu.
-     Semua soft pull dijaring rem 8 dtk di pullSnapshotSoft (dan tarikan lain
-     menunda rem lewat loadSnapshot), jadi putaran ini tidak membanjiri
-     bootstrap. Gagal jaringan dibungkam — cache lama tetap tampil. */
+  /* Langkah "Pilih Tanggal" & "Pilih Armada" adalah permukaan yang paling
+     mudah basi: hapus/edit jadwal oleh agen dan delay pengemudi (langsung
+     maupun hasil persetujuan) hanya hidup di server, sedangkan berkas lokal
+     hanya diisi saat login; badge delay, jam estimasi, dan kartu "Pesanan
+     tutup" (cut-off 60 mnt) hidup di langkah 3. Tarik snapshot segar tiap
+     MASUK ke langkah ini, tiap kembali ke layar (window focus), DAN tiap
+     15 dtk selama masih di salah satu langkah itu — pelanggan kerap menatap
+     halaman tanpa satu pun klik, dan tanpa timer perubahan agen tak akan
+     tertangkap sampailah mereka memencet sesuatu. Semua soft pull dijaring
+     rem 8 dtk di pullSnapshotSoft (tarikan lain menunda rem lewat
+     loadSnapshot), jadi putaran ini tidak membanjiri bootstrap. Gagal
+     jaringan dibungkam — data lama tetap tampil. */
   useEffect(() => {
-    if (!IS_SHEETS || bw.step !== 2) return undefined;
+    if (!IS_SHEETS || (bw.step !== 2 && bw.step !== 3)) return undefined;
     const pull = () => {
       if (document.hidden) return;
       pullSnapshotSoft().then((pulled) => { if (pulled) refresh(); });
@@ -593,6 +597,17 @@ export default function Search() {
       canPayBooking(x, s)
     );
     if (reuse) { openModal(<PaymentModal booking={reuse} />); return; }
+    /* Cut-off pemesanan baru: <60 mnt ke keberangkatan efektif pesanan BARU
+       ditutup (jam estimasi delay ikut dihitung). Pesanan tanggungan yang
+       masih berlaku (reuse di atas) tetap boleh dilunasi sampai berangkat —
+       hanya pembuatan booking baru yang dipagari; hakim final tetap server. */
+    const mntLeft = departureMinutesLeft(s);
+    if (Number.isFinite(mntLeft) && mntLeft < CUSTOMER_BOOK_CUTOFF_MIN) {
+      toast('Pesanan baru ditutup 60 menit sebelum keberangkatan — pilih jadwal berikutnya', 'warn');
+      setBw({ ...bw, step: 3, scheduleId: null });
+      refresh();
+      return;
+    }
     owns.forEach((st) => cancelBookingDomain(st.id, { reason: 'Pesanan diganti saat checkout', by: 'pelanggan' }));
     if (owns.length) refresh();
     const discount = calcDiscount(bw.voucher, bw.scheduleId, bw.seats.length);
@@ -650,7 +665,10 @@ export default function Search() {
     for (let i = 0; i <= 30; i++) {
       const d = todayStr(i);
       const list = allSchedules.filter((x) => selectedRouteIds.has(x.routeId) && x.date === d && routeBookable(routeById(x.routeId)) && !isRouteSuspended(routeById(x.routeId), x.agencyId));
-      const avail = list.filter((s) => schedReady(s) && seatsLeft(s.id) > 0).length;
+      /* Hitung hanya jadwal yang pelanggan memang masih bisa pesan — kursi
+         ≥1 DAN sisa waktu ≥ cut-off 60 mnt (dari jam efektif). Tanpa ini,
+         kalender menipu "1 tersedia" yang setelahnya selalu gagal aturan. */
+      const avail = list.filter((s) => schedReady(s) && seatsLeft(s.id) > 0 && departureMinutesLeft(s) >= CUSTOMER_BOOK_CUTOFF_MIN).length;
       const dt = new Date(d + 'T12:00'); /* label tengah-hari: hari/bulan kapak tidak bergeser di zona waktu mana pun */
       dayMap[d] = {
         d, avail,
@@ -713,8 +731,16 @@ export default function Search() {
           const sel = bw.scheduleId === s.id;
           const ready = schedReady(s);
           const mt = scheduleMaintenance(s);
-          const selectable = ready && left > 0 && !mt;
-          const why = mt ? 'Armada maintenance' : !ready ? ((v && v.status !== 'aktif') ? 'Armada maintenance' : (dr && dr.status !== 'aktif') ? 'Pengemudi nonaktif' : 'Jadwal ditutup') : '';
+          /* Cut-off 60 mnt: pesanan online ditutup mendekati keberangkatan
+             efektif (merapat ikut jam estimasi delay) — kartu dengan sisa
+             waktu <60 mnt tidak lagi boleh dipilih walau kursinya masih ada.
+             Badge delay tetap memakai delayUntil efektif yang disaring server. */
+          const mntLeft = departureMinutesLeft(s);
+          const cutoffPass = mntLeft >= CUSTOMER_BOOK_CUTOFF_MIN;
+          const delayActive = s.tripStatus === 'scheduled' && s.delayUntil && new Date(s.delayUntil).getTime() > Date.now();
+          const effMs = scheduleEffectiveDepartureMs(s);
+          const selectable = ready && left > 0 && !mt && cutoffPass;
+          const why = mt ? 'Armada maintenance' : !ready ? ((v && v.status !== 'aktif') ? 'Armada maintenance' : (dr && dr.status !== 'aktif') ? 'Pengemudi nonaktif' : 'Jadwal ditutup') : (!cutoffPass ? 'Pesanan tutup' : '');
           const cardCls = mt
             ? 'opacity-90 border-red-300 bg-slate-100 cursor-not-allowed'
             : (selectable ? 'cursor-pointer card-hover active:scale-[.99]' : 'opacity-70');
@@ -722,13 +748,14 @@ export default function Search() {
             <div key={s.id} data-schedule-id={s.id} aria-disabled={!selectable} onClick={() => {
               if (selectable) setBw({ ...bw, routeId: s.routeId, scheduleId: s.id, seats: [], passengers: [], pickup: '', pickupAddr: '', pickupCoords: '', voucher: '', discount: 0 });
               else if (mt) toast('Armada maintenance pada tanggal ini — pilih jadwal lain.', 'warn');
+              else if (!cutoffPass) toast('Pesanan online ditutup 60 menit sebelum keberangkatan — pilih jadwal berikutnya.', 'warn');
             }} className={cardCls + ' rounded-2xl border-2 p-3 sm:p-3.5 flex flex-col xs:flex-row sm:flex-row gap-3 transition ' + (sel && selectable ? 'border-sky-500 shadow-lg bg-sky-50/50' : mt ? 'border-red-300' : 'border-slate-100 hover:border-sky-200 bg-white')}>
               <div className="relative shrink-0 overflow-hidden rounded-2xl">
                 <img src={v.photo} onError={(e) => { e.currentTarget.src = 'https://picsum.photos/seed/' + v.id + '/400/250'; }} className={'w-full h-36 xs:w-28 xs:h-24 sm:w-40 sm:h-28 object-cover ' + (mt ? 'grayscale blur-[2px]' : '')} loading="lazy" alt={vehName(v)} />
                 {mt ? <div className="absolute inset-0 bg-slate-900/10"></div> : null}
               </div>
-              <div className="flex-1 min-w-0"><div className="flex items-center gap-2 flex-wrap"><span className="font-extrabold text-[15px]">{vehName(v)}</span><span className="badge bg-slate-100 text-slate-600">{v.plate}</span>{ag ? <span className="badge bg-indigo-50 text-indigo-700">{ag.name}</span> : null}{routeById(s.routeId)?.homePickup !== false ? <span className="badge bg-green-100 text-green-700">Jemput rumah</span> : null}{s.tripStatus === 'scheduled' && s.delayUntil && new Date(s.delayUntil).getTime() > Date.now() ? <span className="badge bg-amber-100 text-amber-700">Delay {s.delayMinutes} mnt • {fmtClock(s.delayUntil)}</span> : null}{mt ? <span className="badge bg-red-100 text-red-700 italic">MAINTENANCE</span> : !ready ? <span className="badge bg-amber-100 text-amber-700">{why}</span> : left <= 2 && left > 0 ? <span className="badge bg-red-100 text-red-700">Sisa {left}</span> : null}{!mt && ready && left === 0 ? <span className="badge bg-red-500 text-white">PENUH</span> : null}</div>
-                <div className="text-[12.5px] font-bold text-sky-700 mt-1 flex items-center gap-2"><Icon name="clock" className="w-3.5 h-3.5" />Berangkat {s.time} WIB • <Icon name="user" className="w-3.5 h-3.5" />{dr ? dr.name + ' ★' + dr.rating : 'Pengemudi ditugaskan travel'}</div>
+              <div className="flex-1 min-w-0"><div className="flex items-center gap-2 flex-wrap"><span className="font-extrabold text-[15px]">{vehName(v)}</span><span className="badge bg-slate-100 text-slate-600">{v.plate}</span>{ag ? <span className="badge bg-indigo-50 text-indigo-700">{ag.name}</span> : null}{routeById(s.routeId)?.homePickup !== false ? <span className="badge bg-green-100 text-green-700">Jemput rumah</span> : null}{delayActive ? <span className="badge bg-amber-100 text-amber-700">Delay {s.delayMinutes} mnt • {fmtClock(s.delayUntil)}</span> : null}{mt ? <span className="badge bg-red-100 text-red-700 italic">MAINTENANCE</span> : !ready ? <span className="badge bg-amber-100 text-amber-700">{why}</span> : left <= 2 && left > 0 ? <span className="badge bg-red-100 text-red-700">Sisa {left}</span> : null}{!mt && ready && left === 0 ? <span className="badge bg-red-500 text-white">PENUH</span> : null}{!mt && ready && left > 0 && !cutoffPass ? <span className="badge bg-amber-100 text-amber-700">Pesanan tutup</span> : null}</div>
+                <div className="text-[12.5px] font-bold text-sky-700 mt-1 flex items-center gap-2"><Icon name="clock" className="w-3.5 h-3.5" />{delayActive && Number.isFinite(effMs) ? 'Berangkat ±' + fmtClock(new Date(effMs)) + ' WIB (estimasi)' : 'Berangkat ' + s.time + ' WIB'} • <Icon name="user" className="w-3.5 h-3.5" />{dr ? dr.name + ' ★' + dr.rating : 'Pengemudi ditugaskan travel'}</div>
                 {mt ? <div className="mt-2 text-[12px] font-semibold text-red-800 bg-red-50 border border-red-200 rounded-xl px-2.5 py-1.5">Tidak dapat dipesan • {mt.legacy ? 'Status armada sedang maintenance.' : 'Maintenance ' + maintenancePeriodLabel(mt) + '.'} Pilih tanggal/jadwal lain.</div> : null}
                 <div className="flex flex-wrap gap-1.5 mt-2">{(v.facilities || []).map((f) => (<span key={f} className="badge bg-slate-100 text-slate-600 !font-semibold"><Icon name="check" className="w-3 h-3" />{f}</span>))}</div>
                 <div className="flex items-center justify-between mt-2.5"><div className="font-extrabold text-[17px] text-[#0b2447]">{fmtRp(s.price + servicePerSeat(s))}<span className="text-[11px] font-semibold text-slate-400">/kursi</span><div className="text-[10.5px] font-semibold text-slate-400">{sisaWaktuBerangkat(s)}</div></div>

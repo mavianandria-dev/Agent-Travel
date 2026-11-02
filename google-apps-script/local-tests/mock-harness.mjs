@@ -285,6 +285,21 @@ function nearDate(hours) {
 }
 const NEAR_DEPARTURE = nearDate(10);
 
+/* Cut-off pemesanan diuji dengan jadwal yang berangkat N MENIT dari sekarang
+   (presisi menit — nearDate() hanya mampu utuh-ke-jam). Margin antar uji
+   besar terhadap batas 60/30 supaya lari harness tidak peka waktu eksekusi. */
+function nearDateMin(minutes) {
+  const d = new Date(Date.now() + minutes * 60000);
+  const p = (n) => String(n).padStart(2, '0');
+  return {
+    date: d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()),
+    time: p(d.getHours()) + ':' + p(d.getMinutes())
+  };
+}
+const CUTOFF_DEP_90 = nearDateMin(90);
+const CUTOFF_DEP_45 = nearDateMin(45);
+const CUTOFF_DEP_25 = nearDateMin(25);
+
 /* Semua tab (utama + anak) dibuat dari skema backend supaya bentuk kolom
    identik dengan spreadsheet produksi yang di-seed lewat setup. */
 const storeSchema = S.apiDescribeStore_();
@@ -1657,6 +1672,50 @@ res = sync({
 ok('sync pengemudi menyelesaikan booking driver + ledger',
   res.ok === true, res);
 
+/* ------------------------------------------------------------------ */
+/* 12b) Cut-off pemesanan: pelanggan 60 mnt, pengemudi 30 mnt          */
+/* ------------------------------------------------------------------ */
+
+console.log('\n== 12b) cut-off pemesanan 60/30 dari keberangkatan efektif ==');
+/* Tiga jadwal uji berangkat 90/45/25 menit dari sekarang (ditulis saat
+   modul dimuat supaya tanggal+jamnya LOKAL dan presisi menit). Margin ke
+   batas 60/30 besar, jadi hasil tidak peka seberapa cepat harness berlari. */
+const cutoffSchedules = [
+  { id: 's_cof90', agencyId: 'ag_1', routeId: 'rt_1', vehicleId: 'v_1', driverId: 'd_1', driverName: 'Bang Jamil', backupDriverId: '', backupName: '', date: CUTOFF_DEP_90.date, time: CUTOFF_DEP_90.time, price: 150000, status: 'open', tripStatus: 'scheduled', blockedSeats: [], createdAt: '2026-10-20T00:00:00.000Z' },
+  { id: 's_cof45', agencyId: 'ag_1', routeId: 'rt_1', vehicleId: 'v_1', driverId: 'd_1', driverName: 'Bang Jamil', backupDriverId: '', backupName: '', date: CUTOFF_DEP_45.date, time: CUTOFF_DEP_45.time, price: 150000, status: 'open', tripStatus: 'scheduled', blockedSeats: [], createdAt: '2026-10-20T00:00:00.000Z' },
+  { id: 's_cof25', agencyId: 'ag_1', routeId: 'rt_1', vehicleId: 'v_1', driverId: 'd_1', driverName: 'Bang Jamil', backupDriverId: '', backupName: '', date: CUTOFF_DEP_25.date, time: CUTOFF_DEP_25.time, price: 150000, status: 'open', tripStatus: 'scheduled', blockedSeats: [], createdAt: '2026-10-20T00:00:00.000Z' }
+];
+res = sync({ schedules: { baseRev: revOf('schedules'), upserts: cutoffSchedules, deletes: [] } }, adminToken);
+ok('superadmin menyiapkan jadwal uji cut-off (90/45/25 mnt)', res.ok === true, res);
+
+/* Pelanggan — online: 90 mnt lolos, 45 mnt ditolak pesan cut-off 60. */
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, syncBooking, {
+  id: 'b_cof90', code: 'TA-C90', scheduleId: 's_cof90', seats: ['A1'],
+  passengers: [{ name: 'Cut-off 90', seat: 'A1' }]
+})], deletes: [] } }, custToken);
+ok('pelanggan masih bisa pesan di 90 mnt', res.ok === true, res);
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, syncBooking, {
+  id: 'b_cof45', code: 'TA-C45', scheduleId: 's_cof45', seats: ['A2'],
+  passengers: [{ name: 'Cut-off 45', seat: 'A2' }]
+})], deletes: [] } }, custToken);
+ok('pelanggan ditolak di 45 mnt (cut-off 60)',
+  res.ok === false && res.error.code === 'VALIDATION' &&
+  String(res.error.message || '').indexOf('60 menit') >= 0, res);
+
+/* Pengemudi — langsung: 45 mnt masih boleh (cut-off 30 ≠ 60), 25 mnt ditolak. */
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, driverBooking, {
+  id: 'b_cof45d', code: 'TA-D45', scheduleId: 's_cof45', seats: ['A6'],
+  passengers: [{ name: 'Sopir 45', seat: 'A6' }]
+})], deletes: [] } }, driverToken);
+ok('pengemudi masih bisa jual di 45 mnt', res.ok === true, res);
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, driverBooking, {
+  id: 'b_cof25d', code: 'TA-D25', scheduleId: 's_cof25', seats: ['A6'],
+  passengers: [{ name: 'Sopir 25', seat: 'A6' }]
+})], deletes: [] } }, driverToken);
+ok('pengemudi ditolak di 25 mnt (cut-off 30)',
+  res.ok === false && res.error.code === 'VALIDATION' &&
+  String(res.error.message || '').indexOf('30 menit') >= 0, res);
+
 /* Ekonomi Model B — fee platform dari subtotal:
    jadwal s_dekat (harga 150000, TANPA maintenance di blok imajiner s_1/s_2),
    kursi A8, voucher HEMAT20 (20% max 30000) → diskon 30000. Voucher
@@ -2410,6 +2469,9 @@ schedRawRows.forEach((r) => {
   if (String(r[0]) === 's_1') { r[idxDrv] = 'd_2'; r[idxDnm] = 'Teuku Rizal'; }
   if (String(r[0]) === 's_2') { r[idxBd] = ''; r[idxBn] = ''; }
   if (String(r[0]) === 's_dekat') { r[idxDrv] = 'd_2'; r[idxDnm] = 'Teuku Rizal'; }
+  /* Jadwal uji cut-off (12b) ikut dilepas — d_1 harus bebas jadwal saat uji
+     tautan (17) menilai kehadiran armada murni karena driverId, bukan jadwal. */
+  if (String(r[0]).indexOf('s_cof') === 0) { r[idxDrv] = 'd_2'; r[idxDnm] = 'Teuku Rizal'; }
 });
 res = dispatch(bodyOf({}, { action: 'bootstrap', token: driverToken }));
 ok('bootstrap pengemudi tanpa jadwal tetap memuat baris sendiri',
