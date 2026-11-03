@@ -2429,6 +2429,11 @@ function apiBootstrapData_(ss, meta, role, user) {
     });
 
     put('routes', read('routes'));
+    /* Gambar kota (kartu tugas pengemudi — latar asal/tujuan) ikut dengan
+       proyeksi publik yang sama (id/city/image): datanya sudah bebas bagi
+       tamu, jadi tidak ada bocoran baru; proyeksi lengkap hanya untuk
+       superadmin. Bacaan lentur bila tab belum dibuat. */
+    putProjected('cityImages', readOptional('cityImages'));
     var driverAgencies = publicAgencies.slice();
     var driverAgency = null;
     if (ownDriver) {

@@ -3036,9 +3036,17 @@ ok('bootstrap agen TIDAK membawa cityImages',
   res.ok === true && !Object.prototype.hasOwnProperty.call(res.data.records, 'cityImages'),
   Object.keys(res.data.records || {}));
 res = dispatch(bodyOf({}, { action: 'bootstrap', token: driverToken }));
-ok('bootstrap pengemudi TIDAK membawa cityImages',
-  res.ok === true && !Object.prototype.hasOwnProperty.call(res.data.records, 'cityImages'),
+ok('bootstrap pengemudi membawa cityImages (latar kartu tugas)',
+  res.ok === true && Object.prototype.hasOwnProperty.call(res.data.records, 'cityImages') &&
+  ((res.data || {}).records || {}).cityImages.length > 0,
   Object.keys(res.data.records || {}));
+/* Proyeksi bagi pengemudi = proyeksi publik: id/city/image saja —
+   province/updatedBy/bytes tidak ikut. */
+const driverCityImg = (res.data.records.cityImages || [])[0] || null;
+ok('proyeksi cityImages bagi pengemudi tetap id+city+image',
+  !!driverCityImg &&
+  Object.keys(driverCityImg).every((k) => ['id', 'city', 'image'].indexOf(k) >= 0),
+  driverCityImg);
 
 /* Tab cityImages HILANG (kasus nyata: kode baru terunggah, "Perbaiki skema"
    belum jalan) → bootstrap publik tidak runtuh DAN sekalian memulihkan tab

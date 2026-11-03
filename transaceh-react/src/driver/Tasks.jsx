@@ -21,6 +21,42 @@ export function drvOfUser(u) {
     || ds.filter((d) => u.agencyId && d.agencyId === u.agencyId)[0] || null;
 }
 
+/** Peta gambar kota (Master admin) → dataURL, kunci nama polos huruf kecil —
+    bahasa pencocokan yang sama dengan kartu "Pilih Rute Perjalanan" (Search). */
+function cityImageMap() {
+  const map = {};
+  DB.load('cityImages', []).forEach((c) => {
+    const k = String(c.city || '').trim().toLowerCase();
+    if (k && c.image) map[k] = c.image;
+  });
+  return map;
+}
+
+/** Latar card tugas berfokus: segitiga foto kota asal (kiri-atas) & tujuan
+    (kanan-bawah) berpisah lewat garis diagonal — bahasa yang sama dengan
+    kartu rute Search. Dilabur putih tembus supaya seluruh isi card (chips,
+    progres, tombol) tetap terbaca; kota tanpa gambar jadi gradasi lembut.
+    -z-10: di ATAS dasar card, di BAWAH seluruh isi (card memakai isolate). */
+function TaskCityBg({ from, to, imgs }) {
+  const side = (img, clip, grad) => (
+    <span className="absolute inset-0" style={{ clipPath: clip }}>
+      {img
+        ? <img src={img} alt="" aria-hidden="true" draggable={false} className="absolute inset-0 h-full w-full object-cover" />
+        : <span className={'absolute inset-0 ' + grad} />}
+    </span>
+  );
+  return (
+    <span className="absolute -z-10 inset-0" aria-hidden="true">
+      {side(imgs[String(from || '').trim().toLowerCase()], 'polygon(0 0, 100% 0, 0 100%)', 'bg-gradient-to-br from-slate-200 to-sky-100')}
+      {side(imgs[String(to || '').trim().toLowerCase()], 'polygon(100% 0, 100% 100%, 0 100%)', 'bg-gradient-to-tr from-sky-100 to-rose-100')}
+      <span className="absolute inset-0 bg-white/75" />
+      <svg className="absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+        <line x1="100" y1="0" x2="0" y2="100" stroke="white" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+      </svg>
+    </span>
+  );
+}
+
 export function tripUpdate(sid, st, toast, refresh, opts = {}) {
   if (!setScheduleTripStatus(sid, st, opts)) return false;
   refresh();
@@ -828,7 +864,8 @@ export default function Tasks({ focusOnly = false }) {
       else openModal(<AckArriveModal sid={s.id} />);
     };
     return (
-      <div key={s.id} data-sid={s.id} className={'bg-white rounded-3xl shadow-card p-4' + (isFocus ? ' ring-2 ring-sky-400' : '')}>
+      <div key={s.id} data-sid={s.id} className={'bg-white rounded-3xl shadow-card p-4 relative isolate overflow-hidden' + (isFocus ? ' ring-2 ring-sky-400' : '')}>
+        {isFocus ? <TaskCityBg from={r.from} to={r.to} imgs={cityImageMap()} /> : null}
         <div className="flex items-center gap-3 flex-wrap">
           <div className="bg-[#0b2447] text-white rounded-2xl px-3.5 py-2 text-center"><div className="text-[11px] font-bold opacity-70">{fmtDate(s.date)}</div><div className="font-extrabold text-[16px]">{s.time}</div></div>
           <div className="flex-1 min-w-[180px]"><div className="font-extrabold text-[15px]">{r.from} → {r.to}</div><div className="text-[12px] text-slate-500 font-medium">{vehName(v)} {v?.plate} • {tk.booked.length}/{schedSeatCap(s.id)} penumpang{tk.blocked.length ? ` • ${tk.blocked.length} tutup` : ''}</div></div>
