@@ -2011,8 +2011,16 @@ export function cleanupHolds(){
   const expired=[];
   const now=Date.now();
   const nowIso=new Date(now).toISOString();
+  /* Pending warisan TANPA holdExpiry dianggap "hold tanpa batas" (kursi
+     tertahan selamanya, tak terjangkau sapuan mana pun) — beri hold segar
+     SEKALI sebagai bantalan: 5 menit lagi untuk melunas; lewat itu jatuh ke
+     pembatalan normal bawah. Nyaris tak ada jalur baru yang mengisi hold
+     (semua pembuat mengisi ini), jadi bagian ini hanya penyelamat warisan. */
+  let granted=0;
   arr.forEach((b)=>{
-    if(b.status!=='pending'||!b.holdExpiry||now<=new Date(b.holdExpiry).getTime()) return;
+    if(b.status!=='pending') return;
+    if(!b.holdExpiry){ b.holdExpiry=new Date(now+5*60*1000).toISOString(); granted+=1; return; }
+    if(now<=new Date(b.holdExpiry).getTime()) return;
     b.status='cancelled';
     b.tripStatus='cancelled';
     b.refundPct=0;
@@ -2026,7 +2034,7 @@ export function cleanupHolds(){
     restoreVoucher(b);
     expired.push(b);
   });
-  if(!expired.length) return;
+  if(!expired.length && !granted) return;
   DB.save('bookings',arr);
   const pays=DB.load('payments',[]);
   let payChanged=false;
@@ -2293,12 +2301,8 @@ function updatePaymentRefund(pays, b, { refund, pct, scope, status }) {
   return true;
 }
 
-/** Booking pending lama yang belum punya hold diberi hold sekali.
- *  Hold yang sudah ada TIDAK diperpanjang saat modal pembayaran dibuka. */
-export function ensureHoldExpiry(b) {
-  if (!b || b.status !== 'pending' || b.holdExpiry) return b;
-  return { ...b, holdExpiry: new Date(Date.now() + 5 * 60 * 1000).toISOString() };
-}
+/* Memberi hold pada pending warisan kini pekerjaan cleanupHolds (kolom
+   bantalan 5 menit) — fungsi manual terpisah tidak diperlukan. */
 
 /** Booking pending masih bisa dibayar: hold aktif, jadwal masih terbuka dan belum berangkat. */
 export function canPayBooking(b, s, { ignoreHold = false, now = Date.now() } = {}) {

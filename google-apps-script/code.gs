@@ -5152,14 +5152,25 @@ function apiSweepExpiredHolds_(ss, meta, revisions) {
   var now = Date.now();
   var nowIso = new Date(now).toISOString();
   var expired = [];
+  var openOld = 0;
   for (var i = 0; i < bookings.length; i++) {
     var b = bookings[i] || {};
     if (String(b.status || '') !== 'pending') continue;
     var hms = Date.parse(b.holdExpiry || '');
-    if (isNaN(hms) || hms > now) continue;
+    if (isNaN(hms)) {
+      /* Pending warisan TANPA hold (semua alur baru mengisi via API_HOLD_MS):
+         selama ini dianggap "hold tanpa batas" — kursinya tertahan selamanya
+         (apiTakenSeatsMap_) dan tidak terjangkau sapuan. Beri hold segar
+         SEKALI sebagai bantalan: 5 menit lagi untuk melunas; lewat itu baris
+         jatuh ke sapuan normal. Idempoten — yang sudah ber-hold di-lewati. */
+      b.holdExpiry = new Date(now + API_HOLD_MS).toISOString();
+      openOld += 1;
+      continue;
+    }
+    if (hms > now) continue;
     expired.push(b);
   }
-  if (!expired.length) return;
+  if (!expired.length && !openOld) return;
   var expiredIds = {};
   for (var j = 0; j < expired.length; j++) {
     var e = expired[j];

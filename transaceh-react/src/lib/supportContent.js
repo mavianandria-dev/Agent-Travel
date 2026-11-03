@@ -58,7 +58,7 @@ export const FAQ_CATEGORIES = [
       {
         id: 'bayar-gagal',
         q: 'Bagaimana jika pembayaran gagal atau terputus?',
-        a: 'Buka menu Tiket Saya, pilih pesanan yang masih berstatus Menunggu Bayar, lalu tekan Bayar untuk mencoba kembali. Sistem akan memberi waktu tambahan 5 menit. Jika saldo sudah terpotong tetapi status belum berubah, hubungi CS dengan menyertakan kode booking dan bukti pembayaran.',
+        a: 'Pesanan Menunggu Bayar ditahan 5 menit dari layar checkout — cobakan bayar di sana, di perangkat yang sama. Tiket Saya baru menampilkan tiket setelah pembayaran lunas. Jika batas habis, pesanan hangus otomatis, kursi dilepas, dan silakan pesan ulang selama kursi masih tersedia. Jika saldo sudah terpotong tetapi status belum berubah, hubungi CS dengan menyertakan kode booking dan bukti pembayaran.',
       },
       {
         id: 'kode-promo',

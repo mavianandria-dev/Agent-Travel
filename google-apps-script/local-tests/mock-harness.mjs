@@ -2720,7 +2720,13 @@ seedCollection('bookings', sweepPrevBookings.concat([
   { id: 'b_sweep_live', code: 'TA-SL', scheduleId: 's_dekat', userEmail: 'cust2@test.local',
     seats: ['B3'], passengers: [{ name: 'Hidup A', seat: 'B3' }],
     subtotal: 160000, discount: 0, total: 160000, status: 'pending',
-    holdExpiry: sweepLiveIso, createdAt: sweepLiveIso }
+    holdExpiry: sweepLiveIso, createdAt: sweepLiveIso },
+  /* pending WARISAN tanpa holdExpiry — sapuannya harus memberi hold segar
+     sekali (bantalan 5 menit), bukan membatalkan langsung. */
+  { id: 'b_sweep_open', code: 'TA-SO', scheduleId: 's_dekat', userEmail: 'cust3@test.local',
+    seats: ['B4'], passengers: [{ name: 'Terbuka A', seat: 'B4' }],
+    subtotal: 160000, discount: 0, total: 160000, status: 'pending',
+    createdAt: sweepDeadIso }
 ]));
 seedCollection('payments', sweepPrevPays.concat([
   { id: 'p_sweep_dead', bookingId: 'b_sweep_dead', amount: 290000, method: 'transfer',
@@ -2755,6 +2761,13 @@ const sweepUsedAfter = (S.apiReadCollection_(spread, 'vouchers').find((x) => x.c
 ok('kuota voucher dikembalikan (used − 1)', sweepUsedAfter === sweepUsedBefore - 1,
   { before: sweepUsedBefore, after: sweepUsedAfter });
 
+/* Pending warisan tanpa hold: diberi hold segar sekali — tetap pending,
+   tidak dibatalkan, dan bantalan berhiilung dari SEKARANG. */
+const sweepOpen = readRec('bookings', 'b_sweep_open');
+ok('pending tanpa holdExpiry diberi hold segar sekali (tetap pending)',
+  !!sweepOpen && sweepOpen.status === 'pending' &&
+  new Date(sweepOpen.holdExpiry).getTime() > Date.now(), sweepOpen);
+
 /* Idempoten: tanpa baris basi sapuan tidak menulis apa-apa — revisi
    bookings/payments/vouchers tidak naik, batch pihak lain tak terganggu. */
 const settled = { bookings: revOf('bookings'), payments: revOf('payments'), vouchers: revOf('vouchers') };
@@ -2766,6 +2779,18 @@ ok('sapu idempoten: tanpa baris basi → no-op, revisi lain tidak naik',
   res.data.revisions.payments === undefined && res.data.revisions.vouchers === undefined &&
   revOf('bookings') === settled.bookings && revOf('payments') === settled.payments &&
   revOf('vouchers') === settled.vouchers, res);
+
+/* Bait kedua: bantalan legacy habis → jabatans jatuh ke pembatalan normal. */
+seedCollection('bookings', S.apiReadCollection_(spread, 'bookings').map((x) =>
+  x.id === 'b_sweep_open' ? Object.assign({}, x, { holdExpiry: new Date(Date.now() - 3000).toISOString() }) : x));
+res = sync({ notifications: { baseRev: revOf('notifications'), upserts: [{
+  id: 'n_sweep_3', to: 'cust1@test.local', title: 'Sapu legacy', msg: 'uji', ch: 'app',
+  time: new Date().toISOString(), read: false }], deletes: [] } }, custToken);
+const sweepOpenDead = readRec('bookings', 'b_sweep_open');
+ok('bantalan legacy habis → dibatalkan sistem oleh sapuan',
+  res.ok === true && !!sweepOpenDead && sweepOpenDead.status === 'cancelled' &&
+  sweepOpenDead.tripStatus === 'cancelled' && sweepOpenDead.cancelledBy === 'sistem' &&
+  sweepOpenDead.cancelReason === 'Hold kedaluwarsa (5 mnt)', sweepOpenDead);
 
 /* ------------------------------------------------------------------ */
 /* 17c) Pagar urutan transisi pengemudi + tagging lokasi wajib         */
