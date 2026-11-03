@@ -2007,6 +2007,9 @@ export function seatBookedFuture(vid,sid){
 }
 
 export function cleanupHolds(){
+  /* Sapuan pencairan otomatis menyusul ayunan yang sama (hanya 10 dtk
+     di mode lokal — di mode Sheets sapuan server yang bekerja). */
+  sweepLedgerAuto();
   const arr=DB.load('bookings',[]);
   const expired=[];
   const now=Date.now();
@@ -2266,8 +2269,40 @@ export function releaseLedger(scheduleId){
 }
 export function voidLedger(bookingId){
   const arr=DB.load('ledger',[]); let ch=false;
-  arr.forEach(e=>{ if(e.bookingId===bookingId&&e.status!=='dicairkan'){ e.status='void'; ch=true; } });
+  arr.forEach(e=>{ if(e.bookingId===bookingId&&e.status!=='dicairkan'){ e.status='void'; e.paidOutAt=null; e.servicePaidOutAt=null; ch=true; } });
   if(ch){ DB.save('ledger',arr); audit('ledger_void',bookingId); }
+  return ch;
+}
+
+/** Jendela ulasan pelanggan: jasa agen otomatis tercatat terkirim ke
+ *  rekening agen tepat 5 menit setelah tag Tiba. */
+export const LEDGER_SERV_GATE_MS = 5*60*1000;
+/** Kliring tiket pengemudi: dana tiket otomatis tercatat terkirim ke
+ *  rekening pengemudi 24 jam setelah tiba. */
+export const LEDGER_KLIRING_MS = 24*3600*1000;
+
+/* Sapu PENCAIRAN OTOMATIS (mode lokal) — cermin dari apiSweepLedgerAuto_:
+   ditahan+sudah tiba → layak; unggul 5 menit → servicePaidOutAt (jasa
+   tercatat terkirim); unggul 24 jam → dicairkan+paidOutAt (tiket). Baris
+   void ditinggalkan; idempoten; tidak ada ajukan, tidak ada tombol. */
+export function sweepLedgerAuto(){
+  const arr=DB.load('ledger',[]);
+  const arrived={};
+  DB.load('schedules',[]).forEach((s)=>{ const t=Date.parse(s.arrivedAt||''); if(!isNaN(t)) arrived[s.id]=t; });
+  const now=Date.now();
+  const nowIso=new Date(now).toISOString();
+  let ch=false;
+  arr.forEach(e=>{
+    if(!e||e.status==='void') return;
+    let t0=arrived[e.scheduleId];
+    if(isNaN(t0)) t0=Date.parse(e.releasedAt||'');
+    if(isNaN(t0)) return;
+    if(e.status==='ditahan'&&now>=t0){ e.status='layak'; e.releasedAt=e.releasedAt||nowIso; ch=true; }
+    if(e.status!=='layak'&&e.status!=='dicairkan') return;
+    if(now>=t0+LEDGER_SERV_GATE_MS&&!e.servicePaidOutAt){ e.servicePaidOutAt=nowIso; ch=true; }
+    if(now>=t0+LEDGER_KLIRING_MS&&!e.paidOutAt){ e.status='dicairkan'; e.paidOutAt=nowIso; ch=true; }
+  });
+  if(ch){ DB.save('ledger',arr); audit('ledger_auto','sapuan pencairan otomatis'); }
   return ch;
 }
 
@@ -2988,12 +3023,6 @@ export function resolveScheduleNoShow(sid, refundPct = 100) {
 
   audit('schedule_no_show', sid + ' • refund ' + pct + '% • ' + count + ' booking • ' + total);
   return { ok: true, count, total, pct };
-}
-export function settleLedger(ids){
-  const arr=DB.load('ledger',[]); let n=0;
-  (ids||[]).forEach(id=>{ const e=arr.find(x=>x.id===id); if(e&&e.status==='layak'){ e.status='dicairkan'; e.paidOutAt=new Date().toISOString(); n++; } });
-  if(n){ DB.save('ledger',arr); audit('ledger_settle',n+' pos'); }
-  return n;
 }
 export function ledgerByDriver(driverId){ return DB.load('ledger',[]).filter(e=>e.driverId===driverId); }
 /* Layak cair = trip tiba + kliring 24 jam */

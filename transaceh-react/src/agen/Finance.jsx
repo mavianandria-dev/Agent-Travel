@@ -14,7 +14,10 @@ export default function Finance({ ag, st }) {
   const ledger = DB.load('ledger', []).filter((e) => e.agencyId === agency.id && e.status !== 'void');
   const active = ledger.filter((e) => e.status === 'ditahan' || e.status === 'layak' || e.status === 'dicairkan');
   const jasaTerkumpul = active.reduce((a, e) => a + (Number(e.service) || 0), 0);
-  const sudahDicairkan = active.filter((e) => e.status === 'dicairkan').reduce((a, e) => a + (Number(e.service) || 0), 0);
+  /* "Sudah terkirim" kini memakai CAP sistem (servicePaidOutAt — diisi
+     sapuan pencairan otomatis menit ke-5), bukan status baris: baris
+     dicairkan lama tanpa cap jasa tidak dihitung terkirim. */
+  const sudahDicairkan = active.filter((e) => e.servicePaidOutAt).reduce((a, e) => a + (Number(e.service) || 0), 0);
   const menungguCair = jasaTerkumpul - sudahDicairkan;
   const feeTot = active.reduce((a, e) => a + (Number(e.fee) || 0), 0);
   const tiketTot = active.reduce((a, e) => a + (Number(e.ticket) || 0), 0);
@@ -46,7 +49,7 @@ export default function Finance({ ag, st }) {
     <div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
         <StatCard icon="hand-coins" label="Jasa Terkumpul" val={fmtRp(jasaTerkumpul)} sub={active.length + ' transaksi jasa'} color="bg-gradient-to-br from-sky-400 to-blue-600" />
-        <StatCard icon="banknote" label="Sudah Dicairkan" val={fmtRp(sudahDicairkan)} sub="status dicairkan" color="bg-gradient-to-br from-green-400 to-emerald-600" />
+        <StatCard icon="banknote" label="Sudah Dicairkan" val={fmtRp(sudahDicairkan)} sub="tercatat terkirim" color="bg-gradient-to-br from-green-400 to-emerald-600" />
         <StatCard icon="clock" label="Menunggu Cair" val={fmtRp(menungguCair)} sub="ditahan + layak" color="bg-gradient-to-br from-amber-400 to-orange-500" />
         <StatCard icon="percent" label={'Fee Platform (' + (gFee.type === 'flat' ? fmtRp(gFee.value) : gFee.value + '%') + ')'} val={fmtRp(feeTot)} sub={'info • tiket ' + fmtRp(tiketTot)} color="bg-gradient-to-br from-red-400 to-rose-600" />
       </div>

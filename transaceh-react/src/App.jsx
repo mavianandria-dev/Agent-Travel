@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { AppProvider, useApp } from '@/store/AppContext.jsx';
 import Header, { BottomNav } from '@/components/Header.jsx';
 import Toasts from '@/components/Toasts.jsx';
+import GateModal from '@/components/GateModal.jsx';
 import Hero from '@/components/Hero.jsx';
 import Home from '@/pages/Home.jsx';
 import Search from '@/pages/Search.jsx';
@@ -87,6 +88,7 @@ function Router() {
       {view === 'home' ? <Hero /> : null}
       <main className="max-w-7xl mx-auto px-3 sm:px-4 pb-32 md:pb-16 pt-3 sm:pt-5 min-h-[70vh]">{navLoading ? <Skeleton /> : page}</main>
       <BottomNav />
+      <GateModal />
       {modal ? (
         <div className="fixed inset-0 z-50 modal-bg flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) closeModal(); }}>
           <div id="modalBox" className="bg-white w-full sm:max-w-lg sm:rounded-3xl rounded-t-3xl max-h-[92vh] overflow-y-auto shadow-pop anim" style={{ animation: 'pop .3s both' }}>

@@ -67,6 +67,14 @@ var API_REGISTER_MAX_PER_HOUR = 30;
 /** Jangka waktu klien harus menyelesaikan pembayaran (hold kursi). */
 var API_HOLD_MS = 5 * 60 * 1000;
 
+/** Jendela ulasan pelanggan: jasa agen tercatat terkirim ke rekening agen
+ *  tepat 5 menit setelah tag Tiba — tanpa ajukan, tanpa tombol admin. */
+var API_LEDGER_SERV_GATE_MS = 5 * 60 * 1000;
+
+/** Kliring tiket pengemudi: dana tiket tercatat terkirim ke rekening
+ *  pengemudi 24 jam setelah tag Tiba — otomatis oleh sapuan. */
+var API_LEDGER_KLIRING_MS = 24 * 60 * 60 * 1000;
+
 /** Jendela penjualan tiket langsung pengemudi: dibuka 12 jam sebelum keberangkatan. */
 var API_DRIVER_SALE_WINDOW_MS = 12 * 60 * 60 * 1000;
 
@@ -838,7 +846,7 @@ var API_MAIN_TABLES = {
     cols: [
       'bookingId', 'scheduleId', 'agencyId', 'driverId', 'userEmail',
       'n:ticket', 'n:service', 'n:fee', 'n:total', 'status', 'createdAt',
-      'releasedAt', 'paidOutAt', 'replacedFromScheduleId'
+      'releasedAt', 'paidOutAt', 'servicePaidOutAt', 'replacedFromScheduleId'
     ],
     children: [
       { table: 'ledger_seats', path: 'seats', kind: 'list', scalar: true,
@@ -2181,6 +2189,12 @@ function apiBootstrapData_(ss, meta, role, user) {
   var revisions = {};
   var cache = {};
 
+  /* Sapuan pencairan otomatis berjalan SEBELUM proyeksi apa pun: snapshot
+     bootstrap memuat cap segar (layak + kliring 24 jam + jasa menit ke-5).
+     Idempoten dan setia pada pagar kolom — meta hanya di-persist bila ada
+     yang benar-benar berubah. */
+  if (apiSweepLedgerAuto_(ss, meta, null)) apiUpdateMeta_(ss, meta);
+
   function read(key) {
     if (!Object.prototype.hasOwnProperty.call(cache, key)) {
       cache[key] = apiReadCollection_(ss, key);
@@ -2982,6 +2996,9 @@ function apiSync_(req, cfg) {
        requester tidak ditolak REV_CONFLICT oleh sapuannya sendiri.
        Idempoten: tanpa baris basi = tanpa tulis, tanpa kenaikan revisi. */
     apiSweepExpiredHolds_(ss, meta, revisions);
+    /* Sapuan pencairan otomatis (tiket 24 jam + jasa menit ke-5) menyusul —
+       kenaikan revisi ledger ikut masuk respons dengan pola yang sama. */
+    apiSweepLedgerAuto_(ss, meta, revisions);
     apiUpdateMeta_(ss, meta);
     SpreadsheetApp.flush();
     return { ok: true, data: { touched: keys, revisions: revisions, scheduleNotes: scheduleNotes } };
@@ -4597,10 +4614,13 @@ function apiSyncValidateLedger_(ctx, target) {
       apiSyncRejectUnknownFields_(entry, {
         id: 1, agencyId: 1, bookingId: 1, scheduleId: 1, driverId: 1,
         userEmail: 1, seats: 1, ticket: 1, service: 1, fee: 1, total: 1,
-        status: 1, createdAt: 1, releasedAt: 1, paidOutAt: 1
+        status: 1, createdAt: 1, releasedAt: 1, paidOutAt: 1,
+        servicePaidOutAt: 1
       }, 'ledger baru');
-      if (entry.paidOutAt) {
-        throw apiError_('FORBIDDEN', 'Pencairan ledger hanya boleh dilakukan admin.');
+      if (entry.paidOutAt || entry.servicePaidOutAt) {
+        /* Pencairan TIDAK lagi milik manusia: sapuan sistem yang mengisi
+           kedua cap ini. Superadmin pun tak boleh menyelip saat membuat. */
+        throw apiError_('FORBIDDEN', 'Pencairan ledger berjalan otomatis oleh sistem.');
       }
       if (!booking || String(booking.status || '') !== 'paid') {
         throw apiError_('VALIDATION', 'Ledger hanya boleh dibuat untuk booking lunas.');
@@ -4664,7 +4684,8 @@ function apiSyncValidateLedger_(ctx, target) {
     var allowed = {
       status: 1, releasedAt: 1, paidOutAt: 1, voidedAt: 1, updatedAt: 1,
       scheduleId: 1, agencyId: 1, driverId: 1, seats: 1,
-      ticket: 1, service: 1, fee: 1, total: 1, replacedFromScheduleId: 1
+      ticket: 1, service: 1, fee: 1, total: 1, replacedFromScheduleId: 1,
+      servicePaidOutAt: 1
     };
     for (var c = 0; c < changed.length; c++) {
       if (!allowed[changed[c]]) {
@@ -4706,11 +4727,24 @@ function apiSyncValidateLedger_(ctx, target) {
     if (!apiSyncLedgerTransitionAllowed_(oldStatus, newStatus)) {
       throw apiError_('FORBIDDEN', 'Perubahan status ledger tidak diizinkan.');
     }
+    /* Void membersihkan seluruh cap pencairan — baris void tidak boleh
+       tampil di laporan pencairan mana pun. Dikerjakan SEBELUM memeriksa
+       pelanggaran supaya payload void dengan cap racun tetap dibersihkan,
+       bukan ditolak. */
+    if (newStatus === 'void') {
+      entry.paidOutAt = '';
+      entry.servicePaidOutAt = '';
+    }
     if (newStatus === 'dicairkan' && oldStatus !== 'dicairkan') {
-      throw apiError_('FORBIDDEN', 'Pencairan ledger hanya boleh dilakukan admin.');
+      /* Tidak ada tombol pencairan lagi: status ini muncul hanya via sapuan
+         otomatis (kliring 24 jam) — bukan aksi pengguna mana pun. */
+      throw apiError_('FORBIDDEN', 'Pencairan ledger berjalan otomatis oleh sistem.');
     }
     if (changed.indexOf('paidOutAt') >= 0 && entry.paidOutAt) {
-      throw apiError_('FORBIDDEN', 'Pencairan ledger hanya boleh dilakukan admin.');
+      throw apiError_('FORBIDDEN', 'Cap pencairan tiket disetel sistem otomatis.');
+    }
+    if (changed.indexOf('servicePaidOutAt') >= 0 && entry.servicePaidOutAt) {
+      throw apiError_('FORBIDDEN', 'Cap pencairan jasa disetel sistem otomatis.');
     }
   }
   (target.upserts || []).forEach(function (rec) {
@@ -5368,4 +5402,81 @@ function apiSweepExpiredHolds_(ss, meta, revisions) {
     apiBumpRev_(meta, 'payments');
     revisions.payments = Number(meta['rev.payments']) || 0;
   }
+}
+
+/**
+ * Sapu PENCAIRAN OTOMATIS ledger — jantung dari alur "semua otomatis":
+ *  - Baris `ditahan` milik jadwal yang sudah TIBA → dilepas ke `layak`
+ *    (jaga-jaga bila pelepasan klien yang lama tak sempat tercatat).
+ *  - `layak` unggul 5 menit sejak tiba → `servicePaidOutAt` terisi
+ *    (jasa agen tercatat terkirim ke rekening agen).
+ *  - `layak` unggul 24 jam sejak tiba → `dicairkan` + `paidOutAt`
+ *    (tiket pengemudi tercatat terkirim ke rekening pengemudi).
+ * Baris `void` DI LEWATI total — uang tidak bergerak tanpa jejak.
+ * Idempoten: tanpa perubahan → tanpa tulis, tanpa kenaikan revisi.
+ * Kolom `servicePaidOutAt` belum ada (skema belum diperbaiki) → diam.
+ * Ukuran tunggu: ukuran anchor = arrivedAt jadwal, bekal releasedAt baris —
+ * sama dengan pegangan ledgerEligible agar lap dan badge cocok.
+ */
+function apiSweepLedgerAuto_(ss, meta, revisions) {
+  var sheet = null;
+  try {
+    sheet = apiSheet_(ss, 'ledger');
+  } catch (e) {
+    return false; /* tab ledger belum ada — apa pun yang terjadi, diam. */
+  }
+  var headers = null;
+  try {
+    var width = apiTables_().mains.ledger.headers.length;
+    headers = sheet.getRange(1, 1, 1, width).getValues()[0] || [];
+  } catch (e2) {
+    return false; /* rentang lewat batas kolom — skema lama, diam. */
+  }
+  var heads = [];
+  for (var h = 0; h < headers.length; h++) heads.push(String(headers[h] || ''));
+  if (heads.indexOf('paidOutAt') < 0 || heads.indexOf('servicePaidOutAt') < 0) return false;
+
+  var ledger = apiReadCollection_(ss, 'ledger');
+  var arrivedAt = {};
+  apiReadCollection_(ss, 'schedules').forEach(function (s) {
+    var t = Date.parse((s && s.arrivedAt) || '');
+    if (!isNaN(t)) arrivedAt[String((s && s.id) || '')] = t;
+  });
+  var now = Date.now();
+  var nowIso = new Date(now).toISOString();
+  var touched = false;
+
+  for (var i = 0; i < ledger.length; i++) {
+    var e = ledger[i];
+    if (!e) continue;
+    var status = String(e.status || '');
+    if (status === 'void') continue; /* uang tidak bergerak — tanpa cap */
+    var t0 = arrivedAt[String(e.scheduleId || '')];
+    if (isNaN(t0)) t0 = Date.parse(String(e.releasedAt || '')); /* bekal baris */
+    if (isNaN(t0)) continue; /* belum pernah tiba / tanpa jejak waktu */
+    if (status === 'ditahan' && now >= t0) {
+      e.status = 'layak';
+      e.releasedAt = String(e.releasedAt || '') || nowIso;
+      status = 'layak';
+      touched = true;
+    }
+    if (status !== 'layak' && status !== 'dicairkan') continue;
+    /* Jasa agen: tepat menit ke-5 sejak tiba — jendela ulasan pelanggan penuh. */
+    if (now >= t0 + API_LEDGER_SERV_GATE_MS && !String(e.servicePaidOutAt || '')) {
+      e.servicePaidOutAt = nowIso;
+      touched = true;
+    }
+    /* Tiket pengemudi: kliring 24 jam sejak tiba → tercatat terkirim. */
+    if (now >= t0 + API_LEDGER_KLIRING_MS && !String(e.paidOutAt || '')) {
+      e.status = 'dicairkan';
+      e.paidOutAt = nowIso;
+      touched = true;
+    }
+  }
+
+  if (!touched) return false;
+  apiWriteCollection_(ss, 'ledger', ledger);
+  apiBumpRev_(meta, 'ledger');
+  if (revisions) revisions.ledger = Number(meta['rev.ledger']) || 0;
+  return true;
 }

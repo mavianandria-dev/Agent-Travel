@@ -1619,6 +1619,107 @@ res = sync({ ledger: { baseRev: revOf('ledger'), upserts: [Object.assign({}, rea
 ok('sync menolak pelanggan mencairkan ledger layak',
   res.ok === false && res.error.code === 'FORBIDDEN', res);
 
+/* ------------------------------------------------------------------ */
+/* 13b) Pencairan OTOMATIS: sapuan clip tiket 24 jam + jasa menit-5    */
+/* ------------------------------------------------------------------ */
+
+console.log('\n== 13b) pencairan otomatis (kliring 24 jam tiket, jasa menit ke-5) ==');
+
+/* Dua jadwal uji milik ag_1 dengan tag tiba: s_gate6 tiba 6 menit lalu
+   (jasa SUDAH lewat menit ke-5, tiket belum lewat 24 jam) dan s_gate24
+   tiba 25 jam lalu (tiket+jasa SUDAH lewat keduanya → dicairkan otomatis). */
+const gateOld6 = new Date(Date.now() - 6 * 60 * 1000).toISOString();
+const gateOld25 = new Date(Date.now() - 25 * 3600 * 1000).toISOString();
+res = sync({ schedules: { baseRev: revOf('schedules'), upserts: [
+  { id: 's_gate6', agencyId: 'ag_1', routeId: 'rt_1', vehicleId: 'v_sync_2', driverId: 'd_sync', driverName: 'Driver Sync', backupDriverId: '', backupName: '', date: nearDateMin(0).date, time: '06:00', price: 150000, status: 'closed', tripStatus: 'arrived', arrivedAt: gateOld6, blockedSeats: [] },
+  { id: 's_gate24', agencyId: 'ag_1', routeId: 'rt_1', vehicleId: 'v_sync_2', driverId: 'd_sync', driverName: 'Driver Sync', backupDriverId: '', backupName: '', date: nearDateMin(0).date, time: '05:00', price: 150000, status: 'closed', tripStatus: 'arrived', arrivedAt: gateOld25, blockedSeats: [] }
+], deletes: [] } }, adminToken);
+ok('superadmin menyiapkan dua jadwal tiba untuk uji sapuan', res.ok === true, res);
+
+const gateBooking6 = {
+  id: 'b_gate_6', code: 'TA-GATE-6', scheduleId: 's_gate6', userEmail: 'cust1@test.local',
+  seats: ['A1'], passengers: [{ name: 'Cust Gate 6', seat: 'A1' }],
+  subtotal: 160000, discount: 0, total: 172800, status: 'paid', source: 'pelanggan',
+  fare: { ticket: 150000, service: 10000, fee: 12800, total: 172800 },
+  createdAt: '2026-10-30T05:00:00.000Z'
+};
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [gateBooking6], deletes: [] } }, adminToken);
+ok('superadmin menyiapkan booking lunas s_gate6', res.ok === true, res);
+res = sync({ payments: { baseRev: revOf('payments'), upserts: [{ id: 'p_gate_6', bookingId: 'b_gate_6', amount: 172800, method: 'transfer', status: 'paid', fee: 12800, time: '2026-10-30T05:05:00.000Z' }], deletes: [] } }, adminToken);
+ok('superadmin menyiapkan pembayaran lunas s_gate6', res.ok === true, res);
+
+const gateBooking24 = Object.assign({}, gateBooking6, {
+  id: 'b_gate_24', code: 'TA-GATE-24', scheduleId: 's_gate24',
+  seats: ['A2'], passengers: [{ name: 'Cust Gate 24', seat: 'A2' }]
+});
+const gateLedger24 = {
+  id: 'l_gate_24', agencyId: 'ag_1', bookingId: 'b_gate_24', scheduleId: 's_gate24',
+  userEmail: 'cust1@test.local', seats: ['A2'], ticket: 150000, service: 10000,
+  fee: 12800, total: 172800, status: 'ditahan', createdAt: '2026-10-30T05:05:00.000Z'
+};
+const gateLedger6 = {
+  id: 'l_gate_6', agencyId: 'ag_1', bookingId: 'b_gate_6', scheduleId: 's_gate6',
+  userEmail: 'cust1@test.local', seats: ['A1'], ticket: 150000, service: 10000,
+  fee: 12800, total: 172800, status: 'ditahan', createdAt: '2026-10-30T05:05:00.000Z'
+};
+res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [gateBooking24], deletes: [] } }, adminToken);
+ok('superadmin menyiapkan booking lunas s_gate24', res.ok === true, res);
+res = sync({ payments: { baseRev: revOf('payments'), upserts: [{ id: 'p_gate_24', bookingId: 'b_gate_24', amount: 172800, method: 'transfer', status: 'paid', fee: 12800, time: '2026-10-30T05:05:00.000Z' }], deletes: [] } }, adminToken);
+ok('superadmin menyiapkan pembayaran lunas s_gate24', res.ok === true, res);
+res = sync({ ledger: { baseRev: revOf('ledger'), upserts: [gateLedger6, gateLedger24], deletes: [] } }, adminToken);
+ok('superadmin menyiapkan dua ledger ditahan untuk sapuan', res.ok === true, res);
+
+/* Bootstrap memicu sapuan SEBELUM proyeksi — cap segar harus terbaca. */
+res = dispatch(bodyOf({}, { action: 'bootstrap', token: custToken }));
+ok('bootstrap menyapu pencairan otomatis (tiket/jasa)',
+  res.ok === true, res);
+const gateFirst6 = readRec('ledger', 'l_gate_6');
+const gateFirst24 = readRec('ledger', 'l_gate_24');
+ok('sapuan: tiket 6 menit → layak + jasa tercatat terkirim, tiket belum',
+  String(gateFirst6.status || '') === 'layak' &&
+  !!String((gateFirst6 || {}).servicePaidOutAt || '') &&
+  !String((gateFirst6 || {}).paidOutAt || ''), gateFirst6);
+ok('sapuan: tiket 25 jam → dicairkan otomatis + kedua cap terisi',
+  String(gateFirst24.status || '') === 'dicairkan' &&
+  !!String((gateFirst24 || {}).paidOutAt || '') &&
+  !!String((gateFirst24 || {}).servicePaidOutAt || ''), gateFirst24);
+
+res = dispatch(bodyOf({}, { action: 'bootstrap', token: custToken }));
+const gateAgain6 = readRec('ledger', 'l_gate_6');
+ok('sapuan idempoten — cap tidak ditulis ulang pada bootstrap kedua',
+  String(gateAgain6.servicePaidOutAt || '') === String(gateFirst6.servicePaidOutAt || '') &&
+  String(gateAgain6.paidOutAt || '') === String(gateFirst6.paidOutAt || ''), gateAgain6);
+
+/* Pelanggaran menulis cap: pengemudi & agen ditolak — pencairan otomatis. */
+res = sync({ ledger: { baseRev: revOf('ledger'), upserts: [Object.assign({}, readRec('ledger', 'l_gate_6') || gateLedger6, {
+  servicePaidOutAt: gateOld6
+})], deletes: [] } }, agenToken);
+ok('sync agen ditolak menulis cap pencairan jasa',
+  res.ok === false && res.error.code === 'FORBIDDEN', res);
+res = sync({ ledger: { baseRev: revOf('ledger'), upserts: [Object.assign({}, readRec('ledger', 'l_gate_6') || gateLedger6, {
+  status: 'dicairkan', paidOutAt: gateOld6, servicePaidOutAt: gateOld6
+})], deletes: [] } }, driverToken);
+ok('sync pengemudi ditolak mencairkan ledger (otomatis)',
+  res.ok === false && res.error.code === 'FORBIDDEN', res);
+
+/* Void membersihkan kedua cap — uang tidak bergerak tanpa jejak. */
+res = sync({ ledger: { baseRev: revOf('ledger'), upserts: [Object.assign({}, readRec('ledger', 'l_gate_6') || gateLedger6, {
+  status: 'void', paidOutAt: gateOld6, servicePaidOutAt: gateOld6
+})], deletes: [] } }, custToken);
+ok('sync void ledger layak diterima', res.ok === true, res);
+const gateVoid = readRec('ledger', 'l_gate_6');
+ok('void membersihkan cap pencairan tiket+jasa',
+  String(gateVoid.status || '') === 'void' &&
+  !String((gateVoid || {}).paidOutAt || '') &&
+  !String((gateVoid || {}).servicePaidOutAt || ''), gateVoid);
+
+/* Penyelamat superadmin tetap boleh menulis cap langsung (alat data). */
+res = sync({ ledger: { baseRev: revOf('ledger'), upserts: [Object.assign({}, readRec('ledger', 'l_gate_24'), {
+  servicePaidOutAt: gateOld25, paidOutAt: gateOld25
+})], deletes: [] } }, adminToken);
+ok('superadmin masih bisa menyelamatkan cap pencairan langsung', res.ok === true, res);
+
+
 res = sync({ bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, syncBooking, {
   id: 'b_sync_agen', code: 'TA-AG', seats: ['A6'],
   passengers: [{ name: 'Agen', seat: 'A6' }]
