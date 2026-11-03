@@ -813,7 +813,7 @@ const publicRes = dispatch(bodyOf({}, { action: 'bootstrap' }));
 const publicRecords = publicRes.data ? publicRes.data.records : {};
 const publicJson = JSON.stringify(publicRes);
 ok('bootstrap publik sukses tanpa token', publicRes.ok === true && publicRes.data.role === 'publik', publicRes);
-ok('bootstrap publik hanya koleksi publik', Object.keys(publicRecords).sort().join(',') === 'agencies,banners,reviews,routes,schedules,settings,vehicles', Object.keys(publicRecords));
+ok('bootstrap publik hanya koleksi publik', Object.keys(publicRecords).sort().join(',') === 'agencies,banners,cityImages,reviews,routes,schedules,settings,vehicles', Object.keys(publicRecords));
 ok('bootstrap publik hanya membuka platformFee dari settings',
   (publicRecords.settings || []).length === 1 &&
   String((publicRecords.settings[0] || {}).key) === 'platformFee' &&
@@ -2953,6 +2953,144 @@ ok('isinya utuh, approvedBy kosong',
   (dRow.length <= dhdrNew.length - 1 ||
     String(dRow[dhdrNew.length - 1]).trim() === ''),
   { row: dRow, hdr: dhdrNew });
+
+/* ------------------------------------------------------------------ */
+/* 20) cityImages — gambar kota tujuan (superadmin-saja, 1 rekord/kota) */
+/* ------------------------------------------------------------------ */
+
+console.log('\n== 20) cityImages: kartu gambar kota tujuan ==');
+
+function cityImgId(city) {
+  const slug = String(city || '').trim().toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return 'ci_' + (slug || 'x');
+}
+function cityRec(city, imageTail) {
+  return {
+    id: cityImgId(city), city, province: 'Aceh', mime: 'image/jpeg',
+    image: 'data:image/jpeg;base64,' + (imageTail || 'a9'),
+    bytes: 1800, updatedAt: new Date().toISOString(), updatedBy: 'admin@transaceh.id'
+  };
+}
+
+/* Non-superadmin ditolak di gerbang daftar peran (bukan validator). */
+res = sync({ cityImages: { baseRev: revOf('cityImages'), upserts: [cityRec('Banda Aceh')], deletes: [] } }, custToken);
+ok('pelanggan menulis cityImages ditolak FORBIDDEN', res.ok === false && res.error.code === 'FORBIDDEN' && /cityImages/.test(res.error.message), res);
+
+/* Superadmin unggah → sukses, revisi naik. */
+const cityBase = revOf('cityImages');
+res = sync({ cityImages: { baseRev: cityBase, upserts: [cityRec('Banda Aceh')], deletes: [] } }, adminToken);
+ok('superadmin unggah gambar kota sukses & revisi naik', res.ok === true && res.data.revisions.cityImages === cityBase + 1, res);
+
+/* Kota sama unggah ulang → memperbarui rekord yang sama, tidak mendobel. */
+const cityCountBefore = S.apiReadCollection_(spread, 'cityImages').length;
+const cityImg2 = 'data:image/jpeg;base64,' + 'b7'.repeat(600);
+res = sync({ cityImages: { baseRev: revOf('cityImages'), upserts: [Object.assign(cityRec('Banda Aceh'), { image: cityImg2 })], deletes: [] } }, adminToken);
+const cityListAfter = S.apiReadCollection_(spread, 'cityImages');
+ok('unggah ulang kota sama memperbarui rekord yang sama (tidak dobel)',
+  res.ok === true && cityListAfter.length === cityCountBefore &&
+  String((readRec('cityImages', cityImgId('Banda Aceh')) || {}).image) === cityImg2,
+  { count: cityListAfter.length });
+
+/* Dua rekord untuk kota yang sama ditolak. */
+res = sync({ cityImages: { baseRev: revOf('cityImages'), upserts: [Object.assign(cityRec('Banda Aceh'), { id: 'ci_manual_lain' })], deletes: [] } }, adminToken);
+ok('dua rekord untuk kota sama ditolak VALIDATION', res.ok === false && res.error.code === 'VALIDATION' && /sudah punya rekord/.test(res.error.message), res);
+
+/* DataURL melebihi ambang validator → VALIDATION sebelum menyentuh sel. */
+res = sync({ cityImages: { baseRev: revOf('cityImages'), upserts: [Object.assign(cityRec('Langsa'), { image: 'data:image/jpeg;base64,' + 'xY'.repeat(24000) })], deletes: [] } }, adminToken);
+ok('gambar raksasa ditolak VALIDATION (ambang validator)',
+  res.ok === false && res.error.code === 'VALIDATION' && /terlalu besar/.test(res.error.message), res);
+
+/* Field di luar skema ditolak. */
+res = sync({ cityImages: { baseRev: revOf('cityImages'), upserts: [Object.assign(cityRec('Sigli'), { fieldKhusus: 1 })], deletes: [] } }, adminToken);
+ok('field di luar skema cityImages ditolak', res.ok === false && res.error.code === 'VALIDATION' && /tidak dikenal/.test(res.error.message), res);
+
+/* Hapus gambar kota sukses. */
+res = sync({ cityImages: { baseRev: revOf('cityImages'), upserts: [], deletes: [cityImgId('Banda Aceh')] } }, adminToken);
+ok('hapus gambar kota sukses', res.ok === true && !readRec('cityImages', cityImgId('Banda Aceh')), res);
+
+/* Kembalikan satu gambar supaya uji proyeksi tak vacuous (bila daftar kosong,
+   "every" selain lolos apa pun yang terjadi). */
+res = sync({ cityImages: { baseRev: revOf('cityImages'), upserts: [cityRec('Banda Aceh', 'e5')], deletes: [] } }, adminToken);
+ok('unggah kembali kota uji untuk skoping proyeksi', res.ok === true, res);
+
+/* Scoping bootstrap: gambar kini bagian katalog — publik menerima proyeksi
+   (kota + gambar saja, tanpa updatedBy/bytes), pelanggan juga; agen dan
+   pengemudi tidak (katalog pencarian ini milik penumpang). */
+clearRateLimits();
+res = dispatch(bodyOf({}, { action: 'bootstrap' }));
+const pubCityList = ((res.data || {}).records || {}).cityImages || [];
+ok('bootstrap publik membawa cityImages terproyeksi (kota + gambar saja)',
+  res.ok === true && pubCityList.length === 1 &&
+  pubCityList.every((c) => String(c.image || '').indexOf('data:image/jpeg') === 0 &&
+    !Object.prototype.hasOwnProperty.call(c, 'updatedBy') &&
+    !Object.prototype.hasOwnProperty.call(c, 'bytes')), pubCityList);
+ok('proyeksi publik cityImages tidak bocor email admin (updatedBy)',
+  !JSON.stringify(pubCityList).includes('admin@transaceh.id'), pubCityList);
+res = dispatch(bodyOf({}, { action: 'bootstrap', token: custToken }));
+ok('bootstrap pelanggan membawa cityImages',
+  res.ok === true && Object.prototype.hasOwnProperty.call(res.data.records, 'cityImages'),
+  Object.keys(res.data.records || {}));
+res = dispatch(bodyOf({}, { action: 'bootstrap', token: agenToken }));
+ok('bootstrap agen TIDAK membawa cityImages',
+  res.ok === true && !Object.prototype.hasOwnProperty.call(res.data.records, 'cityImages'),
+  Object.keys(res.data.records || {}));
+res = dispatch(bodyOf({}, { action: 'bootstrap', token: driverToken }));
+ok('bootstrap pengemudi TIDAK membawa cityImages',
+  res.ok === true && !Object.prototype.hasOwnProperty.call(res.data.records, 'cityImages'),
+  Object.keys(res.data.records || {}));
+
+/* Tab cityImages HILANG (kasus nyata: kode baru terunggah, "Perbaiki skema"
+   belum jalan) → bootstrap publik tidak runtuh DAN sekalian memulihkan tab
+   dari skema; daftar masih kosong sehingga kartu rute memakai gradasi. */
+const citySheetTest = spread.getSheetByName('cityImages');
+spread.deleteSheet(citySheetTest);
+clearRateLimits();
+res = dispatch(bodyOf({}, { action: 'bootstrap' }));
+ok('tab hilang → bootstrap publik pulihkan tab otomatis & tetap ok (kosong)',
+  res.ok === true && Array.isArray(((res.data || {}).records || {}).cityImages) &&
+  ((res.data || {}).records.cityImages).length === 0 && !!spread.getSheetByName('cityImages'), res);
+res = dispatch(bodyOf({}, { action: 'bootstrap', token: custToken }));
+ok('tab hilang → bootstrap pelanggan tetap ok (daftar kosong)',
+  res.ok === true && Array.isArray(((res.data || {}).records || {}).cityImages) &&
+  ((res.data || {}).records.cityImages).length === 0, res);
+
+/* Dan SIMPAN admin tak perlu menunggu apa pun: tab telah pulih → tulis normal. */
+res = sync({ cityImages: { baseRev: revOf('cityImages'), upserts: [cityRec('Langsa', 'f7')], deletes: [] } }, adminToken);
+ok('simpan gambar ke tab yang tadi hilang: tertulis normal (skema pulih)',
+  res.ok === true && !!spread.getSheetByName('cityImages') &&
+  !!readRec('cityImages', cityImgId('Langsa')), res);
+/* Setelah pulih, papan admin memuat koleksi lagi beserta revisinya. */
+res = dispatch(bodyOf({}, { action: 'bootstrap', token: adminToken }));
+ok('bootstrap superadmin memuat cityImages kembali (1 rekord)',
+  res.ok === true && ((res.data || {}).records || {}).cityImages &&
+  ((res.data || {}).records).cityImages.length === 1 &&
+  res.data.revisions.cityImages === revOf('cityImages'), res);
+/* Tulis-lanjutan bekerja biasa (bukti heal tak mengulang-ulang). */
+res = sync({ cityImages: { baseRev: revOf('cityImages'), upserts: [], deletes: [cityImgId('Langsa')] } }, adminToken);
+ok('sync lanjutan normal setelah pulih (hapus rekord uji)',
+  res.ok === true && !readRec('cityImages', cityImgId('Langsa')), res);
+/* ensureSchema idempoten — tab sudah ada; tanpa fix berbunyi "tab cityImages dibuat". */
+const ensureCity = S.ensureSchema_();
+ok('Perbaiki skema setelah pulih: idempoten (tanpa pembuatan ulang cityImages)',
+  ensureCity.ok === true &&
+  !(ensureCity.fixes || []).some((f) => String(f).indexOf('tab cityImages dibuat') === 0),
+  (ensureCity.fixes || []).join(' | '));
+
+/* Field `province` (dropdown provinsi→kota di Master): wajib, tersimpan
+   pada rekornya, dan TIDAK diproyeksikan ke publik — kartu Pilih Rute
+   Perjalanan cukup mencocokkan nama kota. */
+res = sync({ cityImages: { baseRev: revOf('cityImages'), upserts: [Object.assign(cityRec('Medan'), { province: 'Sumatera Utara' })], deletes: [] } }, adminToken);
+ok('field province tersimpan pada rekord cityImages',
+  res.ok === true && String((readRec('cityImages', cityImgId('Medan')) || {}).province) === 'Sumatera Utara', res);
+res = sync({ cityImages: { baseRev: revOf('cityImages'), upserts: [Object.assign(cityRec('Kualasimpang'), { province: '' })], deletes: [] } }, adminToken);
+ok('province kosong ditolak VALIDATION', res.ok === false && res.error.code === 'VALIDATION', res);
+res = dispatch(bodyOf({}, { action: 'bootstrap' }));
+const cityImgPub = (((res.data || {}).records || {}).cityImages || []).find((c) => c.city === 'Medan') || null;
+ok('proyeksi publik cityImages tetap id+city+image (tanpa province)',
+  !!cityImgPub && Object.keys(cityImgPub).every((k) => ['id', 'city', 'image'].indexOf(k) >= 0), cityImgPub);
+res = sync({ cityImages: { baseRev: revOf('cityImages'), upserts: [], deletes: [cityImgId('Medan')] } }, adminToken);
+ok('bersih-bersih rekord uji province', res.ok === true && !readRec('cityImages', cityImgId('Medan')), res);
 
 console.log('\n== Ringkasan ==');
 console.log('PASS: ' + passed + ', FAIL: ' + failed);

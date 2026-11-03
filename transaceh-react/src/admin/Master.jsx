@@ -2,7 +2,9 @@ import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
 import { audit, DEFAULT_SERVICE, platformFeeOf, savePlatformFee } from '@/lib/domain.js';
-import { fmtRp } from '@/lib/utils.js';
+import { cityImageFromFile, cityImageId, CITY_IMAGE_MAX_CHARS } from '@/lib/imageTool.js';
+import { fmtRp, inC } from '@/lib/utils.js';
+import { PROVINSI, KABKOTA, PILIHAN_LAIN } from '@/lib/daerah.js';
 import { Icon } from '@/components/ui.jsx';
 
 function PlatformFeeCard() {
@@ -35,6 +37,188 @@ function PlatformFeeCard() {
   );
 }
 
+function CityImagesCard() {
+  const { user, refresh, toast } = useApp();
+  const routes = DB.load('routes', []);
+  const imgs = DB.load('cityImages', []);
+  const imgByCity = {};
+  imgs.forEach((c) => { imgByCity[String(c.city || '').trim().toLowerCase()] = c; });
+
+  /* Garis kemajuan: kota yang namanya ada pada rute aktif. Form unggah
+     sendiri TIDAK terikat rute — dropdown wilayah (daerah.js) memasang
+     kota mana pun; hitungan ini hanya informasi kenyamanan admin. */
+  const routeCities = new Set();
+  routes.forEach((r) => {
+    const fk = String(r.from || '').trim().toLowerCase();
+    const tk = String(r.to || '').trim().toLowerCase();
+    if (fk) routeCities.add(fk);
+    if (tk) routeCities.add(tk);
+  });
+  const terisi = [...routeCities].filter((k) => imgByCity[k] && imgByCity[k].image).length;
+
+  const [prov, setProv] = useState('');
+  const [kotaSel, setKotaSel] = useState('');
+  const [kotaBebas, setKotaBebas] = useState('');
+  const [pend, setPend] = useState({}); /* { cityKey: {city, provisi, dataUrl, bytes} } — pratinjau sebelum simpan */
+
+  const opsiKota = KABKOTA[prov] || [];
+  /* Dropdown memakai nama resmi berawalan ("Kota Medan", "Kabupaten Aceh
+     Barat") — kartu "Pilih Rute Perjalanan" memakai nama polos ("Medan",
+     "Aceh Barat"). Simpan TANPA awalan supaya pencocokan nama kota tetap
+     pas; kota tulis-sendiri disimpan apa adanya. */
+  const namaRaw = kotaSel === PILIHAN_LAIN ? String(kotaBebas || '').trim() : String(kotaSel || '').trim();
+  const namaCity = kotaSel === PILIHAN_LAIN ? namaRaw : namaRaw.replace(/^(Kabupaten|Kota)\s+/i, '').trim();
+  const cityKey = namaCity.toLowerCase();
+  const cur = imgByCity[cityKey];
+  const p = pend[cityKey];
+
+  /* Pilih file → pipihkan → pratinjau. Provinsi ikut dari pemanggil:
+     editor atas memakai dropdown, baris terpasang memakai provinsi
+     rekornya sendiri. */
+  const pilihFile = (key, city, provisi) => (e) => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    if (f.size > 8 * 1024 * 1024) { toast('Foto maksimal 8 MB — kecilkan dulu', 'err'); return; }
+    cityImageFromFile(f).then((out) => {
+      if (out.dataUrl.length > CITY_IMAGE_MAX_CHARS) {
+        toast('Gambar masih terlalu besar — pilih foto lebih kecil', 'err');
+        return;
+      }
+      setPend((m) => ({ ...m, [key]: { city, provisi, dataUrl: out.dataUrl, bytes: out.bytes } }));
+    }).catch((err) => toast(err.message || 'Gambar tidak bisa dibaca', 'err'));
+  };
+
+  const simpan = (key) => {
+    const pr = pend[key] || {};
+    const city = String(pr.city || '').trim();
+    const provisi = String(pr.provisi || '').trim();
+    if (city.length < 2) { toast('Pilih provinsi lalu kota dulu', 'err'); return; }
+    if (!provisi) { toast('Provinsi wajib dipilih — pilih dari dropdown provinsi', 'err'); return; }
+    const arr = DB.load('cityImages', []);
+    const id = cityImageId(city);
+    let rec = arr.find((x) => x.id === id);
+    const wasBaru = !rec;
+    if (!rec) { rec = { id }; arr.push(rec); }
+    rec.city = city;
+    rec.province = provisi;
+    rec.mime = 'image/jpeg';
+    rec.image = pr.dataUrl;
+    rec.bytes = pr.bytes;
+    rec.updatedAt = new Date().toISOString();
+    rec.updatedBy = (user && user.email) || '';
+    DB.save('cityImages', arr);
+    audit('city_image', city + ' • ' + (wasBaru ? 'unggah gambar' : 'gambar diperbarui'));
+    setPend((m) => { const n = { ...m }; delete n[key]; return n; });
+    refresh();
+    toast('Gambar kota ' + city + ' tersimpan');
+  };
+
+  const hapus = (city) => {
+    const key = city.toLowerCase();
+    DB.save('cityImages', DB.load('cityImages', []).filter((x) => String(x.city || '').trim().toLowerCase() !== key));
+    audit('city_image', city + ' • gambar dihapus');
+    refresh();
+    toast('Gambar kota ' + city + ' dihapus');
+  };
+
+  const terpasang = imgs.slice().sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+
+  return (
+    <div className="bg-white rounded-3xl shadow-card p-5">
+      <h3 className="font-extrabold text-[15px] flex items-center gap-2"><Icon name="image" className="w-5 h-5 text-rose-600" />GAMBAR KOTA</h3>
+      <div className="text-[11.5px] text-slate-400 font-medium mt-1">Tampil di kartu "Pilih Rute Perjalanan" pencarian (belahan asal & tujuan). Dipipihkan otomatis 512 px — target ±30 KB, mutu JPEG minimal 0,60. Satu rekord per kota: unggah ulang menggantikan, tidak mendobel.</div>
+      <div className="text-[11.5px] font-bold mt-2"><span className="text-sky-700">{terisi}/{routeCities.size} kota rute sudah bergambar</span></div>
+
+      {/* Dropdown provinsi → kota/kabupaten (data wilayah resmi, pola AlamatFields). */}
+      <div className="grid grid-cols-2 gap-2.5 mt-2.5">
+        <div>
+          <label className="text-[11px] font-extrabold text-slate-500">PROVINSI <span className="text-red-500">*</span></label>
+          <select value={prov} onChange={(e) => { setProv(e.target.value); setKotaSel(''); setKotaBebas(''); }} className={'w-full mt-1 ' + inC}>
+            <option value="">— Pilih —</option>
+            {PROVINSI.map((o) => <option key={o} value={o}>{o}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-[11px] font-extrabold text-slate-500">KOTA / KABUPATEN <span className="text-red-500">*</span></label>
+          {kotaSel === PILIHAN_LAIN
+            ? <div className="relative mt-1"><input value={kotaBebas} onChange={(e) => setKotaBebas(e.target.value)} placeholder="Nama kota di luar daftar" className={inC + ' pr-9'} /><button type="button" onClick={() => setKotaSel('')} aria-label="Kembali ke daftar" className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-sky-600"><Icon name="x" className="w-4 h-4 pointer-events-none" /></button></div>
+            : <select value={kotaSel} disabled={!prov} onChange={(e) => setKotaSel(e.target.value)} className={'w-full mt-1 ' + (inC + (!prov ? ' opacity-50' : ''))}>
+              <option value="">— Pilih —</option>
+              {opsiKota.map((o) => <option key={o} value={o}>{o}</option>)}
+              <option value={PILIHAN_LAIN}>✏️ Tulis sendiri…</option>
+            </select>}
+          {prov && !opsiKota.length && kotaSel !== PILIHAN_LAIN ? <p className="text-[10.5px] font-bold text-slate-400 mt-1">Kabupaten/kota belum terdaftar — pilih "Tulis sendiri…".</p> : null}
+        </div>
+      </div>
+
+      {/* Editor kota terpilih — muncul begitu kota dipilih dari dropdown. */}
+      {kotaSel ? (
+        <div className="mt-2.5 bg-sky-50 border border-sky-100 rounded-xl px-3 py-2.5 flex items-center gap-2">
+          {p
+            ? <img src={p.dataUrl} alt={'Pratinjau ' + namaCity} className="w-10 h-10 rounded-lg object-cover border-2 border-emerald-300 shrink-0" />
+            : cur
+              ? <img src={cur.image} alt={namaCity} className="w-10 h-10 rounded-lg object-cover border-2 border-slate-200 shrink-0" />
+              : <span className="w-10 h-10 rounded-lg bg-slate-200 shrink-0 flex items-center justify-center text-slate-400"><Icon name="image" className="w-4 h-4" /></span>}
+          <span className="flex-1 min-w-0 text-[12.5px] font-bold truncate">
+            {namaCity || '—'}
+            {prov ? <span className="text-slate-400 font-medium"> • {prov}</span> : null}
+            {p ? <span className="text-[11px] font-extrabold text-emerald-600 ml-1">PRATINJAU</span> : null}
+            {!p && cur ? <span className="text-[11px] font-medium text-slate-400 ml-1">• {Math.round((Number(cur.bytes) || 0) / 1024)} KB</span> : null}
+            {!p && !cur ? <span className="text-[11px] font-medium text-slate-400 ml-1">• belum bergambar</span> : null}
+          </span>
+          <label className="cursor-pointer text-[11.5px] font-extrabold px-2.5 py-1 rounded-xl bg-sky-100 text-sky-700 hover:bg-sky-200 transition shrink-0">
+            {cur ? 'Ganti' : 'Pilih Gambar'}<input type="file" accept="image/*" className="hidden" onChange={pilihFile(cityKey, namaCity, prov)} />
+          </label>
+          {p
+            ? <>
+              <button onClick={() => simpan(cityKey)} className="text-[11.5px] font-extrabold px-2.5 py-1 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 transition shrink-0">Simpan</button>
+              <button onClick={() => setPend((m) => { const n = { ...m }; delete n[cityKey]; return n; })} className="text-[11.5px] font-extrabold px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 transition shrink-0">Batal</button>
+            </>
+            : null}
+          {cur
+            ? <button onClick={() => hapus(namaCity)} className="text-[11.5px] font-extrabold px-2.5 py-1 rounded-xl bg-red-100 text-red-700 hover:bg-red-200 transition shrink-0">Hapus</button>
+            : null}
+        </div>
+      ) : null}
+
+      {/* Daftar gambar terpasang — terbaru dulu. */}
+      <div className="text-[11px] font-extrabold text-slate-400 mt-3.5 mb-1.5 tracking-wide">TERPASANG ({terpasang.length})</div>
+      <div className="space-y-1.5 max-h-[420px] overflow-y-auto pr-1">
+        {terpasang.map((c) => {
+          const city = String(c.city || '').trim();
+          const key = city.toLowerCase();
+          const rp = pend[key];
+          return (
+            <div key={key} className="flex items-center gap-2 bg-slate-50 rounded-xl px-3 py-2">
+              {rp
+                ? <img src={rp.dataUrl} alt={'Pratinjau ' + city} className="w-10 h-10 rounded-lg object-cover border-2 border-emerald-300 shrink-0" />
+                : <img src={c.image} alt={city} className="w-10 h-10 rounded-lg object-cover border-2 border-slate-200 shrink-0" />}
+              <span className="flex-1 min-w-0 text-[12.5px] font-bold truncate">
+                {city}
+                {c.province ? <span className="text-slate-400 font-medium"> • {c.province}</span> : null}
+                {rp ? <span className="text-[11px] font-extrabold text-emerald-600 ml-1">PRATINJAU</span> : null}
+                {!rp ? <span className="text-[11px] font-medium text-slate-400 ml-1">• {Math.round((Number(c.bytes) || 0) / 1024)} KB</span> : null}
+              </span>
+              <label className="cursor-pointer text-[11.5px] font-extrabold px-2.5 py-1 rounded-xl bg-sky-100 text-sky-700 hover:bg-sky-200 transition shrink-0">
+                Ganti<input type="file" accept="image/*" className="hidden" onChange={pilihFile(key, city, c.province)} />
+              </label>
+              {rp
+                ? <>
+                  <button onClick={() => simpan(key)} className="text-[11.5px] font-extrabold px-2.5 py-1 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 transition shrink-0">Simpan</button>
+                  <button onClick={() => setPend((m) => { const n = { ...m }; delete n[key]; return n; })} className="text-[11.5px] font-extrabold px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 transition">Batal</button>
+                </>
+                : null}
+              <button onClick={() => hapus(city)} className="text-[11.5px] font-extrabold px-2.5 py-1 rounded-xl bg-red-100 text-red-700 hover:bg-red-200 transition shrink-0">Hapus</button>
+            </div>
+          );
+        })}
+        {!terpasang.length ? <div className="text-[12.5px] text-slate-400 font-medium mt-1">Belum ada gambar — pilih provinsi lalu kota di atas.</div> : null}
+      </div>
+    </div>
+  );
+}
+
 export function Master() {
   const { refresh, toast } = useApp();
   const banners = DB.load('banners', []);
@@ -56,6 +240,7 @@ export function Master() {
   return (
     <div className="grid lg:grid-cols-2 gap-4">
       <PlatformFeeCard />
+      <CityImagesCard />
       <div className="bg-white rounded-3xl shadow-card p-5">
         <h3 className="font-extrabold text-[15px] flex items-center gap-2"><Icon name="banknote" className="w-5 h-5 text-sky-600" />JASA AGEN / KURSI</h3>
         <div className="text-[11.5px] text-slate-400 font-medium mt-1">Ditentukan admin per agen — berlaku untuk semua rute agen tersebut. Transaksi yang sudah terproses tidak berubah.</div>

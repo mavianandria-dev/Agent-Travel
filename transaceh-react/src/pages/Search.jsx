@@ -643,17 +643,62 @@ export default function Search() {
     openModal(<PaymentModal booking={booking} />);
   };
 
-  const renderStep1 = () => (
-    <>
-      <h3 className="font-extrabold text-[16px]">Pilih Rute Perjalanan</h3>
-      <div className="grid sm:grid-cols-2 gap-3 mt-3">{routeGroups.map((g) => (
-        <button key={g.key} data-route-group={g.key} aria-pressed={selectedGroup?.key === g.key} onClick={() => setBw({ ...bw, routeId: g.routeId, step: 1, scheduleId: null, seats: [], passengers: [], pickup: '', pickupAddr: '', pickupCoords: '', voucher: '', discount: 0 })} className={'text-left rounded-2xl border-2 p-4 min-h-[72px] flex items-center transition ' + (selectedGroup?.key === g.key ? 'border-sky-500 bg-sky-50 shadow-lg' : 'border-slate-100 hover:border-sky-200')}>
-          <div className="font-extrabold text-[15px]">{g.from} → {g.to}</div>
-        </button>
-      ))}</div>
-      {wizNav(false, true)}
-    </>
-  );
+  const renderStep1 = () => {
+    /* Kartu rute split-image diagonal: peta kota → dataURL dari koleksi
+       cityImages (Master admin). Pemisah segitiga = garis dari SUDUT
+       KANAN-ATAS ke SUDUT KIRI-BAWAH: kota asal menguasai segitiga kiri-atas,
+       tujuan segitiga kanan-bawah; lingkaran panah persis di pusat (titik
+       tembus garis). Kota tanpa gambar tetap rapi sebagai segitiga gradasi —
+       kartu tak pernah rusak walau gambar setengah terisi. */
+    const cityImgs = {};
+    DB.load('cityImages', []).forEach((c) => {
+      const k = String(c.city || '').trim().toLowerCase();
+      if (k && c.image) cityImgs[k] = c.image;
+    });
+    const cityChip = (name, pos) => name
+      ? <span className={'absolute z-10 max-w-[80%] truncate rounded-full bg-black/55 px-2 py-[3px] text-[10px] font-extrabold uppercase tracking-wide text-white ' + pos}>{name}</span>
+      : null;
+    const citySide = (city, side) => {
+      const name = String(city || '').trim();
+      const img = cityImgs[name.toLowerCase()];
+      const clip = side === 'from' ? 'polygon(0 0, 100% 0, 0 100%)' : 'polygon(100% 0, 100% 100%, 0 100%)';
+      return (
+        <span className="absolute inset-0" style={{ clipPath: clip }}>
+          {img
+            ? <img src={img} alt={name} loading="lazy" draggable={false} className="absolute inset-0 h-full w-full object-cover" />
+            : <span className={'absolute inset-0 ' + (side === 'from' ? 'bg-gradient-to-br from-slate-800 to-sky-700' : 'bg-gradient-to-tr from-blue-800 to-sky-500')} aria-hidden="true" />}
+          {cityChip(name, side === 'from' ? 'left-1.5 top-1.5' : 'right-1.5 bottom-1.5')}
+        </span>
+      );
+    };
+    const routeDiptych = (g) => (
+      <span className="relative flex-1 min-w-0 overflow-hidden rounded-lg">
+        {citySide(g.from, 'from')}
+        {citySide(g.to, 'to')}
+        {/* Garis pemisah: sudut kanan-atas → sudut kiri-bawah (tegap
+            non-skala: tetap 2px walau persegi panjang). */}
+        <svg className="absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+          <line x1="100" y1="0" x2="0" y2="100" stroke="white" strokeOpacity="0.85" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+        </svg>
+        <span className="absolute left-1/2 top-1/2 z-20 flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-slate-200 bg-white shadow-md">
+          <Icon name="arrow-right" className="w-3.5 h-3.5 text-sky-600" />
+        </span>
+      </span>
+    );
+    return (
+      <>
+        <h3 className="font-extrabold text-[16px]">Pilih Rute Perjalanan</h3>
+        <div className="grid sm:grid-cols-2 gap-3 mt-3">{routeGroups.map((g) => (
+          <button key={g.key} data-route-group={g.key} aria-pressed={selectedGroup?.key === g.key} onClick={() => setBw({ ...bw, routeId: g.routeId, step: 1, scheduleId: null, seats: [], passengers: [], pickup: '', pickupAddr: '', pickupCoords: '', voucher: '', discount: 0 })} className={'text-left rounded-2xl border-2 p-1.5 h-28 flex items-stretch transition ' + (selectedGroup?.key === g.key ? 'border-sky-500 bg-sky-50 shadow-lg' : 'border-slate-100 hover:border-sky-200')}>
+            <span className="flex-1 min-w-0 flex items-stretch">
+              {routeDiptych(g)}
+            </span>
+          </button>
+        ))}</div>
+        {wizNav(false, true)}
+      </>
+    );
+  };
 
   const renderStep2 = () => {
     /* Perpindah bulan pada pilihan tanggal: hari ini s.d. 30 hari ke depan

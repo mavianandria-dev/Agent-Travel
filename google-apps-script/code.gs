@@ -87,7 +87,7 @@ var API_COLLECTION_KEYS = [
   'users', 'agencies', 'routes', 'routeRequests', 'vehicles', 'drivers',
   'schedules', 'maintenanceRequests', 'bookings', 'payments', 'ledger',
   'vouchers', 'reviews', 'notifications', 'audit', 'banners', 'supportTickets',
-  'settings', 'fees'
+  'settings', 'fees', 'cityImages'
 ];
 
 /** Daftar kunci koleksi (akses runtime; dipakai seed.gs). */
@@ -103,6 +103,10 @@ function apiCollectionKeys_() {
  */
 var API_PUBLIC_FIELDS = {
   banners: null,
+  /* Gambar kota rute: id/kecil digunakan klien untuk peta pencarian;
+     `updatedBy` (email admin) & bytes tidak untuk umum. */
+  cityImages: ['id', 'city', 'image'],
+  routes: null,
   routes: null,
   reviews: null,
   agencies: [
@@ -165,7 +169,7 @@ var API_SYNC_ORDER = [
   'agencies', 'users', 'routes', 'routeRequests', 'vehicles', 'drivers',
   'schedules', 'maintenanceRequests', 'bookings', 'payments', 'ledger',
   'vouchers', 'reviews', 'notifications', 'supportTickets', 'banners',
-  'settings', 'fees', 'audit'
+  'settings', 'fees', 'cityImages', 'audit'
 ];
 
 /* Aksi baca `seatinfo` — cek kursi deteksi dini saat pengguna memilih
@@ -535,6 +539,37 @@ function apiSheet_(ss, key) {
 }
 
 /**
+ * Pemulihan tab utama koleksi yang HILANG (koleksi muda dari deploy baru,
+ * ketika "Perbaiki skema" belum sempat dijalankan): buat-ulang tab + header
+ * dari skema — SEKALI per permintaan (idempoten; lebih dari itu = skema
+ * salah, diteruskan sejujurnya). Tulis sync/bootstrap bisa langsung menyihat
+ * tanpa menunggu langkah manual; pergeseran kolom lama biasa tetap tugas
+ * ensureSchema() (menu Perbaiki skema).
+ */
+var API_MAIN_TAB_AUTOHEALED_ = false;
+
+function apiHealMainSheet_(ss, key) {
+  var main = apiTables_().mains[key];
+  if (!main || API_MAIN_TAB_AUTOHEALED_) return false;
+  API_MAIN_TAB_AUTOHEALED_ = true;
+  var sheet = ss.insertSheet(key);
+  sheet.getRange(1, 1, 1, main.headers.length).setValues([main.headers]);
+  return true;
+}
+
+/** ApiReadCollection_ + pita pemulihan: tab hilang → pulihkan → baca ulang. */
+function apiReadCollectionTolerant_(ss, key) {
+  try {
+    return apiReadCollection_(ss, key);
+  } catch (e) {
+    if (e && e.code === 'SHEET_NOT_FOUND' && apiHealMainSheet_(ss, key)) {
+      return apiReadCollection_(ss, key);
+    }
+    throw e;
+  }
+}
+
+/**
  * Ambil tab anak; bila belum ada (skema menambah tab setelah deploy)
  * tab dibuat otomatis bersama header-nya supaya engine tidak macet sebelum
  * `ensureSchema()` (seed.gs) dijalankan.
@@ -855,6 +890,15 @@ var API_MAIN_TABLES = {
   },
   fees: {
     cols: ['defaultType', 'n:defaultValue', 'updatedAt']
+  },
+  /* Gambar kota tujuan (Master admin): satu rekord per kota, dataURL JPEG
+     dalam satu sel. Id deterministik dari nama kota — unggah ulang =
+     memperbarui rekord yang sama, tidak mendobel. `image` dijaga klien
+     ≤ ±40.000 karakter; batas sel server 45.000 (API_MAX_CELL_CHARS).
+     `province` dari dropdown wilayah — tidak diproyeksikan ke publik;
+     kartu Pilih Rute Perjalanan cukup mencocokkan nama kota. */
+  cityImages: {
+    cols: ['city', 'province', 'mime', 'image', 'n:bytes', 'updatedAt', 'updatedBy']
   }
 };
 
@@ -2143,6 +2187,21 @@ function apiBootstrapData_(ss, meta, role, user) {
     }
     return cache[key];
   }
+  /* Bacaan lentur koleksi muda: tab belum ada (skema belum diperbaiki) →
+     percoba pulihkan tab dari skema sekali; kalau masih tak bisa, kembalikan
+     daftar kosong supaya seluruh halaman tidak runtuh gara-gara data hiasan.
+     Kesalahan lain (lock, spreadsheet hilang) tetap diteruskan sejujurnya. */
+  function readOptional(key) {
+    try {
+      return read(key);
+    } catch (e) {
+      if (e && e.code === 'SHEET_NOT_FOUND' && apiHealMainSheet_(ss, key)) {
+        return read(key);
+      }
+      if (e && e.code === 'SHEET_NOT_FOUND') return [];
+      throw e;
+    }
+  }
   function rev(key) {
     return Number(meta['rev.' + key] || 0) || 0;
   }
@@ -2161,7 +2220,10 @@ function apiBootstrapData_(ss, meta, role, user) {
   if (role === 'superadmin') {
     for (var s = 0; s < API_COLLECTION_KEYS.length; s++) {
       var superKey = API_COLLECTION_KEYS[s];
-      put(superKey, read(superKey));
+      /* cityImages adalah koleksi muda — baca lentur (readOptional) supaya
+         tab yang belum dibuat ("Perbaiki skema" belum jalan) tak menutup
+         seluruh papan admin; kartu Master menampilkannya kosong. */
+      put(superKey, superKey === 'cityImages' ? readOptional(superKey) : read(superKey));
     }
     return { records: records, revisions: revisions };
   }
@@ -2199,6 +2261,11 @@ function apiBootstrapData_(ss, meta, role, user) {
 
   if (role === 'publik') {
     putProjected('banners', read('banners'));
+    /* Gambar kota rute — katalog kartu "Pilih Rute Perjalanan" (belahan
+       asal/tujuan). Bacaan LENTUR: bila tab belum dibuat ("Perbaiki skema"
+       belum jalan) dianggap daftar kosong, bukan alasan halaman utama
+       runtuh — kartu memakai belahan gradasi. Proyeksinya id/city/image. */
+    putProjected('cityImages', readOptional('cityImages'));
     put('routes', read('routes'));
     putProjected('reviews', publicReviews());
     putProjected('agencies', publicAgencies);
@@ -2241,6 +2308,11 @@ function apiBootstrapData_(ss, meta, role, user) {
     var ownBookingIds = apiIdSet_(ownBookings);
 
     putProjected('banners', read('banners'));
+    /* Gambar kota rute — katalog kartu "Pilih Rute Perjalanan" (belahan
+       asal/tujuan). Bacaan LENTUR: bila tab belum dibuat ("Perbaiki skema"
+       belum jalan) dianggap daftar kosong, bukan alasan halaman utama
+       runtuh — kartu memakai belahan gradasi. Proyeksinya id/city/image. */
+    putProjected('cityImages', readOptional('cityImages'));
     put('routes', read('routes'));
     putProjected('reviews', publicReviews());
     putProjected('agencies', publicAgencies);
@@ -2847,11 +2919,7 @@ function apiSync_(req, cfg) {
 
     var refKeys = ['users', 'agencies', 'routes', 'vehicles', 'drivers', 'schedules', 'bookings'];
     for (var r = 0; r < refKeys.length; r++) {
-      var refKey = refKeys[r];
-      if (!Object.prototype.hasOwnProperty.call(ctx.current, refKey)) {
-        ctx.current[refKey] = apiReadCollection_(ss, refKey);
-        ctx.currentMap[refKey] = apiIndexById_(ctx.current[refKey]);
-      }
+      apiSyncEnsureCollection_(ctx, refKeys[r]);
     }
 
     for (var k = 0; k < keys.length; k++) {
@@ -2866,10 +2934,7 @@ function apiSync_(req, cfg) {
         throw apiError_('REV_CONFLICT', 'Revisi koleksi ' + key + ' sudah berubah. Muat ulang data lalu coba lagi.');
       }
       apiSyncValidateTargetShape_(key, target);
-      if (!Object.prototype.hasOwnProperty.call(ctx.current, key)) {
-        ctx.current[key] = apiReadCollection_(ss, key);
-        ctx.currentMap[key] = apiIndexById_(ctx.current[key]);
-      }
+      apiSyncEnsureCollection_(ctx, key);
       ctx.pending[key] = apiIndexById_(target.upserts || []);
       ctx.deleted[key] = {};
       (target.deletes || []).forEach(function (id) {
@@ -3039,7 +3104,7 @@ function apiSyncSameExcept_(rec, old, except) {
 
 function apiSyncEnsureCollection_(ctx, key) {
   if (Object.prototype.hasOwnProperty.call(ctx.current, key)) return ctx.current[key];
-  ctx.current[key] = apiReadCollection_(ctx.ss, key);
+  ctx.current[key] = apiReadCollectionTolerant_(ctx.ss, key);
   ctx.currentMap[key] = apiIndexById_(ctx.current[key]);
   return ctx.current[key];
 }
@@ -4950,10 +5015,78 @@ function apiSyncValidateCollection_(ctx, key, target) {
     case 'notifications': apiSyncValidateNotifications_(ctx, target); return;
     case 'supportTickets': apiSyncValidateSupportTickets_(ctx, target); return;
     case 'routeRequests': apiSyncValidateRouteRequests_(ctx, target); return;
+    case 'cityImages': apiSyncValidateCityImages_(ctx, target); return;
     default:
       if (ctx.role !== 'superadmin') {
         throw apiError_('FORBIDDEN', 'Peran tidak diizinkan menulis ' + key + '.');
       }
+  }
+}
+
+/**
+ * Gambar kota tujuan (kartu Master admin). Tulis superadmin-saja; bukan
+ * superadmin ditolak sebelum apa pun. Klien memipihkan gambar di browser
+ * (sisi terpanjang ±420 px) menjadi dataURL JPEG ≤ ±40.000 karakter —
+ * batas sel Sheets 45.000 karakter (API_MAX_CELL_CHARS), jadi 44.000
+ * diberi jarak untuk pesan VALIDATION yang jelas sebelum tamat sel.
+ * Satu rekord per kota: id deterministik dari nama kota (ci_-slug) —
+ * unggah ulang memperbarui rekord yang sama, dua rekord untuk kota yang
+ * sama ditolak.
+ */
+var API_CITY_IMAGE_MAX_CHARS = 44000;
+
+function apiSyncValidateCityImages_(ctx, target) {
+  if (ctx.role !== 'superadmin') {
+    throw apiError_('FORBIDDEN', 'Peran tidak diizinkan menulis cityImages.');
+  }
+  apiSyncValidateTargetShape_('cityImages', target);
+  var byCity = {};
+  apiSyncMergeList_(ctx, 'cityImages').forEach(function (rec) {
+    var city = String((rec && rec.city) || '').trim().toLowerCase();
+    if (!city) return;
+    var id = String(apiRecordId_(rec) || '');
+    if (byCity[city] && byCity[city].indexOf(id) < 0) byCity[city].push(id);
+    else if (!byCity[city]) byCity[city] = [id];
+  });
+  var upserts = target.upserts || [];
+  for (var i = 0; i < upserts.length; i++) {
+    var rec = upserts[i] || {};
+    var cityRaw = String(rec.city || '').trim();
+    if (cityRaw.length < 2) {
+      throw apiError_('VALIDATION', 'Nama kota wajib diisi (minimal 2 huruf).');
+    }
+    var provRaw = String(rec.province || '').trim();
+    if (provRaw.length < 1 || provRaw.length > 40) {
+      throw apiError_('VALIDATION', 'Provinsi kota ' + cityRaw +
+        ' wajib diisi (1-40 huruf).');
+    }
+    if (String(rec.mime || '') !== 'image/jpeg') {
+      throw apiError_('VALIDATION', 'Gambar kota ' + cityRaw + ' harus JPEG.');
+    }
+    var img = String(rec.image || '');
+    if (!img) {
+      throw apiError_('VALIDATION', 'Data gambar kota ' + cityRaw + ' kosong.');
+    }
+    if (img.length > API_CITY_IMAGE_MAX_CHARS) {
+      throw apiError_('VALIDATION', 'Gambar kota ' + cityRaw + ' terlalu besar (' +
+        img.length + ' karakter, maks ' + API_CITY_IMAGE_MAX_CHARS + ').');
+    }
+    var bytes = Number(rec.bytes);
+    if (!isNaN(bytes) && (bytes < 0 || bytes > 200000)) {
+      throw apiError_('VALIDATION', 'Ukuran gambar kota ' + cityRaw + ' tidak wajar.');
+    }
+    var city = cityRaw.toLowerCase();
+    var own = String(apiRecordId_(rec) || '');
+    var clash = null;
+    for (var c = 0; c < (byCity[city] || []).length; c++) {
+      if (byCity[city][c] !== own) { clash = byCity[city][c]; break; }
+    }
+    if (clash) {
+      throw apiError_('VALIDATION', 'Kota ' + cityRaw + ' sudah punya rekord ' +
+        clash + '. Satu kota satu rekord.');
+    }
+    if (!byCity[city]) byCity[city] = [];
+    if (byCity[city].indexOf(own) < 0) byCity[city].push(own);
   }
 }
 
@@ -5095,7 +5228,7 @@ function apiApplyCollection_(ss, key, target, meta) {
   deletes.forEach(function (d) { deleted[String(d)] = true; });
   var upserted = {};
   upserts.forEach(function (rec) { upserted[apiRecordId_(rec)] = rec; });
-  var existing = apiReadCollection_(ss, key);
+  var existing = apiReadCollectionTolerant_(ss, key);
   var out = [];
   var emitted = {};
   existing.forEach(function (old) {
