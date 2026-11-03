@@ -215,7 +215,10 @@ export default function Settlement() {
           {driverRows.map((e) => {
             const { r, d, ag, tiba } = rowInfo(e);
             const bank = (d?.bank || '').trim();
-            const paidDate = new Date(String(e.paidOutAt || '')).toISOString().slice(0, 10);
+            /* Tgl Cair diambil sebagai TEKS ISO (bukan dipecah new Date):
+               baris belum dicairkan (paidOutAt kosong) tak boleh membuat
+               tanggal tidak sah → RangeError merobohkan halaman. */
+            const paidDate = String(e.paidOutAt || '').slice(0, 10);
             return (
               <tr key={e.id}>
                 <td className="font-mono font-extrabold">{codeOf(e)}<br /><span className="text-[11px] text-slate-400 font-semibold">{ag?.name || 'Agen lama'}</span></td>
