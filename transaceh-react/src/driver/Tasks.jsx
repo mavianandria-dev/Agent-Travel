@@ -735,7 +735,12 @@ function DriverSaleCutoffModal({ sid }) {
   );
 }
 
-export default function Tasks() {
+/** Papan tugas pengemudi. Prop focusOnly — dipakai halaman "Tugas Saat Ini":
+ *  menampilkan HANYA SATU card tugas paling mendekati jadwal (perjalanan yang
+ *  berjalan, atau jadwal berikutnya) — card yang sama juga diberi highlight
+ *  di papan penuh, jadi satu definisi "tugas terdekat" untuk kedua halaman.
+ *  Tarikan snapshot 30 dtk tetap aktif di kedua mode. */
+export default function Tasks({ focusOnly = false }) {
   const { go, user, refresh, openModal, modal } = useApp();
   const me = drvOfUser(user);
   const [, setClock] = useState(0);
@@ -780,8 +785,12 @@ export default function Tasks() {
   const mySched = DB.load('schedules', []).filter((s) => !me || s.driverId === me.id).sort((a, b) => (a.date + b.time).localeCompare(b.date + b.time));
   const overdue = mySched.filter(scheduleNeedsReview);
   const upcoming = mySched.filter((s) => !scheduleInHistory(s) && !scheduleNeedsReview(s) && s.status !== 'cancelled' && !['arrived', 'missed', 'cancelled'].includes(s.tripStatus));
+  /* Satu definisi "tugas paling mendekati jadwal": urutan pertama daftar depan
+     (perjalanan berjalan ikut dalam daftar ini, jadwalnya paling dekat).
+     Dipakai untuk highlight di papan DAN card tunggal halaman Tugas Saat Ini. */
+  const focusSched = upcoming[0] || null;
 
-  const renderTask = (s, late) => {
+  const renderTask = (s, late, isFocus = false) => {
     const r = routeById(s.routeId), v = vehicleById(s.vehicleId);
     const bk = bookingsOf(s.id);
     const left = seatsLeft(s.id);
@@ -819,7 +828,7 @@ export default function Tasks() {
       else openModal(<AckArriveModal sid={s.id} />);
     };
     return (
-      <div key={s.id} data-sid={s.id} className="bg-white rounded-3xl shadow-card p-4">
+      <div key={s.id} data-sid={s.id} className={'bg-white rounded-3xl shadow-card p-4' + (isFocus ? ' ring-2 ring-sky-400' : '')}>
         <div className="flex items-center gap-3 flex-wrap">
           <div className="bg-[#0b2447] text-white rounded-2xl px-3.5 py-2 text-center"><div className="text-[11px] font-bold opacity-70">{fmtDate(s.date)}</div><div className="font-extrabold text-[16px]">{s.time}</div></div>
           <div className="flex-1 min-w-[180px]"><div className="font-extrabold text-[15px]">{r.from} → {r.to}</div><div className="text-[12px] text-slate-500 font-medium">{vehName(v)} {v?.plate} • {tk.booked.length}/{schedSeatCap(s.id)} penumpang{tk.blocked.length ? ` • ${tk.blocked.length} tutup` : ''}</div></div>
@@ -839,6 +848,7 @@ export default function Tasks() {
               <span className="relative z-10 font-extrabold whitespace-nowrap">{prog.pct}% <span className="font-bold text-slate-500">• ETA {fmtClock(prog.end)}</span></span>
             </div>
           ) : null}
+          {isFocus ? <span className="badge bg-sky-600 text-white !text-[10px] px-2 py-0.5">TERDEKAT</span> : null}
           <BadgeStatus st={s.tripStatus || 'scheduled'} />
         </div>
         {paxPicks.length ? (
@@ -881,6 +891,18 @@ export default function Tasks() {
     );
   };
 
+  /* Mode focusOnly (halaman "Tugas Saat Ini"): HANYA SATU card — tugas paling
+     mendekati jadwal, card yang sama persis dengan yang di-highlight di papan
+     (termasuk semua tombolnya). Bila kosong: satu pesan ramah. Dipanggil
+     setelah seluruh hook & renderTask terpasang — urutan hook tetap aman. */
+  if (focusOnly) {
+    return (
+      <div className="anim space-y-3">
+        {focusSched ? renderTask(focusSched, false, true) : <Empty icon="car" msg="Tidak ada tugas — Istirahat dulu, Pengemudi hebat." />}
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="anim space-y-4">
@@ -897,7 +919,7 @@ export default function Tasks() {
         </div> : null}
 
         <div className="space-y-3">
-            {upcoming.slice(0, 6).map((s) => renderTask(s, false))}
+            {upcoming.slice(0, 6).map((s) => renderTask(s, false, s.id === focusSched?.id))}
           {upcoming.length === 0 && overdue.length === 0 ? <Empty icon="car" msg="Tidak ada tugas — Istirahat dulu, Pengemudi hebat." /> : null}
         </div>
       </div>

@@ -10,8 +10,8 @@ import TugasAktif from './TugasAktif.jsx';
 /* Panel driver's: satu halaman dengan tab (pola sama dengan Panel Agen & Panel Admin).
    Tab ditentukan oleh view, jadi link lama (driver-trips, driver-wallet, driver-profile) tetap bekerja. */
 const TABS = [
-  ['driver', 'car-front', 'Tugas Saya'],
   ['driver-aktif', 'navigation', 'Tugas Saat Ini'],
+  ['driver', 'car-front', 'Tugas Saya'],
   ['driver-maintenance', 'wrench', 'Maintenance'],
   ['driver-trips', 'route', 'Trip'],
   ['driver-wallet', 'wallet', 'Dompet'],

@@ -19,7 +19,9 @@ export const freshBW = () => ({ step: 1, routeId: '', date: todayStr(0), schedul
 const CUSTOMER_VIEWS = ['home', 'search', 'tickets', 'history', 'profile', 'help'];
 export { CUSTOMER_VIEWS };
 
-const roleHome = (role) => (role === 'agen' ? 'agen' : role === 'pengemudi' ? 'driver' : 'admin');
+/* Pengemudi dibuka langsung di "Tugas Saat Ini" — halaman satu-card yang
+   minimal (card tugas paling mendekati jadwal); papan lengkap = tab 'driver'. */
+const roleHome = (role) => (role === 'agen' ? 'agen' : role === 'pengemudi' ? 'driver-aktif' : 'admin');
 
 const initialView = () => {
   try {

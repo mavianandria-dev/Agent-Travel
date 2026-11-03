@@ -30,7 +30,7 @@ export default function Home() {
     audit('login', u.email + ' (demo)');
     refresh();
     if (u.role === 'agen') go('agen');
-    else if (u.role === 'pengemudi') go('driver');
+    else if (u.role === 'pengemudi') go('driver-aktif');
     else if (u.role === 'superadmin') go('admin');
     else go('home');
     toast('Masuk sebagai ' + u.role + ' — ' + u.name);

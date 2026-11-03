@@ -25,7 +25,7 @@ function landAfterAuth(u, { go, setBw, toast }) {
   if (u.role === 'agen') {
     /* KYC belum lengkap tetap boleh masuk — hanya diarahkan ke halaman kelengkapan data */
     go(agencyPending(u) ? 'agen-pending' : 'agen');
-  } else if (u.role === 'pengemudi') go('driver');
+  } else if (u.role === 'pengemudi') go('driver-aktif');
   else if (u.role === 'superadmin') go('admin');
   else go('home');
   return false;
