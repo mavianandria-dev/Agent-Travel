@@ -848,6 +848,9 @@ export default function Tasks({ focusOnly = false }) {
   const renderTask = (s, late, isFocus = false) => {
     const r = routeById(s.routeId), v = vehicleById(s.vehicleId);
     const bk = bookingsOf(s.id);
+    /* Hitungan tombol Manifest = jumlah PENUMPANG, bukan jumlah booking —
+       satu booking bisa memuat beberapa kursi/penumpang sekaligus. */
+    const paxCount = bk.reduce((n, b) => n + bookedPassengers(b).length, 0);
     const left = seatsLeft(s.id);
     const tk = takenSeats(s.id);
     const delayActive = s.tripStatus === 'scheduled' && s.delayUntil && new Date(s.delayUntil).getTime() > Date.now();
@@ -924,7 +927,7 @@ export default function Tasks({ focusOnly = false }) {
         {tripInfo ? <div className="mt-2.5 bg-sky-50 border border-sky-200 rounded-2xl p-2.5 text-[12px] font-semibold text-sky-900">Info keterlambatan: {tripInfo.reason}{tripInfo.note ? ' • ' + tripInfo.note : ''} ({fmtClock(tripInfo.at)})</div> : null}
         {mtActive ? <div className="mt-2.5 bg-red-50 border-2 border-red-200 rounded-2xl p-2.5 text-[12px] font-semibold text-red-800"><b>Maintenance armada</b>{mt.legacy ? ' — status armada sedang maintenance.' : ' ' + maintenancePeriodLabel(mt) + '.'} Jadwal ini tidak berangkat; booking pelanggan ditangani agen. Manifest tetap dapat dilihat.</div> : null}
         <div className="flex flex-wrap gap-1.5 mt-3 items-center">
-          <button onClick={() => openModal(<ManifestModal sid={s.id} />)} className="badge bg-sky-100 text-sky-700 cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="users" className="w-3.5 h-3.5" /> Manifest ({bk.length})</button>
+          <button onClick={() => openModal(<ManifestModal sid={s.id} />)} className="badge bg-sky-100 text-sky-700 cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="users" className="w-3.5 h-3.5" /> Manifest ({paxCount})</button>
           {late && !mtActive ? <button onClick={finish} className="badge bg-blue-600 text-white cursor-pointer !text-[12px] py-1.5 active:scale-95 transition">Tandai Tiba</button> : null}
           {!late && !mtActive && (s.tripStatus === 'scheduled' || !s.tripStatus) ? <button onClick={() => openModal(<StartTripModal sid={s.id} />)} className="badge bg-green-500 text-white cursor-pointer !text-[12px] py-1.5 active:scale-95 transition">Berangkat →</button> : null}
           {s.delayReqStatus === 'menunggu' && (s.tripStatus === 'scheduled' || !s.tripStatus) ? <button onClick={() => openModal(<DelayModal sid={s.id} mode="departure" />)} className="badge bg-amber-500 text-white cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="timer" className="w-3.5 h-3.5" /> Permintaan +{s.delayReqMinutes}m ⏳</button> : null}
