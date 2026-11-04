@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { ledgerEligible, driverById, schedById, routeById, agencyById, scheduleNeedsReview, setScheduleTripStatus, resolveScheduleNoShow, splitFare, fareModelOf, markRefundPaid, startRefundProcessing, LEDGER_SERV_GATE_MS, LEDGER_KLIRING_MS } from '@/lib/domain.js';
+import { driverById, schedById, routeById, agencyById, scheduleNeedsReview, setScheduleTripStatus, resolveScheduleNoShow, splitFare, fareModelOf, markRefundPaid, startRefundProcessing, LEDGER_SERV_GATE_MS } from '@/lib/domain.js';
 import { fmtRp } from '@/lib/utils.js';
 import { Icon, Empty } from '@/components/ui.jsx';
 
@@ -70,20 +70,10 @@ export default function Settlement() {
   const bookings = DB.load('bookings', []);
   const codeOf = (e) => bookings.find((b) => b.id === e.bookingId)?.code || '-';
 
-  /* Laporan TIKET pengemudi: layak (menunggu kliring otomatis) + dicairkan. */
+  /* Laporan TIKET pengemudi: langsung tercatat terkirim begitu tiba (kliring 0). */
   const driverRows = ledger
     .filter((e) => (e.status === 'layak' || e.status === 'dicairkan') && (!agFilter || e.agencyId === agFilter))
     .sort((a, b) => (b.paidOutAt || b.releasedAt || b.createdAt || '').localeCompare(a.paidOutAt || a.releasedAt || a.createdAt || ''));
-  const driverPending = driverRows.filter((e) => e.status === 'layak');
-  const driverAutoAt = (() => {
-    let min = null;
-    driverPending.forEach((e) => {
-      const s = schedById(e.scheduleId);
-      const at = tanggalOtomatis(s?.arrivedAt || e.releasedAt, LEDGER_KLIRING_MS);
-      if (at && (min === null || at < min)) min = at;
-    });
-    return min;
-  })();
 
   /* Laporan JASA agen: hanya baris yang SISTEM sudah menandai terkirim
      (servicePaidOutAt) — era lama tanpa cap jasa tidak ikut tampil. */
@@ -205,10 +195,7 @@ export default function Settlement() {
           <h3 className="font-extrabold text-[16px] flex items-center gap-2"><Icon name="hand-coins" className="w-5 h-5 text-sky-600" />Riwayat Pencairan Pengemudi (Tiket)</h3>
           <FilterBar agFilter={agFilter} setAgFilter={setAgFilter} agencies={agencies} />
         </div>
-        <p className="text-[12px] text-slate-500 font-medium mt-1">Pencairan berjalan <b>otomatis</b>: layak saat tiba, tercatat terkirim ke rekening pengemudi 24 jam kemudian. Tidak ada tombol — laporan ini bukti siapa sudah berhak berapa.</p>
-        {(driverPending.length > 0 && driverAutoAt) ? (
-          <div className="mt-2 bg-blue-50 text-blue-700 rounded-xl px-3 py-2 text-[12px] font-semibold">{driverPending.length} pos akan otomatis tercatat terkirim paling cepat di {driverAutoAt}</div>
-        ) : null}
+        <p className="text-[12px] text-slate-500 font-medium mt-1">Pencairan berjalan <b>otomatis</b>: begitu bus tiba, dana tiket langsung tercatat terkirim ke rekening pengemudi. Tidak ada tombol — laporan ini bukti siapa sudah berhak berapa.</p>
         <div className="table-wrap mt-3"><table className="data w-full min-w-[820px]"><thead><tr>
           <th>Kode</th><th>Rute</th><th>Pengemudi / Bank</th><th>Nominal Tiket</th><th>Tgl Tiba</th><th>Tgl Cair</th>
         </tr></thead><tbody>
@@ -228,9 +215,7 @@ export default function Settlement() {
                 <td className="text-[12px] font-semibold">{tiba || '-'}</td>
                 <td>{e.paidOutAt
                   ? <span className="text-[12px] font-bold">{paidDate}</span>
-                  : (ledgerEligible(e)
-                    ? <span className="badge bg-sky-100 text-sky-700">Otomatis</span>
-                    : <span className="badge bg-amber-100 text-amber-700">Menunggu kliring 24 jam</span>)}</td>
+                  : <span className="badge bg-sky-100 text-sky-700">Otomatis</span>}</td>
               </tr>
             );
           })}

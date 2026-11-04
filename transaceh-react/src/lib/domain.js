@@ -2277,13 +2277,14 @@ export function voidLedger(bookingId){
 /** Jendela ulasan pelanggan: jasa agen otomatis tercatat terkirim ke
  *  rekening agen tepat 5 menit setelah tag Tiba. */
 export const LEDGER_SERV_GATE_MS = 5*60*1000;
-/** Kliring tiket pengemudi: dana tiket otomatis tercatat terkirim ke
- *  rekening pengemudi 24 jam setelah tiba. */
-export const LEDGER_KLIRING_MS = 24*3600*1000;
+/** Kliring tiket pengemudi: 0 = dana tiket LANGSUNG tercatat terkirim ke
+ *  rekening pengemudi begitu tiba. Ubah nilainya (ms) bila kelak perlu
+ *  jeda — sapuan dan badge otomatis mengikuti. */
+export const LEDGER_KLIRING_MS = 0;
 
 /* Sapu PENCAIRAN OTOMATIS (mode lokal) — cermin dari apiSweepLedgerAuto_:
    ditahan+sudah tiba → layak; unggul 5 menit → servicePaidOutAt (jasa
-   tercatat terkirim); unggul 24 jam → dicairkan+paidOutAt (tiket). Baris
+   tercatat terkirim); kliring (0 = langsung) → dicairkan+paidOutAt (tiket). Baris
    void ditinggalkan; idempoten; tidak ada ajukan, tidak ada tombol. */
 export function sweepLedgerAuto(){
   const arr=DB.load('ledger',[]);
@@ -3025,13 +3026,13 @@ export function resolveScheduleNoShow(sid, refundPct = 100) {
   return { ok: true, count, total, pct };
 }
 export function ledgerByDriver(driverId){ return DB.load('ledger',[]).filter(e=>e.driverId===driverId); }
-/* Layak cair = trip tiba + kliring 24 jam */
+/* Layak cair = trip tiba + kliring (0 = langsung) */
 export function ledgerEligible(e){
   if(!e||e.status!=='layak') return false;
   const s=schedById(e.scheduleId);
   const at=s?.arrivedAt||e.releasedAt;
   if(!at) return true;
-  return Date.now()-new Date(at).getTime()>=24*3600*1000;
+  return Date.now()-new Date(at).getTime()>=LEDGER_KLIRING_MS;
 }
 
 /* Normalisasi titik jemput: trim, buang kosong & duplikat (abaikan besar/kecil huruf) */

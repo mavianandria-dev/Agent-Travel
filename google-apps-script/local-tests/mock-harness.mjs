@@ -1620,14 +1620,15 @@ ok('sync menolak pelanggan mencairkan ledger layak',
   res.ok === false && res.error.code === 'FORBIDDEN', res);
 
 /* ------------------------------------------------------------------ */
-/* 13b) Pencairan OTOMATIS: sapuan clip tiket 24 jam + jasa menit-5    */
+/* 13b) Pencairan OTOMATIS: tiket langsung saat tiba + jasa menit-5    */
 /* ------------------------------------------------------------------ */
 
-console.log('\n== 13b) pencairan otomatis (kliring 24 jam tiket, jasa menit ke-5) ==');
+console.log('\n== 13b) pencairan otomatis (tiket langsung saat tiba, jasa menit ke-5) ==');
 
 /* Dua jadwal uji milik ag_1 dengan tag tiba: s_gate6 tiba 6 menit lalu
-   (jasa SUDAH lewat menit ke-5, tiket belum lewat 24 jam) dan s_gate24
-   tiba 25 jam lalu (tiket+jasa SUDAH lewat keduanya → dicairkan otomatis). */
+   (tiket+jasa SUDAH lewat syaratnya — kliring 0 = langsung, jasa menit
+   ke-5) dan s_gate24 tiba 25 jam lalu (backlog lama → sapuan pertama
+   langsung mencairkan). */
 const gateOld6 = new Date(Date.now() - 6 * 60 * 1000).toISOString();
 const gateOld25 = new Date(Date.now() - 25 * 3600 * 1000).toISOString();
 res = sync({ schedules: { baseRev: revOf('schedules'), upserts: [
@@ -1675,10 +1676,10 @@ ok('bootstrap menyapu pencairan otomatis (tiket/jasa)',
   res.ok === true, res);
 const gateFirst6 = readRec('ledger', 'l_gate_6');
 const gateFirst24 = readRec('ledger', 'l_gate_24');
-ok('sapuan: tiket 6 menit → layak + jasa tercatat terkirim, tiket belum',
-  String(gateFirst6.status || '') === 'layak' &&
+ok('sapuan: tiket 6 menit → langsung dicairkan + kedua cap terisi',
+  String(gateFirst6.status || '') === 'dicairkan' &&
   !!String((gateFirst6 || {}).servicePaidOutAt || '') &&
-  !String((gateFirst6 || {}).paidOutAt || ''), gateFirst6);
+  !!String((gateFirst6 || {}).paidOutAt || ''), gateFirst6);
 ok('sapuan: tiket 25 jam → dicairkan otomatis + kedua cap terisi',
   String(gateFirst24.status || '') === 'dicairkan' &&
   !!String((gateFirst24 || {}).paidOutAt || '') &&
@@ -1696,18 +1697,22 @@ res = sync({ ledger: { baseRev: revOf('ledger'), upserts: [Object.assign({}, rea
 })], deletes: [] } }, agenToken);
 ok('sync agen ditolak menulis cap pencairan jasa',
   res.ok === false && res.error.code === 'FORBIDDEN', res);
-res = sync({ ledger: { baseRev: revOf('ledger'), upserts: [Object.assign({}, readRec('ledger', 'l_gate_6') || gateLedger6, {
+/* l_sync_1 masih layak (jadwalnya tanpa tag tiba → tak tersapu) —
+   percobaan layak→dicairkan kena pagar "pencairan berjalan otomatis". */
+res = sync({ ledger: { baseRev: revOf('ledger'), upserts: [Object.assign({}, readRec('ledger', 'l_sync_1') || gateLedger6, {
   status: 'dicairkan', paidOutAt: gateOld6, servicePaidOutAt: gateOld6
 })], deletes: [] } }, driverToken);
 ok('sync pengemudi ditolak mencairkan ledger (otomatis)',
   res.ok === false && res.error.code === 'FORBIDDEN', res);
 
-/* Void membersihkan kedua cap — uang tidak bergerak tanpa jejak. */
-res = sync({ ledger: { baseRev: revOf('ledger'), upserts: [Object.assign({}, readRec('ledger', 'l_gate_6') || gateLedger6, {
+/* Void membersihkan kedua cap — uang tidak bergerak tanpa jejak.
+   l_sync_1 (layak) dipakai karena void dari dicairkan memang tidak
+   sah — pagar urutan transisi menolaknya. */
+res = sync({ ledger: { baseRev: revOf('ledger'), upserts: [Object.assign({}, readRec('ledger', 'l_sync_1') || gateLedger6, {
   status: 'void', paidOutAt: gateOld6, servicePaidOutAt: gateOld6
 })], deletes: [] } }, custToken);
 ok('sync void ledger layak diterima', res.ok === true, res);
-const gateVoid = readRec('ledger', 'l_gate_6');
+const gateVoid = readRec('ledger', 'l_sync_1');
 ok('void membersihkan cap pencairan tiket+jasa',
   String(gateVoid.status || '') === 'void' &&
   !String((gateVoid || {}).paidOutAt || '') &&

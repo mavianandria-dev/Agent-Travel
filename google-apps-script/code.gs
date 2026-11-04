@@ -71,9 +71,10 @@ var API_HOLD_MS = 5 * 60 * 1000;
  *  tepat 5 menit setelah tag Tiba — tanpa ajukan, tanpa tombol admin. */
 var API_LEDGER_SERV_GATE_MS = 5 * 60 * 1000;
 
-/** Kliring tiket pengemudi: dana tiket tercatat terkirim ke rekening
- *  pengemudi 24 jam setelah tag Tiba — otomatis oleh sapuan. */
-var API_LEDGER_KLIRING_MS = 24 * 60 * 60 * 1000;
+/** Kliring tiket pengemudi: 0 = dana tiket LANGSUNG tercatat terkirim ke
+ *  rekening pengemudi begitu tag Tiba (tanpa jeda). Ubah nilai ini (ms)
+ *  bila kelak perlu jeda kliring — sapuan otomatis mengikutinya. */
+var API_LEDGER_KLIRING_MS = 0;
 
 /** Jendela penjualan tiket langsung pengemudi: dibuka 12 jam sebelum keberangkatan. */
 var API_DRIVER_SALE_WINDOW_MS = 12 * 60 * 60 * 1000;
@@ -5410,7 +5411,7 @@ function apiSweepExpiredHolds_(ss, meta, revisions) {
  *    (jaga-jaga bila pelepasan klien yang lama tak sempat tercatat).
  *  - `layak` unggul 5 menit sejak tiba → `servicePaidOutAt` terisi
  *    (jasa agen tercatat terkirim ke rekening agen).
- *  - `layak` unggul 24 jam sejak tiba → `dicairkan` + `paidOutAt`
+ *  - `layak` (kliring 0 = langsung) → `dicairkan` + `paidOutAt`
  *    (tiket pengemudi tercatat terkirim ke rekening pengemudi).
  * Baris `void` DI LEWATI total — uang tidak bergerak tanpa jejak.
  * Idempoten: tanpa perubahan → tanpa tulis, tanpa kenaikan revisi.
@@ -5466,7 +5467,7 @@ function apiSweepLedgerAuto_(ss, meta, revisions) {
       e.servicePaidOutAt = nowIso;
       touched = true;
     }
-    /* Tiket pengemudi: kliring 24 jam sejak tiba → tercatat terkirim. */
+    /* Tiket pengemudi: kliring (0 = langsung) sejak tiba → tercatat terkirim. */
     if (now >= t0 + API_LEDGER_KLIRING_MS && !String(e.paidOutAt || '')) {
       e.status = 'dicairkan';
       e.paidOutAt = nowIso;
