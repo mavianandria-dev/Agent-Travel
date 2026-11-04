@@ -168,6 +168,16 @@ export function SchedFormModal({ agId, onDone, sched }) {
   const routeOptions = vehicleId ? routesForVehicle(vehicleId) : [];
   const unknownDuration = !!route && !routeDurationMinutes(route);
 
+  /* Jarak terdekat dari sekarang ke jam berangkat tanggal terpilih (menit) —
+     dasar pemberitahuan cut-off penjualan: pesan online tutup 60 mnt,
+     jualan langsung pengemudi tutup 30 mnt sebelum keberangkatan. */
+  const minGapMin = selSorted.reduce((min, d) => {
+    const ms = new Date(d + 'T' + (time || '00:00') + ':00').getTime();
+    if (!Number.isFinite(ms)) return min;
+    const gap = Math.floor((ms - nowMs) / 60000);
+    return min === null || gap < min ? gap : min;
+  }, null);
+
   const statusFor = (date, at = nowMs) => scheduleDateStatus({
     vehicleId,
     routeId,
@@ -393,6 +403,20 @@ export function SchedFormModal({ agId, onDone, sched }) {
               ⚠ {invalidSelected.length} tanggal dipilih tidak valid: {invalidSelected.slice(0, 3).map((x) => fmtShort(x.d)).join(', ')}{invalidSelected.length > 3 ? ' +' + (invalidSelected.length - 3) + ' lagi' : ''}
               <div className="text-[11px] font-medium text-red-600 mt-0.5">{invalidSelected[0].st.reason}. Tanggal ini tidak ikut disimpan.</div>
             </div>
+          ) : null}
+
+          {/* Pemberitahuan cut-off penjualan: jadwal yang dibuat mendekati jam
+              berangkat lahir dengan pintu pesan yang sudah/akan tertutup. */}
+          {minGapMin !== null && minGapMin >= 0 && minGapMin < 60 ? (
+            minGapMin < 30 ? (
+              <div className="mt-3 bg-red-50 border-2 border-red-200 text-red-700 rounded-xl p-3 text-[11.5px] font-bold">
+                ⚠ Keberangkatan ±{minGapMin} menit lagi: pesan online sudah ditutup (batas 60 menit) dan jualan langsung pengemudi juga sudah ditutup (batas 30 menit) — jadwal ini tidak bisa dijual siapa pun.
+              </div>
+            ) : (
+              <div className="mt-3 bg-amber-50 border-2 border-amber-200 text-amber-700 rounded-xl p-3 text-[11.5px] font-bold">
+                ⚠ Keberangkatan ±{minGapMin} menit lagi: pesan online pelanggan sudah ditutup (batas 60 menit) — hanya pengemudi yang bisa jual tiket langsung sampai 30 menit sebelum berangkat.
+              </div>
+            )
           ) : null}
 
           <button onClick={editing ? saveEdit : saveSched} className="mt-4 w-full bg-sky-600 text-white font-extrabold text-[14px] py-3 rounded-2xl">{editing ? 'Simpan Perubahan' : (!selSorted.length ? 'Simpan Jadwal' : okCount ? 'Simpan ' + okCount + ' Jadwal' : 'Tidak Ada Tanggal Valid')}</button>

@@ -192,10 +192,23 @@ function DelayModal({ sid, mode = 'departure' }) {
   const [minutes, setMinutes] = useState(30);
   const [reason, setReason] = useState('');
   const [note, setNote] = useState('');
+  /* Waktu modal dibuka — pembanding delay aktif (state initializer bebas
+     purity; modal selalu baru saat dibuka, jadi nilainya segar). */
+  const [openedAt] = useState(() => Date.now());
   const s = schedById(sid);
   if (!s) return <div className="p-6 font-bold text-slate-500">Jadwal tidak ditemukan</div>;
 
   const departure = mode === 'departure';
+  /* Proyeksi delay total (delay aktif + tambahan) dan efeknya ke pintu pesan
+     online: total ≥60 menit membuka kembali pesan online sampai estimasi
+     baru; di bawah itu online tetap tertutup — hanya jualan langsung
+     pengemudi (batas 30 mnt sebelum berangkat). */
+  const curDelay = departure ? (Number(s.delayMinutes || 0) || 0) : 0;
+  const projected = curDelay + Number(minutes || 0);
+  const baseMs = departure && s.delayUntil && new Date(s.delayUntil).getTime() > openedAt
+    ? new Date(s.delayUntil).getTime()
+    : scheduleEffectiveDepartureMs(s);
+  const newEstMs = Number.isFinite(baseMs) ? baseMs + Number(minutes || 0) * 60000 : NaN;
   /* Kebijakan: permintaan delay > 180 mnt menunggu persetujuan agen —
      pengemudi bisa menariknya balik selama belum diputuskan. */
   const pendReq = s.delayReqStatus === 'menunggu';
@@ -253,6 +266,12 @@ function DelayModal({ sid, mode = 'departure' }) {
             {[15, 30, 45, 60, 90, 120, 180, 240, 300].map((m) => <option key={m} value={m}>{m} menit{m > 180 ? ' • perlu persetujuan agen' : ''}</option>)}
           </select>
           <div className="text-[11px] text-slate-400 font-semibold mt-1">Sampai 180 menit langsung dicatat. Lebih dari itu jadi permintaan — agen yang menyetujui.</div>
+          {/* Efek delay ke pintu pesan online — ikut berubah sesuai pilihan. */}
+          <div className={'mt-2 rounded-xl p-2.5 text-[11.5px] font-bold ' + (projected >= 60 ? 'bg-sky-50 border border-sky-200 text-sky-800' : 'bg-amber-50 border border-amber-200 text-amber-800')}>
+            {projected >= 60
+              ? <>Delay total {projected} menit — pesan online <b>TERBUKA kembali</b> untuk pelanggan sampai estimasi {Number.isFinite(newEstMs) ? fmtClock(newEstMs) : '-'}{minutes > 180 ? ' (menunggu persetujuan agen)' : ''}. Penumpang baru bisa pesan online lagi.</>
+              : <>Delay total {projected} menit — pesan online <b>tetap tertutup</b>. Pintu online butuh delay total ≥60 menit; sampai saat itu hanya jualan langsung Anda (batas 30 menit sebelum berangkat).</>}
+          </div>
         </div>
       ) : null}
 
@@ -933,9 +952,74 @@ export default function Tasks({ focusOnly = false }) {
      (termasuk semua tombolnya). Bila kosong: satu pesan ramah. Dipanggil
      setelah seluruh hook & renderTask terpasang — urutan hook tetap aman. */
   if (focusOnly) {
+    /* Pemberitahuan cut-off penjualan "terselip" di bawah card tugas —
+       seperti slip buku: lebih ramping, ujung atasnya tersembunyi di balik
+       card tugas. Pesan online tutup 60 mnt sebelum berangkat efektif,
+       jualan langsung tutup 30 mnt. */
+    const focusDepMs = focusSched ? scheduleEffectiveDepartureMs(focusSched) : NaN;
+    const focusMins = Number.isFinite(focusDepMs) ? Math.floor((focusDepMs - now) / 60000) : NaN;
+    const focusPre = !!focusSched &&
+      (focusSched.tripStatus === 'scheduled' || !focusSched.tripStatus) &&
+      (focusSched.status === 'open' || !focusSched.status);
+    const saleNotice = focusPre && Number.isFinite(focusMins) && focusMins >= 0 && focusMins < 60
+      ? (focusMins >= 30 ? 'langsung-terbuka' : 'semua-tutup')
+      : null;
     return (
-      <div className="anim space-y-3">
-        {focusSched ? renderTask(focusSched, false, true) : <Empty icon="car" msg="Tidak ada tugas — Istirahat dulu, Pengemudi hebat." />}
+      <div className="anim">
+        {focusSched ? (
+          <div className="relative">
+            <div className="relative z-10">{renderTask(focusSched, false, true)}</div>
+            {saleNotice ? (
+              <div className={'relative z-0 -mt-3 mx-3 rounded-b-3xl border-2 border-t-0 p-4 pt-6 ' +
+                (saleNotice === 'langsung-terbuka'
+                  ? 'bg-gradient-to-br from-amber-50 to-amber-100 border-amber-200 text-amber-900'
+                  : 'bg-gradient-to-br from-red-50 to-red-100 border-red-200 text-red-800')}>
+                {/* Judul + pil hitung mundur */}
+                <div className="flex items-center gap-2.5">
+                  <div className={'w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ' +
+                    (saleNotice === 'langsung-terbuka' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-600')}>
+                    <Icon name="ticket" className="w-5 h-5" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-extrabold text-[12.5px] leading-tight">{saleNotice === 'langsung-terbuka' ? 'Pesan Online Ditutup' : 'Semua Penjualan Ditutup'}</div>
+                    <div className="text-[10.5px] font-bold opacity-70">{saleNotice === 'langsung-terbuka' ? 'Jualan langsung masih terbuka' : 'Bersiap untuk keberangkatan'}</div>
+                  </div>
+                  <div className={'shrink-0 text-center rounded-xl px-2.5 py-1 ring-1 animate-pulse ' +
+                    (saleNotice === 'langsung-terbuka' ? 'bg-white ring-amber-300' : 'bg-white ring-red-300')}>
+                    <div className="font-extrabold text-[15px] leading-none">±{focusMins}</div>
+                    <div className="text-[9px] font-bold opacity-60 uppercase tracking-wide">menit</div>
+                  </div>
+                </div>
+                {/* Chip status penjualan */}
+                <div className="flex items-center gap-1.5 mt-3">
+                  <span className={'badge !text-[10px] px-2 py-1 gap-1 ' + (saleNotice === 'langsung-terbuka' ? 'bg-red-100 text-red-600' : 'bg-red-200 text-red-700')}>
+                    <Icon name="ban" className="w-3 h-3" /> Online: Tutup
+                  </span>
+                  {saleNotice === 'langsung-terbuka' ? (
+                    <span className="badge bg-green-100 text-green-700 !text-[10px] px-2 py-1 gap-1">
+                      <Icon name="circle-check-big" className="w-3 h-3" /> Langsung: Buka
+                    </span>
+                  ) : (
+                    <span className="badge bg-red-200 text-red-700 !text-[10px] px-2 py-1 gap-1">
+                      <Icon name="ban" className="w-3 h-3" /> Langsung: Tutup
+                    </span>
+                  )}
+                </div>
+                {/* Garis sobekan tiket */}
+                <div className={'border-t-2 border-dashed mt-3 ' + (saleNotice === 'langsung-terbuka' ? 'border-amber-300' : 'border-red-300')}></div>
+                {/* Saran aksi */}
+                <div className="flex items-start gap-2 mt-2.5">
+                  <Icon name="info" className="w-3.5 h-3.5 mt-0.5 shrink-0 opacity-70" />
+                  <div className="text-[11px] font-semibold leading-snug">
+                    {saleNotice === 'langsung-terbuka'
+                      ? <>Ingin pintu online terbuka lagi? Ajukan <b>Delay</b> — total ≥60 menit membuka pesan online sampai estimasi baru.</>
+                      : <>Terlambat? Ajukan <b>Delay</b> total ≥60 menit — pesan online terbuka kembali sampai estimasi baru, jualan langsung Anda ikut terbuka.</>}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : <Empty icon="car" msg="Tidak ada tugas — Istirahat dulu, Pengemudi hebat." />}
       </div>
     );
   }
