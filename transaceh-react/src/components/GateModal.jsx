@@ -28,7 +28,10 @@ function gateTarget(user) {
   let best = null;
   for (let i = 0; i < bookings.length; i++) {
     const b = bookings[i];
-    if (!b || b.source !== 'pelanggan') continue;
+    /* Konvensi: field source hanya pernah ditulis 'driver' (jualan langsung).
+       Booking pesan online TIDAK punya field source — jadi kuncinya bukan
+       "harus pelanggan", melainkan "buang yang driver". */
+    if (!b || b.source === 'driver') continue;
     if (b.status !== 'paid' && b.status !== 'done') continue;
     if (String(b.userEmail || '').toLowerCase() !== email) continue;
     const s = schedules.find((x) => x.id === b.scheduleId);
