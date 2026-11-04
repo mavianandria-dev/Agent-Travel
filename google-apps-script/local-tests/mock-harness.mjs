@@ -1528,6 +1528,9 @@ ok('sync pelanggan menyelesaikan pembayaran+ledger booking sendiri',
 ok('server mengisi driverId ledger dari jadwal (klien pelanggan tidak selalu tahu)',
   String(readRec('ledger', 'l_sync_1').driverId || '') === 'd_1',
   readRec('ledger', 'l_sync_1'));
+ok('ledger pelanggan tanpa komisi via sopir (viaSopir 0)',
+  Number(readRec('ledger', 'l_sync_1').viaSopir || 0) === 0,
+  readRec('ledger', 'l_sync_1'));
 const pSyncPaid = readRec('payments', 'p_sync_1');
 res = sync({ payments: { baseRev: revOf('payments'), upserts: [Object.assign({}, syncPayment, {
   id: 'p_sync_2', bookingId: 'b_4'
@@ -1769,8 +1772,9 @@ res = sync({ payments: { baseRev: revOf('payments'), upserts: [Object.assign({},
 })], deletes: [] } }, driverToken);
 ok('sync menolak pembayaran lunas saat booking masih pending',
   res.ok === false && res.error.code === 'VALIDATION', res);
-/* Jurnal driver jalur Model B: Tiket penuh 150000; viaSopir (5.000) hanya
-   memo — kolom jasa tetap penuh 10.000; fee 8% × subtotal 160000 = 12800. */
+/* Jurnal driver jalur Model B: Tiket penuh 150000; viaSopir 5.000 (komisi
+   50% jasa → pengemudi) KINI TERSIMPAN di kolomnya sendiri; kolom jasa
+   tetap penuh 10.000; fee 8% × subtotal 160000 = 12800. */
 const driverFare = { ticket: 150000, service: 10000, fee: 12800, total: 172800 };
 res = sync({
   bookings: { baseRev: revOf('bookings'), upserts: [Object.assign({}, driverBooking, {
@@ -1783,11 +1787,14 @@ res = sync({
   ledger: { baseRev: revOf('ledger'), upserts: [{
     id: 'l_driver_sync', bookingId: 'b_driver_sync', scheduleId: 's_dekat', agencyId: 'ag_1',
     driverId: 'd_1', userEmail: null, seats: ['A6'], ticket: 150000, service: 10000,
-    fee: 12800, total: 172800, status: 'ditahan', createdAt: '2026-10-30T05:27:00.000Z'
+    viaSopir: 5000, fee: 12800, total: 172800, status: 'ditahan', createdAt: '2026-10-30T05:27:00.000Z'
   }], deletes: [] }
 }, driverToken);
 ok('sync pengemudi menyelesaikan booking driver + ledger',
   res.ok === true, res);
+ok('komisi via sopir tersimpan di ledger driver (viaSopir 5000)',
+  Number(readRec('ledger', 'l_driver_sync').viaSopir || 0) === 5000,
+  readRec('ledger', 'l_driver_sync'));
 
 /* ------------------------------------------------------------------ */
 /* 12b) Cut-off pemesanan: pelanggan 60 mnt, pengemudi 30 mnt          */
@@ -3061,6 +3068,135 @@ ok('isinya utuh, approvedBy kosong',
   (dRow.length <= dhdrNew.length - 1 ||
     String(dRow[dhdrNew.length - 1]).trim() === ''),
   { row: dRow, hdr: dhdrNew });
+
+/* ------------------------------------------------------------------ */
+/* 19b) ensureSchema: tab ledger era "label geser" → migrasi khusus     */
+/* ------------------------------------------------------------------ */
+
+console.log('\n== 19b) ensureSchema migrasi tab ledger era label geser ==');
+const ledSheetMig = spread.getSheetByName('ledger');
+const ledSchema = S.apiDescribeStore_().tables.find((t) => t.name === 'ledger');
+const lhdrNew = ledSchema.headers;
+/* Kondisi produksi: label servicePaidOutAt TIDAK PERNAH ada di kepala tab —
+   data jasa tertulis di kolom berlabel replacedFromScheduleId, data
+   replacedFromScheduleId di kolom berlabel updated_at, dan updated_at
+   menumpang di kolom tanpa label di ujung (jejak pelebaran tulis engine). */
+const lhdrOld = lhdrNew.filter((nm) => nm !== 'servicePaidOutAt' && nm !== 'viaSopir');
+const lcolsOld = lhdrNew.slice(2, lhdrNew.length - 1).filter((nm) => nm !== 'viaSopir');
+const lrecOld = {
+  ticket: 150000, service: 10000, fee: 12800, total: 172800,
+  status: 'ditahan', createdAt: '2026-01-01T00:00:00.000Z',
+  servicePaidOutAt: 'SVC_TAG', replacedFromScheduleId: 'REP_TAG',
+};
+const lrowOld = ['l_mig', 1].concat(
+  lcolsOld.map((nm) => (lrecOld[nm] !== undefined ? lrecOld[nm] : '')), ['UPD_TAG']);
+ledSheetMig.clearContents();
+ledSheetMig.rows = [lhdrOld, lrowOld];
+
+const ensureLedger = S.ensureSchema_();
+ok('ensureSchema migrasi tab ledger: terjalankan & tercatat',
+  ensureLedger.ok === true &&
+  ensureLedger.fixes.some((f) => f.indexOf('tab ledger:') === 0), ensureLedger);
+ok('header ledger sejajar penuh dengan skema baru',
+  JSON.stringify(ledSheetMig.getRange(1, 1, 1, lhdrNew.length).getValues()[0]) ===
+  JSON.stringify(lhdrNew));
+const lrowMig = ledSheetMig.rows[1];
+ok('data ledger lama bergeser utuh mengikuti kolomnya',
+  lrowMig[lhdrNew.indexOf('servicePaidOutAt')] === 'SVC_TAG' &&
+  lrowMig[lhdrNew.indexOf('replacedFromScheduleId')] === 'REP_TAG' &&
+  String(lrowMig[lhdrNew.indexOf('updated_at')]) === 'UPD_TAG' &&
+  String(lrowMig[lhdrNew.indexOf('viaSopir')]).trim() === '' &&
+  lrowMig[lhdrNew.indexOf('ticket')] === 150000, lrowMig);
+const ledRead = S.apiReadCollection_(spread, 'ledger');
+ok('ledger era label geser terbaca tanpa DATA_CORRUPT',
+  ledRead.length === 1 && ledRead[0].id === 'l_mig' &&
+  Number(ledRead[0].ticket) === 150000 &&
+  String(ledRead[0].servicePaidOutAt || '') === 'SVC_TAG', ledRead);
+
+/* Idempoten: dipanggil ulang tidak menulis apa pun lagi. */
+const ensureLedger2 = S.ensureSchema_();
+ok('ensureSchema migrasi ledger idempoten (no-op)',
+  ensureLedger2.ok === true &&
+  !ensureLedger2.fixes.some((f) => f.indexOf('tab ledger:') === 0), ensureLedger2);
+
+/* ------------------------------------------------------------------ */
+/* 19c) ensureSchema: tab cityImages hanyut posisi → perbaikan berbasis */
+/*      isi (data URL menumpang n:bytes, email menumpang updated_at)    */
+/* ------------------------------------------------------------------ */
+
+console.log('\n== 19c) ensureSchema migrasi tab cityImages hanyut posisi ==');
+const citySheetMig = spread.getSheetByName('cityImages');
+const citySchema = S.apiDescribeStore_().tables.find((t) => t.name === 'cityImages');
+const chdrNew = citySchema.headers;
+/* Simpan kondisi tab — seksi 20 menguji cityImages lewat sync. */
+const citySavedRows = citySheetMig.rows.map((r) => r.slice());
+/* Layout produksi (rekonstruksi dari pola error validator): kolom ekstra
+   kosong setelah ord menggeser semuanya ke kanan — image (data URL)
+   mendarat di posisi bytes, email admin di posisi updated_at. */
+const chdrOld = ['id', 'ord', 'name'].concat(chdrNew.slice(2));
+const crowOld = ['ci_banda-aceh', 1, '', 'Banda Aceh', 'Aceh', 'image/jpeg',
+  'data:image/jpeg;base64,AAAA', 1800, '2026-01-01T00:00:00.000Z',
+  'admin@transaceh.id', '2026-01-02T00:00:00.000Z'];
+citySheetMig.clearContents();
+citySheetMig.rows = [chdrOld, crowOld];
+
+/* Baca dulu harus gagal DATA_CORRUPT — mereplikasi keluhan produksi. */
+let cityCorrupt = null;
+try { S.apiReadCollection_(spread, 'cityImages'); } catch (e) { cityCorrupt = e; }
+ok('cityImages hanyut memang gagal dibaca (DATA_CORRUPT)',
+  !!cityCorrupt &&
+  String((cityCorrupt && cityCorrupt.message) || cityCorrupt)
+    .indexOf('Nilai angka tidak valid') >= 0,
+  cityCorrupt && cityCorrupt.message);
+
+const ensureCityMig = S.ensureSchema_();
+ok('ensureSchema migrasi cityImages: terjalankan & tercatat',
+  ensureCityMig.ok === true &&
+  ensureCityMig.fixes.some((f) => f.indexOf('tab cityImages:') === 0), ensureCityMig);
+ok('header cityImages sejajar penuh dengan skema',
+  JSON.stringify(citySheetMig.getRange(1, 1, 1, chdrNew.length).getValues()[0]) ===
+  JSON.stringify(chdrNew));
+const crowMig = citySheetMig.rows[1];
+ok('baris cityImages ditata ulang berdasarkan isi sel',
+  crowMig[chdrNew.indexOf('city')] === 'Banda Aceh' &&
+  crowMig[chdrNew.indexOf('province')] === 'Aceh' &&
+  crowMig[chdrNew.indexOf('mime')] === 'image/jpeg' &&
+  crowMig[chdrNew.indexOf('image')] === 'data:image/jpeg;base64,AAAA' &&
+  Number(crowMig[chdrNew.indexOf('bytes')]) === 1800 &&
+  crowMig[chdrNew.indexOf('updatedBy')] === 'admin@transaceh.id' &&
+  !isNaN(Date.parse(String(crowMig[chdrNew.length - 1]))), crowMig);
+const cityRead = S.apiReadCollection_(spread, 'cityImages');
+ok('cityImages terbaca kembali utuh tanpa DATA_CORRUPT',
+  cityRead.length === 1 && cityRead[0].id === 'ci_banda-aceh' &&
+  cityRead[0].city === 'Banda Aceh' &&
+  cityRead[0].image === 'data:image/jpeg;base64,AAAA' &&
+  Number(cityRead[0].bytes) === 1800, cityRead);
+
+/* Idempoten: dipanggil ulang tidak menulis apa pun lagi. */
+const ensureCityMig2 = S.ensureSchema_();
+ok('ensureSchema migrasi cityImages idempoten (no-op)',
+  ensureCityMig2.ok === true &&
+  !ensureCityMig2.fixes.some((f) => f.indexOf('tab cityImages:') === 0), ensureCityMig2);
+
+/* Kasus produksi kedua: kepala tab SUDAH cocok skema tapi isi barisnya
+   hanyut — cek "header cocok → no-op" tidak boleh menutupi ini. */
+const crowShift = ['ci_banda-aceh', 1, '', 'Banda Aceh', 'Aceh', 'image/jpeg',
+  'data:image/jpeg;base64,AAAA', 1800, '2026-01-01T00:00:00.000Z',
+  'admin@transaceh.id', '2026-01-02T00:00:00.000Z'];
+citySheetMig.clearContents();
+citySheetMig.rows = [chdrNew, crowShift];
+const ensureCityMig3 = S.ensureSchema_();
+ok('ensureSchema memperbaiki cityImages berkepala benar tapi isi hanyut',
+  ensureCityMig3.ok === true &&
+  ensureCityMig3.fixes.some((f) => f.indexOf('tab cityImages:') === 0), ensureCityMig3);
+const cityRead2 = S.apiReadCollection_(spread, 'cityImages');
+ok('cityImages kepala-benar-isi-hanyut terbaca utuh',
+  cityRead2.length === 1 && cityRead2[0].city === 'Banda Aceh' &&
+  Number(cityRead2[0].bytes) === 1800, cityRead2);
+
+/* Pulihkan kondisi tab untuk seksi 20. */
+citySheetMig.clearContents();
+citySheetMig.rows = citySavedRows;
 
 /* ------------------------------------------------------------------ */
 /* 20) cityImages — gambar kota tujuan (superadmin-saja, 1 rekord/kota) */

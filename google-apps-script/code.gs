@@ -847,7 +847,8 @@ var API_MAIN_TABLES = {
     cols: [
       'bookingId', 'scheduleId', 'agencyId', 'driverId', 'userEmail',
       'n:ticket', 'n:service', 'n:fee', 'n:total', 'status', 'createdAt',
-      'releasedAt', 'paidOutAt', 'servicePaidOutAt', 'replacedFromScheduleId'
+      'releasedAt', 'paidOutAt', 'servicePaidOutAt', 'replacedFromScheduleId',
+      'n:viaSopir'
     ],
     children: [
       { table: 'ledger_seats', path: 'seats', kind: 'list', scalar: true,
@@ -4614,7 +4615,7 @@ function apiSyncValidateLedger_(ctx, target) {
       if (ctx.role === 'superadmin') return;
       apiSyncRejectUnknownFields_(entry, {
         id: 1, agencyId: 1, bookingId: 1, scheduleId: 1, driverId: 1,
-        userEmail: 1, seats: 1, ticket: 1, service: 1, fee: 1, total: 1,
+        userEmail: 1, seats: 1, ticket: 1, service: 1, viaSopir: 1, fee: 1, total: 1,
         status: 1, createdAt: 1, releasedAt: 1, paidOutAt: 1,
         servicePaidOutAt: 1
       }, 'ledger baru');
@@ -4674,6 +4675,13 @@ function apiSyncValidateLedger_(ctx, target) {
           throw apiError_('VALIDATION', 'Nominal ' + field + ' ledger tidak sesuai perhitungan.');
         }
       });
+      /* viaSopir (komisi 50% jasa untuk tiket via pengemudi) kini tersimpan.
+         Divalidasi bila klien mengirim; klien lama tanpa field ini tetap
+         lolos — nilainya memo laporan, bukan penentu dana. */
+      if (entry.viaSopir != null && entry.viaSopir !== '' &&
+          Math.abs(apiSyncNumber_(entry.viaSopir, 0) - apiSyncNumber_(expected.viaSopir, 0)) > 0.5) {
+        throw apiError_('VALIDATION', 'Nominal viaSopir ledger tidak sesuai perhitungan.');
+      }
       if (Math.abs(apiSyncNumber_(entry.total, 0) - apiSyncNumber_(booking.total, 0)) > 0.5) {
         throw apiError_('VALIDATION', 'Total ledger tidak sesuai total booking.');
       }
@@ -4685,7 +4693,7 @@ function apiSyncValidateLedger_(ctx, target) {
     var allowed = {
       status: 1, releasedAt: 1, paidOutAt: 1, voidedAt: 1, updatedAt: 1,
       scheduleId: 1, agencyId: 1, driverId: 1, seats: 1,
-      ticket: 1, service: 1, fee: 1, total: 1, replacedFromScheduleId: 1,
+      ticket: 1, service: 1, viaSopir: 1, fee: 1, total: 1, replacedFromScheduleId: 1,
       servicePaidOutAt: 1
     };
     for (var c = 0; c < changed.length; c++) {
@@ -4696,6 +4704,7 @@ function apiSyncValidateLedger_(ctx, target) {
     var moved = changed.indexOf('scheduleId') >= 0 || changed.indexOf('agencyId') >= 0 ||
       changed.indexOf('driverId') >= 0 || changed.indexOf('seats') >= 0 ||
       changed.indexOf('ticket') >= 0 || changed.indexOf('service') >= 0 ||
+      changed.indexOf('viaSopir') >= 0 ||
       changed.indexOf('fee') >= 0 || changed.indexOf('total') >= 0 ||
       changed.indexOf('replacedFromScheduleId') >= 0;
     if (moved) {
@@ -4722,6 +4731,10 @@ function apiSyncValidateLedger_(ctx, target) {
           throw apiError_('VALIDATION', 'Nominal ' + field + ' ledger tidak sesuai perhitungan.');
         }
       });
+      if (entry.viaSopir != null && entry.viaSopir !== '' &&
+          Math.abs(apiSyncNumber_(entry.viaSopir, 0) - apiSyncNumber_(movedExpected.viaSopir, 0)) > 0.5) {
+        throw apiError_('VALIDATION', 'Nominal viaSopir ledger tidak sesuai perhitungan.');
+      }
     }
     var oldStatus = String(old.status || '');
     var newStatus = String(entry.status || '');

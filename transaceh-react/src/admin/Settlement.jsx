@@ -195,13 +195,21 @@ export default function Settlement() {
           <h3 className="font-extrabold text-[16px] flex items-center gap-2"><Icon name="hand-coins" className="w-5 h-5 text-sky-600" />Riwayat Pencairan Pengemudi (Tiket)</h3>
           <FilterBar agFilter={agFilter} setAgFilter={setAgFilter} agencies={agencies} />
         </div>
-        <p className="text-[12px] text-slate-500 font-medium mt-1">Pencairan berjalan <b>otomatis</b>: begitu bus tiba, dana tiket langsung tercatat terkirim ke rekening pengemudi. Tidak ada tombol — laporan ini bukti siapa sudah berhak berapa.</p>
-        <div className="table-wrap mt-3"><table className="data w-full min-w-[820px]"><thead><tr>
-          <th>Kode</th><th>Rute</th><th>Pengemudi / Bank</th><th>Nominal Tiket</th><th>Tgl Tiba</th><th>Tgl Cair</th>
+        <p className="text-[12px] text-slate-500 font-medium mt-1">Pencairan berjalan <b>otomatis</b>: begitu bus tiba, dana tiket langsung tercatat terkirim ke rekening pengemudi. Tidak ada tombol — laporan ini bukti siapa sudah berhak berapa. Komisi via sopir (50% jasa untuk tiket jualan langsung) tampil di kolomnya sendiri.</p>
+        <div className="table-wrap mt-3"><table className="data w-full min-w-[940px]"><thead><tr>
+          <th>Kode</th><th>Rute</th><th>Pengemudi / Bank</th><th>Nominal Tiket</th><th>Komisi Via Sopir</th><th>Tgl Tiba</th><th>Tgl Cair</th>
         </tr></thead><tbody>
           {driverRows.map((e) => {
-            const { r, d, ag, tiba } = rowInfo(e);
+            const { s, r, d, ag, tiba } = rowInfo(e);
             const bank = (d?.bank || '').trim();
+            /* Komisi via sopir: tersimpan di ledger sejak penjualan (viaSopir).
+               Baris lama tanpa field dihitung ulang dari bookingnya agar tetap
+               terlihat — hanya untuk tiket jualan langsung pengemudi. */
+            const bkRec = bookings.find((b) => b.id === e.bookingId);
+            const vs = Number(e.viaSopir) > 0 ? Number(e.viaSopir)
+              : (bkRec && bkRec.source === 'driver' && s
+                ? (splitFare(s, (bkRec.seats || []).length, bkRec.discount || 0, 'driver', fareModelOf(bkRec)).viaSopir || 0)
+                : 0);
             /* Tgl Cair diambil sebagai TEKS ISO (bukan dipecah new Date):
                baris belum dicairkan (paidOutAt kosong) tak boleh membuat
                tanggal tidak sah → RangeError merobohkan halaman. */
@@ -212,6 +220,7 @@ export default function Settlement() {
                 <td className="text-[12.5px] font-semibold">{r ? `${r.from} → ${r.to}` : '-'}<br /><span className="text-slate-400">{(e.seats || []).join(', ') || '-'}</span></td>
                 <td className="text-[12.5px] font-semibold">{d?.name || '-'}<br /><span className="text-slate-400">{bank || ''}</span>{bank ? null : <span className="badge bg-red-100 text-red-600 ml-1">Rekening kosong</span>}</td>
                 <td className="font-extrabold">{fmtRp(e.ticket)}</td>
+                <td className="font-extrabold text-sky-700">{vs > 0 ? fmtRp(vs) : <span className="text-slate-300">–</span>}</td>
                 <td className="text-[12px] font-semibold">{tiba || '-'}</td>
                 <td>{e.paidOutAt
                   ? <span className="text-[12px] font-bold">{paidDate}</span>

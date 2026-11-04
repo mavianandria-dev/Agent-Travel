@@ -108,6 +108,16 @@ function ensureSchema_() {
       var lastCol = Math.max(sheet.getLastColumn(), table.headers.length);
       var header = (sheet.getRange(1, 1, 1, lastCol).getDisplayValues()[0] || [])
         .slice(0, table.headers.length).join('|');
+      /* Tab cityImages produksi punya baris yang hanyut posisinya (kolom
+         ekstra warisan unggahan antara): data URL gambar menumpang kolom
+         n:bytes (dibaca sebagai angka → DATA_CORRUPT) dan email admin
+         menumpang updated_at. Dijalankan SEBELUM pemeriksaan header karena
+         kepala tab bisa saja sudah cocok skema sementara isinya hanyut —
+         tab yang benar-benar rapi dilewati di dalam fungsi (return null). */
+      if (table.name === 'cityImages') {
+        var cityFix = migrateCityImageRows_(sheet, table);
+        if (cityFix) { fixes.push(cityFix); return; }
+      }
       if (header === table.headers.join('|')) return;
       /* Kolom baru melintasi deploy tanpa reset data. Dua kasus dilayani:
          (1) tambahan di UJUNG skema → cukup tulis nama yang belum ada;
@@ -133,6 +143,10 @@ function ensureSchema_() {
           fixes.push('kolom tab ' + table.name + ' ditambah: ' + ins.join(', '));
           return;
         }
+      }
+      if (table.name === 'ledger') {
+        var ledgerFix = migrateLedgerHeaders_(sheet, table);
+        if (ledgerFix) { fixes.push(ledgerFix); return; }
       }
       if (table.name === 'agency_kyc_docs') {
         migrateDocsBlob_(ss, sheet, table, described.tables);
@@ -187,6 +201,141 @@ function updateMetaTableCount_(metaSheet, described) {
  * database. Idempoten: header tanpa `selfie` tanpa baris chunk `selfie`
  * menghasilkan null (tidak ada catatan perubahan).
  */
+/** Migrasi tab cityImages produksi yang barisnya hanyut posisinya: ada
+ *  kolom ekstra warisan unggahan antara sehingga data URL gambar menumpang
+ *  kolom n:bytes (dibaca sebagai angka → DATA_CORRUPT "Nilai angka tidak
+ *  valid") dan email admin menumpang updated_at (validator: "updated_at
+ *  tidak valid"). Kolom ekstranya tidak dikenal, jadi baris ditata ulang
+ *  berdasarkan ISI sel yang sangat khas pada cityImages:
+ *    'data:image/…' → image, 'image/…' → mime, angka murni → bytes,
+ *    ber-email → updatedBy, timestamp → updated_at/updatedAt, teks lain
+ *    → city (dicocokkan slug-nya dengan id 'ci_<slug>') lalu province.
+ *  bytes dipaksa angka/kosong dan updated_at dipaksa timestamp agar
+ *  validator hijau. Idempoten: header cocok + semua baris berbentuk
+ *  benar → return null (jalur umum lanjut, no-op). */
+function migrateCityImageRows_(sheet, table) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    var headEmpty = (sheet.getRange(1, 1, 1, table.headers.length)
+      .getDisplayValues()[0] || []).map(function (v) { return String(v).trim(); }).join('|');
+    if (headEmpty === table.headers.join('|')) return null; /* sudah rapi */
+    sheet.getRange(1, 1, 1, table.headers.length).setValues([table.headers]);
+    return 'tab cityImages: kepala dilurkan sesuai skema (tab kosong)';
+  }
+  var width = Math.max(sheet.getLastColumn(), table.headers.length);
+  var all = sheet.getRange(1, 1, lastRow, width).getValues();
+  var imageIdx = table.headers.indexOf('image');
+  var bytesIdx = table.headers.indexOf('bytes');
+  var stampIdx = table.headers.length - 1;
+  /* Sudah rapi? Header cocok + tak ada data URL di luar kolom image +
+     bytes angka/kosong + updated_at timestamp valid → biarkan jalur umum. */
+  var neat = (all[0] || []).slice(0, table.headers.length).join('|') ===
+    table.headers.join('|');
+  if (neat) {
+    for (var r = 1; r < all.length && neat; r++) {
+      var probe = all[r] || [];
+      var blank = probe.every(function (cell) {
+        return String(cell == null ? '' : cell).trim() === '';
+      });
+      if (blank) continue;
+      for (var pc = 2; pc < table.headers.length; pc++) {
+        var pv = String(probe[pc] == null ? '' : probe[pc]).trim();
+        if (!pv || pc === imageIdx) continue;
+        if (pv.indexOf('data:image/') === 0 ||
+            (pc === bytesIdx && !/^\d+$/.test(pv)) ||
+            (pc === stampIdx && isNaN(Date.parse(pv)))) { neat = false; break; }
+      }
+    }
+    if (neat) return null;
+  }
+  function cellText(cell) {
+    if (cell instanceof Date) return cell.toISOString();
+    return String(cell == null ? '' : cell).trim();
+  }
+  function citySlug_(s) {
+    return String(s || '').trim().toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  }
+  var out = [];
+  for (var i = 1; i < all.length; i++) {
+    var row = all[i] || [];
+    var blank = row.every(function (cell) {
+      return String(cell == null ? '' : cell).trim() === '';
+    });
+    if (blank) continue;
+    var id = String(row[0] == null ? '' : row[0]).trim();
+    var image = '', mime = '', bytes = '', updatedBy = '', stamp = '';
+    var texts = [];
+    for (var c = 2; c < row.length; c++) {
+      var txt = cellText(row[c]);
+      if (!txt) continue;
+      if (txt.indexOf('data:image/') === 0) { if (!image) image = txt; continue; }
+      if (/^image\/[a-z0-9.+-]+$/i.test(txt)) { if (!mime) mime = txt; continue; }
+      if (!bytes && /^\d+$/.test(txt)) { bytes = txt; continue; }
+      if (!updatedBy && txt.indexOf('@') > 0) { updatedBy = txt; continue; }
+      if (!stamp && txt.length >= 16 && !isNaN(Date.parse(txt))) { stamp = txt; continue; }
+      texts.push(txt);
+    }
+    var city = '';
+    if (id.indexOf('ci_') === 0) {
+      var want = id.slice(3);
+      for (var t = 0; t < texts.length && !city; t++) {
+        if (citySlug_(texts[t]) === want) city = texts.splice(t, 1)[0];
+      }
+    }
+    if (!city && texts.length) city = texts.shift();
+    var province = texts.length ? texts.shift() : '';
+    if (!stamp) stamp = new Date().toISOString();
+    if (!/^\d*$/.test(String(bytes))) bytes = '';
+    var val = {
+      city: city, province: province, mime: mime, image: image,
+      bytes: bytes, updatedAt: stamp, updatedBy: updatedBy, updated_at: stamp
+    };
+    out.push([id, String(row[1] == null ? '' : row[1]).trim() || String(out.length + 1)]
+      .concat(table.headers.slice(2).map(function (nm) {
+        return val[nm] !== undefined ? val[nm] : '';
+      })));
+  }
+  sheet.clearContents();
+  sheet.getRange(1, 1, 1, table.headers.length).setValues([table.headers]);
+  if (out.length) {
+    var rng = sheet.getRange(2, 1, out.length, table.headers.length);
+    rng.setNumberFormat('@');
+    rng.setValues(out);
+  }
+  return 'tab cityImages: ' + out.length + ' baris ditata ulang sesuai skema (perbaikan berbasis isi)';
+}
+
+/** Migrasi tab ledger era "label geser": kepala tab produksi lama tidak
+ *  pernah memuat label 'servicePaidOutAt' — data jasa tertulis di kolom
+ *  berlabel 'replacedFromScheduleId', data replacedFromScheduleId di kolom
+ *  berlabel 'updated_at', dan updated_at menumpang di kolom tak berlabel di
+ *  ujung (jejak pelebaran tulis engine). Baca/tulis posisi tetap konsisten
+ *  sehingga aplikasi berjalan normal, tetapi perbandingan nama label di
+ *  jalur umum ensureSchema tidak bisa menjajarkannya, dan kolom viaSopir
+ *  baru bertabrakan dengan updated_at (tanggal terbaca sebagai angka →
+ *  DATA_CORRUPT). Perbaikan: sisipkan satu kolom kosong tepat pada posisi
+ *  skema viaSopir (updated_at bergeser ke kanan ke tempatnya), lalu tulis
+ *  ulang seluruh kepala sesuai skema. Idempoten — tab yang sudah memuat
+ *  'servicePaidOutAt' dilewati; pola tak dikenal diteruskan jujur ke jalur
+ *  umum agar gagal dengan pesan jelas. */
+function migrateLedgerHeaders_(sheet, table) {
+  var real = (sheet.getRange(1, 1, 1, Math.max(1, sheet.getLastColumn())).getDisplayValues()[0] || [])
+    .map(function (v) { return String(v).trim(); });
+  while (real.length && real[real.length - 1] === '') real.pop();
+  if (real.indexOf('servicePaidOutAt') >= 0) return null; /* sudah rapi */
+  var paidIdx = table.headers.indexOf('paidOutAt');
+  var svcIdx = table.headers.indexOf('servicePaidOutAt');
+  var viaIdx = table.headers.indexOf('viaSopir');
+  if (paidIdx < 0 || svcIdx !== paidIdx + 1 || viaIdx < 0) return null;
+  /* Pola era label geser: label paidOutAt masih di posisinya, lalu label
+     replacedFromScheduleId menduduki tempat servicePaidOutAt. */
+  if (real[paidIdx] !== 'paidOutAt' || real[svcIdx] !== 'replacedFromScheduleId') return null;
+  sheet.insertColumns(viaIdx + 1, 1);
+  sheet.getRange(1, 1, 1, table.headers.length).setValues([table.headers]);
+  return 'tab ledger: label kepala dilurkan + kolom viaSopir disisipkan (era label geser)';
+}
+
 function migrateSelfieColumn_(ss, tables) {
   var fixes = [];
   var driversTable = null;

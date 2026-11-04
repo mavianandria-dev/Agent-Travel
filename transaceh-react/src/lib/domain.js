@@ -1321,6 +1321,7 @@ export function moveMaintenanceBooking(bookingId, targetScheduleId, { by = 'pela
     e.seats = [...nextSeats];
     e.ticket = fare.ticket;
     e.service = fare.service;
+    e.viaSopir = fare.viaSopir || 0;
     e.fee = fare.fee;
     e.total = fare.total;
     e.replacedFromScheduleId = orig.id;
@@ -2256,7 +2257,7 @@ export function createLedger(booking){
   if(DB.load('ledger',[]).some(x=>x.bookingId===booking.id)) return null;
   const s=schedById(booking.scheduleId); if(!s) return null;
   const f=splitFare(s,(booking.seats||[]).length,booking.discount||0, booking.source, fareModelOf(booking));
-  const e={id:uid('LG'),bookingId:booking.id,scheduleId:s.id,agencyId:s.agencyId,driverId:s.driverId||null,userEmail:booking.userEmail,seats:[...(booking.seats||[])],ticket:f.ticket,service:f.service,fee:f.fee,total:f.total,status:'ditahan',createdAt:new Date().toISOString(),releasedAt:null,paidOutAt:null};
+  const e={id:uid('LG'),bookingId:booking.id,scheduleId:s.id,agencyId:s.agencyId,driverId:s.driverId||null,userEmail:booking.userEmail,seats:[...(booking.seats||[])],ticket:f.ticket,service:f.service,viaSopir:f.viaSopir||0,fee:f.fee,total:f.total,status:'ditahan',createdAt:new Date().toISOString(),releasedAt:null,paidOutAt:null};
   const arr=DB.load('ledger',[]); arr.unshift(e); DB.save('ledger',arr);
   audit('ledger_hold',booking.code+' • T'+f.ticket+' J'+f.service+' F'+f.fee);
   return e;
