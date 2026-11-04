@@ -234,22 +234,33 @@ export default function Settlement() {
 
       <div className="bg-white rounded-3xl shadow-card p-5">
         <h3 className="font-extrabold text-[16px] flex items-center gap-2"><Icon name="banknote" className="w-5 h-5 text-emerald-600" />Riwayat Pencairan Jasa — Agen</h3>
-        <p className="text-[12px] text-slate-500 font-medium mt-1">Jasa agen tercatat terkirim ke rekening agen (dari KYC) tepat 5 menit setelah bus tiba — otomatis, mengikuti jendela ulasan pelanggan.</p>
+        <p className="text-[12px] text-slate-500 font-medium mt-1">Jasa agen tercatat terkirim ke rekening agen (dari KYC) tepat 5 menit setelah bus tiba — otomatis, mengikuti jendela ulasan pelanggan. Untuk tiket jualan langsung pengemudi, 50% jasa jadi komisi pengemudi — jasa bersih agen tampil di kolomnya sendiri.</p>
         {(servicePending.length > 0 && serviceAutoAt) ? (
           <div className="mt-2 bg-emerald-50 text-emerald-700 rounded-xl px-3 py-2 text-[12px] font-semibold">{servicePending.length} pos jasa akan otomatis tercatat terkirim paling cepat di {serviceAutoAt}</div>
         ) : null}
-        <div className="table-wrap mt-3"><table className="data w-full min-w-[720px]"><thead><tr>
-          <th>Kode</th><th>Rute</th><th>Agen / Rekening</th><th>Nominal Jasa</th><th>Tgl Tiba</th><th>Tgl Cair</th>
+        <div className="table-wrap mt-3"><table className="data w-full min-w-[940px]"><thead><tr>
+          <th>Kode</th><th>Rute</th><th>Agen / Rekening</th><th>Nominal Jasa</th><th>Komisi Sopir</th><th>Jasa Bersih</th><th>Tgl Tiba</th><th>Tgl Cair</th>
         </tr></thead><tbody>
           {serviceRows.map((e) => {
-            const { r, ag, tiba } = rowInfo(e);
+            const { s, r, ag, tiba } = rowInfo(e);
             const rek = (ag?.bank || '').trim();
+            /* Komisi via sopir (50% jasa untuk tiket jualan langsung) sudah
+               disisihkan dari jasa — baris lama tanpa field dihitung ulang
+               dari bookingnya agar tetap benar. */
+            const bkRec = bookings.find((b) => b.id === e.bookingId);
+            const vs = Number(e.viaSopir) > 0 ? Number(e.viaSopir)
+              : (bkRec && bkRec.source === 'driver' && s
+                ? (splitFare(s, (bkRec.seats || []).length, bkRec.discount || 0, 'driver', fareModelOf(bkRec)).viaSopir || 0)
+                : 0);
+            const bersih = Math.max(0, (Number(e.service) || 0) - vs);
             return (
               <tr key={e.id}>
                 <td className="font-mono font-extrabold">{codeOf(e)}</td>
                 <td className="text-[12.5px] font-semibold">{r ? `${r.from} → ${r.to}` : '-'}<br /><span className="text-slate-400">{(e.seats || []).join(', ') || '-'}</span></td>
                 <td className="text-[12.5px] font-semibold">{ag?.name || '-'}<br /><span className="text-slate-400">{rek || ''}</span>{rek ? null : <span className="badge bg-red-100 text-red-600 ml-1">Rekening kosong</span>}</td>
-                <td className="font-extrabold text-emerald-700">{fmtRp(e.service)}</td>
+                <td className="font-extrabold">{fmtRp(e.service)}</td>
+                <td className="font-extrabold text-red-600">{vs > 0 ? <span>-{fmtRp(vs)}<span className="block text-[10px] font-semibold text-red-400">Pesan Tiket Via Pengemudi</span></span> : <span className="text-slate-300">–</span>}</td>
+                <td className="font-extrabold text-emerald-700">{fmtRp(bersih)}</td>
                 <td className="text-[12px] font-semibold">{tiba || '-'}</td>
                 <td className="text-[12px] font-bold">{String(e.servicePaidOutAt || '').slice(0, 10)}</td>
               </tr>
