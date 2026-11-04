@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(path.join(__dirname, '..', 'code.gs'), 'utf8');
 const seedSource = readFileSync(path.join(__dirname, '..', 'seed.gs'), 'utf8');
+const resetSource = readFileSync(path.join(__dirname, '..', 'reset.gs'), 'utf8');
 
 /* ------------------------------------------------------------------ */
 /* Mock Spreadsheet                                                    */
@@ -236,6 +237,7 @@ vm.createContext(sandbox);
 try {
   new vm.Script(source).runInContext(sandbox);
   new vm.Script(seedSource).runInContext(sandbox);
+  new vm.Script(resetSource).runInContext(sandbox);
 } catch (err) {
   console.error('PARSE/LOAD ERROR:', err.stack || err.message);
   process.exit(1);
@@ -3205,6 +3207,81 @@ ok('proyeksi publik cityImages tetap id+city+image (tanpa province)',
   !!cityImgPub && Object.keys(cityImgPub).every((k) => ['id', 'city', 'image'].indexOf(k) >= 0), cityImgPub);
 res = sync({ cityImages: { baseRev: revOf('cityImages'), upserts: [], deletes: [cityImgId('Medan')] } }, adminToken);
 ok('bersih-bersih rekord uji province', res.ok === true && !readRec('cityImages', cityImgId('Medan')), res);
+
+/* ------------------------------------------------------------------ */
+/* 21) reset data operasional (reset.gs)                                */
+/* ------------------------------------------------------------------ */
+
+console.log('\n== 21) reset data operasional (reset.gs) ==');
+
+/* Kondisi awal dicatat: jumlah baris koleksi operasional, master data,
+   kuota voucher, dan revisi — pembanding untuk asersi setelah reset. */
+const resetKeys = ['bookings', 'payments', 'ledger', 'schedules', 'notifications',
+  'reviews', 'maintenanceRequests', 'supportTickets', 'audit'];
+const resetBefore = {};
+resetKeys.forEach((k) => { resetBefore[k] = S.apiReadCollection_(spread, k).length; });
+const masterKeys = ['users', 'agencies', 'routes', 'routeRequests', 'vehicles',
+  'drivers', 'settings', 'fees', 'banners', 'cityImages'];
+const masterBefore = {};
+masterKeys.forEach((k) => { masterBefore[k] = S.apiReadCollection_(spread, k).length; });
+const revBefore = {};
+resetKeys.concat(['vouchers']).forEach((k) => { revBefore[k] = revOf(k); });
+
+/* Pastikan minimal satu voucher tercatat terpakai (used>0) supaya efek
+   "kuota dikembalikan" teruji secara deterministik. */
+const vouBefore = S.apiReadCollection_(spread, 'vouchers');
+vouBefore.forEach((v) => { v.used = 3; });
+S.apiWriteCollection_(spread, 'vouchers', vouBefore);
+
+/* Jalankan reset (fungsi internal — tanpa dialog UI). */
+const resetResult = S.resetDataOperasional_();
+ok('reset data operasional sukses', !!resetResult && resetResult.ok === true, resetResult);
+
+/* Semua koleksi operasional kosong. */
+const resetEmpty = resetKeys.every((k) => S.apiReadCollection_(spread, k).length === 0);
+ok('semua koleksi operasional kosong setelah reset', resetEmpty,
+  resetKeys.map((k) => k + '=' + S.apiReadCollection_(spread, k).length).join(','));
+
+/* Tab anak operasional ikut bersih: kursi/penumpang/fare booking, kursi
+   ledger, blocked seats & riwayat delay jadwal, meta notifikasi. */
+const resetChildEmpty = ['booking_seats', 'booking_passengers', 'booking_fare',
+  'ledger_seats', 'schedule_blocked_seats', 'schedule_delay_history',
+  'notifications_meta']
+  .every((t) => { const sh = spread.getSheetByName(t); return !sh || sh.getLastRow() <= 1; });
+ok('tab anak operasional ikut kosong (kursi/penumpang/fare/delay)', resetChildEmpty);
+
+/* Master data utuh — akun, agensi, rute, armada, pengemudi, pengaturan. */
+const masterSame = masterKeys.every((k) => S.apiReadCollection_(spread, k).length === masterBefore[k]);
+ok('master data (akun/agensi/rute/armada/pengemudi) utuh', masterSame,
+  masterKeys.map((k) => k + '=' + S.apiReadCollection_(spread, k).length + '/' + masterBefore[k]).join(','));
+
+/* Voucher tetap ada, kuota pemakaian kembali 0. */
+const vouAfter = S.apiReadCollection_(spread, 'vouchers');
+ok('voucher tetap ada + kuota used kembali 0',
+  vouAfter.length === vouBefore.length &&
+  vouAfter.every((v) => (Number(v.used || 0) || 0) === 0), vouAfter);
+
+/* Revisi tiap koleksi reset + vouchers naik satu — klien lama tidak konflik
+   sync; bootstrap memberi koleksi kosong. */
+const revBumped = resetKeys.concat(['vouchers']).every((k) => revOf(k) === revBefore[k] + 1);
+ok('revisi koleksi reset + vouchers naik satu', revBumped,
+  resetKeys.concat(['vouchers']).map((k) => k + ':' + revBefore[k] + '→' + revOf(k)).join(','));
+
+/* Idempoten: reset kedua tetap sukses, baris tetap 0, rev koleksi operasional
+   naik lagi; rev.vouchers TIDAK naik karena kuota sudah 0 (tidak ada ubah). */
+const revAfterFirst = {};
+resetKeys.concat(['vouchers']).forEach((k) => { revAfterFirst[k] = revOf(k); });
+const resetAgain = S.resetDataOperasional_();
+const stillEmpty = resetKeys.every((k) => S.apiReadCollection_(spread, k).length === 0);
+ok('reset kedua idempoten (tetap kosong, rev naik lagi, voucher no-op)',
+  !!resetAgain && resetAgain.ok === true && stillEmpty &&
+  resetAgain.vouchersReset === 0 &&
+  resetKeys.every((k) => revOf(k) === revAfterFirst[k] + 1) &&
+  revOf('vouchers') === revAfterFirst.vouchers, resetAgain);
+
+/* Bootstrap publik setelah reset tetap ok — aplikasi langsung bisa dipakai. */
+res = dispatch(bodyOf({}, { action: 'bootstrap' }));
+ok('bootstrap publik tetap ok setelah reset', res.ok === true, res);
 
 console.log('\n== Ringkasan ==');
 console.log('PASS: ' + passed + ', FAIL: ' + failed);
