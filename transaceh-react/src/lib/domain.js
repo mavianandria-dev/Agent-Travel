@@ -2142,6 +2142,24 @@ export function splitFare(s,nSeats=1,discount=0, source='pelanggan', model='B'){
   return {ticket:gross-dTik,service:jasaTotal-dSvc,fee,total,subtotal,quoteTicket:gross,quoteService:jasaTotal,viaSopir:viaSopir,disc:raw};
 }
 
+/* Komisi via sopir per entri ledger (50% jasa tiket jualan langsung;
+   tersimpan sejak penjualan di n:viaSopir — baris lama tanpa field
+   dihitung ulang dari bookingnya). Sumber tunggal untuk tabel dompet,
+   card indikator, dan laporan admin/agen. */
+export function viaSopirOf(e, bookings) {
+  const s = schedById(e.scheduleId);
+  const bk = (bookings || []).find((b) => b.id === e.bookingId);
+  return Number(e.viaSopir) > 0 ? Number(e.viaSopir)
+    : (bk && bk.source === 'driver' && s
+      ? (splitFare(s, (bk.seats || []).length, bk.discount || 0, 'driver', fareModelOf(bk)).viaSopir || 0)
+      : 0);
+}
+/* Total bersih pengemudi = nominal tiket + komisi via sopir — uang yang
+   benar-benar diterima pengemudi; dipakai tabel dan card indikator. */
+export function totalBersihOf(e, bookings) {
+  return (Number(e.ticket) || 0) + viaSopirOf(e, bookings);
+}
+
 /** 4 kolom uang yang sah untuk booking_fare — memo layar (subtotal/quote) dibuang. */
 export const fareCore=(f)=>({ticket:f?.ticket||0,service:f?.service||0,fee:f?.fee||0,total:f?.total||0});
 

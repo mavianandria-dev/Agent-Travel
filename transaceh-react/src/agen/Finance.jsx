@@ -1,6 +1,6 @@
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { agencyOf, routeById, schedById, splitFare, fareModelOf } from '@/lib/domain.js';
+import { agencyOf, routeById, schedById, viaSopirOf } from '@/lib/domain.js';
 import { fmtRp } from '@/lib/utils.js';
 import { StatCard, Icon } from '@/components/ui.jsx';
 import { ManifestModal } from './Bookings.jsx';
@@ -16,19 +16,10 @@ export default function Finance({ ag, st }) {
   const active = ledger.filter((e) => e.status === 'ditahan' || e.status === 'layak' || e.status === 'dicairkan');
   const bookings = DB.load('bookings', []);
   const byId = (id) => bookings.find((b) => b.id === id);
-  /* Komisi via sopir per entri (50% jasa tiket jualan langsung); baris
-     lama tanpa field dihitung ulang dari bookingnya agar tetap benar. */
-  const vsOf = (e) => {
-    const bk = byId(e.bookingId);
-    const s = schedById(e.scheduleId);
-    return Number(e.viaSopir) > 0 ? Number(e.viaSopir)
-      : (bk && bk.source === 'driver' && s
-        ? (splitFare(s, (bk.seats || []).length, bk.discount || 0, 'driver', fareModelOf(bk)).viaSopir || 0)
-        : 0);
-  };
-  /* Jasa bersih = jasa − komisi via sopir — uang yang benar-benar milik
-     agen; dipakai card indikator dan tabel. */
-  const bersihOf = (e) => Math.max(0, (Number(e.service) || 0) - vsOf(e));
+  /* Komisi via sopir per entri — helper domain (baris lama dihitung
+     ulang dari bookingnya). Jasa bersih = jasa − komisi — uang yang
+     benar-benar milik agen; dipakai card indikator dan tabel. */
+  const bersihOf = (e) => Math.max(0, (Number(e.service) || 0) - viaSopirOf(e, bookings));
   /* Card indikator pola dompet pengemudi: tiga status, basis jasa bersih.
      "Sudah Dicairkan" tetap memakai cap sistem servicePaidOutAt (jasa cair
      otomatis 5 menit setelah tiba) — baris dicairkan lama tanpa cap jasa
@@ -93,9 +84,9 @@ export default function Finance({ ag, st }) {
           {groups.map((g) => {
             const s = schedById(g.sid);
             const r = s ? routeById(s.routeId) : null;
-            /* Komisi via sopir dijumlah per tiket; baris lama dihitung
-               ulang dari bookingnya (helper vsOf di atas). */
-            const vs = g.items.reduce((a, e) => a + vsOf(e), 0);
+            /* Komisi via sopir dijumlah per tiket — helper domain; baris
+               lama dihitung ulang dari bookingnya. */
+            const vs = g.items.reduce((a, e) => a + viaSopirOf(e, bookings), 0);
             const jasa = g.items.reduce((a, e) => a + (Number(e.service) || 0), 0);
             const bersih = Math.max(0, jasa - vs);
             const berangkat = loc(s?.departedAt) || (s ? `${s.date || ''} ${s.time || ''}`.trim() : '');

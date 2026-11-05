@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { driverById, schedById, routeById, agencyById, scheduleNeedsReview, setScheduleTripStatus, resolveScheduleNoShow, splitFare, fareModelOf, markRefundPaid, startRefundProcessing, LEDGER_SERV_GATE_MS } from '@/lib/domain.js';
+import { driverById, schedById, routeById, agencyById, scheduleNeedsReview, setScheduleTripStatus, resolveScheduleNoShow, splitFare, fareModelOf, viaSopirOf, markRefundPaid, startRefundProcessing, LEDGER_SERV_GATE_MS } from '@/lib/domain.js';
 import { fmtRp } from '@/lib/utils.js';
 import { Icon, Empty } from '@/components/ui.jsx';
+import DriverLedgerTable from '@/components/DriverLedgerTable.jsx';
 
 function NoShowModal({ sid }) {
   const { closeModal, toast, refresh } = useApp();
@@ -65,6 +66,7 @@ function FilterBar({ agFilter, setAgFilter, agencies }) {
 export default function Settlement() {
   const { toast, refresh, openModal } = useApp();
   const [agFilter, setAgFilter] = useState('');
+  const [openLedger, setOpenLedger] = useState(null);
   const agencies = DB.load('agencies', []);
   const ledger = DB.load('ledger', []);
   const bookings = DB.load('bookings', []);
@@ -74,6 +76,29 @@ export default function Settlement() {
   const driverRows = ledger
     .filter((e) => (e.status === 'layak' || e.status === 'dicairkan') && (!agFilter || e.agencyId === agFilter))
     .sort((a, b) => (b.paidOutAt || b.releasedAt || b.createdAt || '').localeCompare(a.paidOutAt || a.releasedAt || a.createdAt || ''));
+
+  /* Tabel induk: satu baris per keberangkatan (rute + waktu berangkat) —
+     nilai dijumlahkan per jadwal; urut keberangkatan terbaru di atas. */
+  const depGroups = [];
+  const seenSched = {};
+  driverRows.forEach((e) => {
+    const sid = String(e.scheduleId || '');
+    if (!seenSched[sid]) { seenSched[sid] = { sid, items: [] }; depGroups.push(seenSched[sid]); }
+    seenSched[sid].items.push(e);
+  });
+  const depKey = (g) => {
+    const s = schedById(g.sid);
+    return String(s?.departedAt || (s ? `${s.date || ''}T${s.time || ''}` : '') || '');
+  };
+  depGroups.sort((a, b) => depKey(b).localeCompare(depKey(a)));
+  /* Tanggal + jam:menit waktu perangkat (bukan UTC server) untuk tampilan. */
+  const loc = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
 
   /* Laporan JASA agen: hanya baris yang SISTEM sudah menandai terkirim
      (servicePaidOutAt) — era lama tanpa cap jasa tidak ikut tampil. */
@@ -196,36 +221,48 @@ export default function Settlement() {
           <FilterBar agFilter={agFilter} setAgFilter={setAgFilter} agencies={agencies} />
         </div>
         <p className="text-[12px] text-slate-500 font-medium mt-1">Pencairan berjalan <b>otomatis</b>: begitu bus tiba, dana tiket langsung tercatat terkirim ke rekening pengemudi. Tidak ada tombol — laporan ini bukti siapa sudah berhak berapa. Komisi via sopir (50% jasa untuk tiket jualan langsung) tampil di kolomnya sendiri.</p>
-        <div className="table-wrap mt-3"><table className="data w-full min-w-[940px]"><thead><tr>
-          <th>Kode</th><th>Rute</th><th>Pengemudi / Bank</th><th>Nominal Tiket</th><th>Komisi Via Sopir</th><th>Tgl Tiba</th><th>Tgl Cair</th>
+        <div className="table-wrap mt-3"><table className="data w-full min-w-[860px]"><thead><tr>
+          <th>Nama Travel</th><th>Rute</th><th>Pengemudi / Bank</th><th>Total Nominal Tiket</th><th>Total Komisi Via Sopir</th><th>Total Bersih</th>
         </tr></thead><tbody>
-          {driverRows.map((e) => {
-            const { s, r, d, ag, tiba } = rowInfo(e);
+          {depGroups.map((g) => {
+            const s = schedById(g.sid);
+            const r = s ? routeById(s.routeId) : null;
+            const first = g.items[0];
+            const d = first.driverId ? driverById(first.driverId) : null;
+            const ag = agencyById(first.agencyId);
             const bank = (d?.bank || '').trim();
-            /* Komisi via sopir: tersimpan di ledger sejak penjualan (viaSopir).
-               Baris lama tanpa field dihitung ulang dari bookingnya agar tetap
-               terlihat — hanya untuk tiket jualan langsung pengemudi. */
-            const bkRec = bookings.find((b) => b.id === e.bookingId);
-            const vs = Number(e.viaSopir) > 0 ? Number(e.viaSopir)
-              : (bkRec && bkRec.source === 'driver' && s
-                ? (splitFare(s, (bkRec.seats || []).length, bkRec.discount || 0, 'driver', fareModelOf(bkRec)).viaSopir || 0)
-                : 0);
-            /* Tgl Cair diambil sebagai TEKS ISO (bukan dipecah new Date):
-               baris belum dicairkan (paidOutAt kosong) tak boleh membuat
-               tanggal tidak sah → RangeError merobohkan halaman. */
-            const paidDate = String(e.paidOutAt || '').slice(0, 10);
+            const berangkat = loc(s?.departedAt) || (s ? `${s.date || ''} ${s.time || ''}`.trim() : '');
+            const tiba = loc(s?.arrivedAt || first.releasedAt);
+            const tiket = g.items.reduce((a, e) => a + (Number(e.ticket) || 0), 0);
+            /* Komisi via sopir dijumlah per tiket — helper domain; baris
+               lama dihitung ulang dari bookingnya. */
+            const vs = g.items.reduce((a, e) => a + viaSopirOf(e, bookings), 0);
             return (
-              <tr key={e.id}>
-                <td className="font-mono font-extrabold">{codeOf(e)}<br /><span className="text-[11px] text-slate-400 font-semibold">{ag?.name || 'Agen lama'}</span></td>
-                <td className="text-[12.5px] font-semibold">{r ? `${r.from} → ${r.to}` : '-'}<br /><span className="text-slate-400">{(e.seats || []).join(', ') || '-'}</span></td>
-                <td className="text-[12.5px] font-semibold">{d?.name || '-'}<br /><span className="text-slate-400">{bank || ''}</span>{bank ? null : <span className="badge bg-red-100 text-red-600 ml-1">Rekening kosong</span>}</td>
-                <td className="font-extrabold">{fmtRp(e.ticket)}</td>
-                <td className="font-extrabold text-sky-700">{vs > 0 ? fmtRp(vs) : <span className="text-slate-300">–</span>}</td>
-                <td className="text-[12px] font-semibold">{tiba || '-'}</td>
-                <td>{e.paidOutAt
-                  ? <span className="text-[12px] font-bold">{paidDate}</span>
-                  : <span className="badge bg-sky-100 text-sky-700">Otomatis</span>}</td>
-              </tr>
+              <Fragment key={g.sid || first.id}>
+                {/* Baris dapat diklik → kartu rincian tiket "terselip"
+                    terbuka di bawahnya (satu yang terbuka pada satu waktu). */}
+                <tr onClick={() => setOpenLedger(openLedger === g.sid ? null : g.sid)} className="cursor-pointer hover:bg-sky-50/60 transition">
+                  <td className="font-extrabold">{ag?.name || 'Agen lama'}</td>
+                  <td className="text-[12.5px] font-semibold">{r ? `${r.from} → ${r.to}` : '-'}{berangkat ? <span className="block text-[11px] text-slate-400 font-semibold">Berangkat {berangkat}</span> : null}{tiba ? <span className="block text-[11px] text-slate-400 font-semibold">Tiba {tiba}</span> : null}</td>
+                  <td className="text-[12.5px] font-semibold">{d?.name || '-'}<br /><span className="text-slate-400">{bank || ''}</span>{bank ? null : <span className="badge bg-red-100 text-red-600 ml-1">Rekening kosong</span>}</td>
+                  <td className="font-extrabold text-green-700">+{fmtRp(tiket)}</td>
+                  <td className="font-extrabold text-green-700">{vs > 0 ? `+${fmtRp(vs)}` : <span className="text-slate-300">–</span>}</td>
+                  <td className="font-extrabold">{fmtRp(tiket + vs)}</td>
+                </tr>
+                {openLedger === g.sid ? (
+                  <tr>
+                    <td colSpan={6} className="bg-slate-50">
+                      <div className="anim bg-white border-2 border-slate-100 rounded-2xl p-4 m-2">
+                        <div className="font-extrabold text-[14px] flex items-center gap-2"><Icon name="ticket" className="w-4 h-4 text-sky-600" />Rincian Tiket — {r ? `${r.from} → ${r.to}` : '-'} · {berangkat || '-'}</div>
+                        {/* Rincian per tiket keberangkatan ini — desain dompet
+                            pengemudi (komponen bersama); info berangkat
+                            disembunyikan karena sudah ada di baris induk. */}
+                        <DriverLedgerTable entries={g.items} showBerangkat={false} />
+                      </div>
+                    </td>
+                  </tr>
+                ) : null}
+              </Fragment>
             );
           })}
         </tbody></table></div>
@@ -242,16 +279,12 @@ export default function Settlement() {
           <th>Kode</th><th>Rute</th><th>Agen / Rekening</th><th>Nominal Jasa</th><th>Komisi Sopir</th><th>Jasa Bersih</th><th>Tgl Tiba</th><th>Tgl Cair</th>
         </tr></thead><tbody>
           {serviceRows.map((e) => {
-            const { s, r, ag, tiba } = rowInfo(e);
+            const { r, ag, tiba } = rowInfo(e);
             const rek = (ag?.bank || '').trim();
             /* Komisi via sopir (50% jasa untuk tiket jualan langsung) sudah
-               disisihkan dari jasa — baris lama tanpa field dihitung ulang
-               dari bookingnya agar tetap benar. */
-            const bkRec = bookings.find((b) => b.id === e.bookingId);
-            const vs = Number(e.viaSopir) > 0 ? Number(e.viaSopir)
-              : (bkRec && bkRec.source === 'driver' && s
-                ? (splitFare(s, (bkRec.seats || []).length, bkRec.discount || 0, 'driver', fareModelOf(bkRec)).viaSopir || 0)
-                : 0);
+               disisihkan dari jasa — baris lama dihitung ulang dari
+               bookingnya agar tetap benar (helper domain). */
+            const vs = viaSopirOf(e, bookings);
             const bersih = Math.max(0, (Number(e.service) || 0) - vs);
             return (
               <tr key={e.id}>
