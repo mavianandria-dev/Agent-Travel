@@ -4,6 +4,7 @@ import { DB } from '@/lib/db.js';
 import { driverById, schedById, routeById, agencyById, scheduleNeedsReview, setScheduleTripStatus, resolveScheduleNoShow, splitFare, fareModelOf, viaSopirOf, markRefundPaid, startRefundProcessing, LEDGER_SERV_GATE_MS } from '@/lib/domain.js';
 import { fmtRp } from '@/lib/utils.js';
 import { Icon, Empty } from '@/components/ui.jsx';
+import { ManifestModal } from '@/agen/Bookings.jsx';
 import DriverLedgerTable from '@/components/DriverLedgerTable.jsx';
 
 function NoShowModal({ sid }) {
@@ -70,7 +71,6 @@ export default function Settlement() {
   const agencies = DB.load('agencies', []);
   const ledger = DB.load('ledger', []);
   const bookings = DB.load('bookings', []);
-  const codeOf = (e) => bookings.find((b) => b.id === e.bookingId)?.code || '-';
 
   /* Laporan TIKET pengemudi: langsung tercatat terkirim begitu tiba (kliring 0). */
   const driverRows = ledger
@@ -105,6 +105,17 @@ export default function Settlement() {
   const serviceRows = ledger
     .filter((e) => e.servicePaidOutAt && (!agFilter || e.agencyId === agFilter))
     .sort((a, b) => String(b.servicePaidOutAt || '').localeCompare(String(a.servicePaidOutAt || '')));
+
+  /* Tabel jasa agen: satu baris per keberangkatan — nilai dijumlahkan
+     per jadwal (pola sama dengan halaman Keuangan agen); urutan kelompok
+     mengikuti pencairan terbaru (serviceRows sudah terurut). */
+  const servGroups = [];
+  const seenServ = {};
+  serviceRows.forEach((e) => {
+    const sid = String(e.scheduleId || '');
+    if (!seenServ[sid]) { seenServ[sid] = { sid, items: [] }; servGroups.push(seenServ[sid]); }
+    seenServ[sid].items.push(e);
+  });
   const servicePending = ledger.filter((e) => {
     if (e.servicePaidOutAt || e.status !== 'layak') return false;
     if (agFilter && e.agencyId !== agFilter) return false;
@@ -133,15 +144,6 @@ export default function Settlement() {
       return s && s.agencyId === agFilter;
     })
     .sort((a, b) => String(b.cancelledAt || '').localeCompare(String(a.cancelledAt || '')));
-
-  const rowInfo = (e) => {
-    const s = schedById(e.scheduleId);
-    const r = s ? routeById(s.routeId) : null;
-    const d = e.driverId ? driverById(e.driverId) : null;
-    const ag = agencyById(e.agencyId);
-    const tiba = (s?.arrivedAt || e.releasedAt || '').slice(0, 10);
-    return { s, r, d, ag, tiba };
-  };
 
   return (
     <div className="space-y-4">
@@ -275,27 +277,35 @@ export default function Settlement() {
         {(servicePending.length > 0 && serviceAutoAt) ? (
           <div className="mt-2 bg-emerald-50 text-emerald-700 rounded-xl px-3 py-2 text-[12px] font-semibold">{servicePending.length} pos jasa akan otomatis tercatat terkirim paling cepat di {serviceAutoAt}</div>
         ) : null}
-        <div className="table-wrap mt-3"><table className="data w-full min-w-[940px]"><thead><tr>
-          <th>Kode</th><th>Rute</th><th>Agen / Rekening</th><th>Nominal Jasa</th><th>Komisi Sopir</th><th>Jasa Bersih</th><th>Tgl Tiba</th><th>Tgl Cair</th>
+        <div className="table-wrap mt-3"><table className="data w-full min-w-[860px]"><thead><tr>
+          <th>Manifest</th><th>Agen / Rekening</th><th>Rute</th><th>Nominal Jasa</th><th>Komisi Sopir</th><th>Jasa Bersih</th><th>Tgl Cair / Status</th>
         </tr></thead><tbody>
-          {serviceRows.map((e) => {
-            const { r, ag, tiba } = rowInfo(e);
+          {servGroups.map((g) => {
+            const s = schedById(g.sid);
+            const r = s ? routeById(s.routeId) : null;
+            const first = g.items[0];
+            const ag = agencyById(first.agencyId);
             const rek = (ag?.bank || '').trim();
-            /* Komisi via sopir (50% jasa untuk tiket jualan langsung) sudah
-               disisihkan dari jasa — baris lama dihitung ulang dari
-               bookingnya agar tetap benar (helper domain). */
-            const vs = viaSopirOf(e, bookings);
-            const bersih = Math.max(0, (Number(e.service) || 0) - vs);
+            const berangkat = loc(s?.departedAt) || (s ? `${s.date || ''} ${s.time || ''}`.trim() : '');
+            const tiba = loc(s?.arrivedAt);
+            /* Nama pengemudi jadwal + pengemudi pengganti bila tercatat. */
+            const drvNama = s?.driverName || (s?.driverId ? driverById(s.driverId)?.name : '') || '';
+            const backNama = s?.backupName || (s?.backupDriverId ? driverById(s.backupDriverId)?.name : '') || '';
+            const jasa = g.items.reduce((a, e) => a + (Number(e.service) || 0), 0);
+            /* Komisi via sopir dijumlah per tiket — helper domain; baris
+               lama dihitung ulang dari bookingnya. */
+            const vs = g.items.reduce((a, e) => a + viaSopirOf(e, bookings), 0);
+            const bersih = Math.max(0, jasa - vs);
+            const cairAt = loc(g.items.map((e) => e.servicePaidOutAt).sort().pop());
             return (
-              <tr key={e.id}>
-                <td className="font-mono font-extrabold">{codeOf(e)}</td>
-                <td className="text-[12.5px] font-semibold">{r ? `${r.from} → ${r.to}` : '-'}<br /><span className="text-slate-400">{(e.seats || []).join(', ') || '-'}</span></td>
+              <tr key={g.sid || first.id}>
+                <td><button onClick={() => openModal(<ManifestModal sid={g.sid} />)} title="Manifest" className="bg-sky-100 text-sky-700 p-2 rounded-lg"><Icon name="users" className="w-4 h-4" /></button></td>
                 <td className="text-[12.5px] font-semibold">{ag?.name || '-'}<br /><span className="text-slate-400">{rek || ''}</span>{rek ? null : <span className="badge bg-red-100 text-red-600 ml-1">Rekening kosong</span>}</td>
-                <td className="font-extrabold">{fmtRp(e.service)}</td>
-                <td className="font-extrabold text-red-600">{vs > 0 ? <span>-{fmtRp(vs)}<span className="block text-[10px] font-semibold text-red-400">Pesan Tiket Via Pengemudi</span></span> : <span className="text-slate-300">–</span>}</td>
-                <td className="font-extrabold text-emerald-700">{fmtRp(bersih)}</td>
-                <td className="text-[12px] font-semibold">{tiba || '-'}</td>
-                <td className="text-[12px] font-bold">{String(e.servicePaidOutAt || '').slice(0, 10)}</td>
+                <td className="text-[12.5px] font-semibold">{r ? `${r.from} → ${r.to}` : '-'}{berangkat ? <span className="block text-[11px] text-slate-400 font-semibold">Berangkat {berangkat}</span> : null}{tiba ? <span className="block text-[11px] text-slate-400 font-semibold">Tiba {tiba}</span> : null}{drvNama ? <span className="block text-[11px] text-slate-400 font-semibold">Pengemudi {drvNama}</span> : null}{backNama ? <span className="block text-[11px] text-slate-400 font-semibold">Pengganti {backNama}</span> : null}</td>
+                <td className="font-extrabold text-green-700">+{fmtRp(jasa)}</td>
+                <td className="font-extrabold text-red-600">{vs > 0 ? `-${fmtRp(vs)}` : <span className="text-slate-300">–</span>}</td>
+                <td className="font-extrabold">{fmtRp(bersih)}</td>
+                <td><span className="badge b-done">Dicairkan</span>{cairAt ? <span className="block text-[11px] font-bold text-slate-600 mt-0.5">{cairAt}</span> : null}</td>
               </tr>
             );
           })}
