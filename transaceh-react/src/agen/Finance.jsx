@@ -22,7 +22,7 @@ export default function Finance({ ag, st }) {
   const bersihOf = (e) => Math.max(0, (Number(e.service) || 0) - viaSopirOf(e, bookings));
   /* Card indikator pola dompet pengemudi: tiga status, basis jasa bersih.
      "Sudah Dicairkan" tetap memakai cap sistem servicePaidOutAt (jasa cair
-     otomatis 5 menit setelah tiba) — baris dicairkan lama tanpa cap jasa
+     langsung begitu tiba) — baris dicairkan lama tanpa cap jasa
      tidak dihitung terkirim, dan tidak dihitung ganda di Layak Cair. */
   const sumBersih = (fn) => active.filter(fn).reduce((a, e) => a + bersihOf(e), 0);
   const pending = sumBersih((e) => e.status === 'ditahan');
@@ -91,7 +91,7 @@ export default function Finance({ ag, st }) {
             const bersih = Math.max(0, jasa - vs);
             const berangkat = loc(s?.departedAt) || (s ? `${s.date || ''} ${s.time || ''}`.trim() : '');
             const tiba = loc(s?.arrivedAt);
-            /* Status kelompok: jasa cair otomatis 5 menit setelah tiba —
+            /* Status kelompok: jasa cair langsung begitu tiba —
                semua terkirim (cap servicePaidOutAt) → Dicairkan + jam. */
             const allCair = g.items.every((e) => e.servicePaidOutAt);
             const anyTahan = g.items.some((e) => e.status === 'ditahan');

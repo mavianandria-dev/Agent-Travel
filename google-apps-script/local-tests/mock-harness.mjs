@@ -1628,11 +1628,11 @@ ok('sync menolak pelanggan mencairkan ledger layak',
 /* 13b) Pencairan OTOMATIS: tiket langsung saat tiba + jasa menit-5    */
 /* ------------------------------------------------------------------ */
 
-console.log('\n== 13b) pencairan otomatis (tiket langsung saat tiba, jasa menit ke-5) ==');
+console.log('\n== 13b) pencairan otomatis (tiket & jasa langsung saat tiba) ==');
 
 /* Dua jadwal uji milik ag_1 dengan tag tiba: s_gate6 tiba 6 menit lalu
-   (tiket+jasa SUDAH lewat syaratnya — kliring 0 = langsung, jasa menit
-   ke-5) dan s_gate24 tiba 25 jam lalu (backlog lama → sapuan pertama
+   (tiket+jasa SUDAH lewat syaratnya — kliring 0 = langsung, jasa gate 0 =
+   langsung) dan s_gate24 tiba 25 jam lalu (backlog lama → sapuan pertama
    langsung mencairkan). */
 const gateOld6 = new Date(Date.now() - 6 * 60 * 1000).toISOString();
 const gateOld25 = new Date(Date.now() - 25 * 3600 * 1000).toISOString();

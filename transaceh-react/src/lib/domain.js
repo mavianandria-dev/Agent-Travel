@@ -2293,16 +2293,17 @@ export function voidLedger(bookingId){
   return ch;
 }
 
-/** Jendela ulasan pelanggan: jasa agen otomatis tercatat terkirim ke
- *  rekening agen tepat 5 menit setelah tag Tiba. */
-export const LEDGER_SERV_GATE_MS = 5*60*1000;
+/** Jasa agen: LANGSUNG tercatat terkirim ke rekening agen begitu tag Tiba
+ *  (gate 0). Ubah nilainya (ms) bila kelak perlu jeda — sapuan, card, dan
+ *  laporan otomatis mengikuti. */
+export const LEDGER_SERV_GATE_MS = 0;
 /** Kliring tiket pengemudi: 0 = dana tiket LANGSUNG tercatat terkirim ke
  *  rekening pengemudi begitu tiba. Ubah nilainya (ms) bila kelak perlu
  *  jeda — sapuan dan badge otomatis mengikuti. */
 export const LEDGER_KLIRING_MS = 0;
 
 /* Sapu PENCAIRAN OTOMATIS (mode lokal) — cermin dari apiSweepLedgerAuto_:
-   ditahan+sudah tiba → layak; unggul 5 menit → servicePaidOutAt (jasa
+   ditahan+sudah tiba → layak; gate 0 = langsung → servicePaidOutAt (jasa
    tercatat terkirim); kliring (0 = langsung) → dicairkan+paidOutAt (tiket). Baris
    void ditinggalkan; idempoten; tidak ada ajukan, tidak ada tombol. */
 export function sweepLedgerAuto(){

@@ -67,9 +67,9 @@ var API_REGISTER_MAX_PER_HOUR = 30;
 /** Jangka waktu klien harus menyelesaikan pembayaran (hold kursi). */
 var API_HOLD_MS = 5 * 60 * 1000;
 
-/** Jendela ulasan pelanggan: jasa agen tercatat terkirim ke rekening agen
- *  tepat 5 menit setelah tag Tiba — tanpa ajukan, tanpa tombol admin. */
-var API_LEDGER_SERV_GATE_MS = 5 * 60 * 1000;
+/** Jasa agen: tercatat terkirim ke rekening agen LANGSUNG begitu tag Tiba
+ *  (gate 0) — tanpa ajukan, tanpa tombol admin. */
+var API_LEDGER_SERV_GATE_MS = 0;
 
 /** Kliring tiket pengemudi: 0 = dana tiket LANGSUNG tercatat terkirim ke
  *  rekening pengemudi begitu tag Tiba (tanpa jeda). Ubah nilai ini (ms)
@@ -2192,7 +2192,7 @@ function apiBootstrapData_(ss, meta, role, user) {
   var cache = {};
 
   /* Sapuan pencairan otomatis berjalan SEBELUM proyeksi apa pun: snapshot
-     bootstrap memuat cap segar (layak + kliring 24 jam + jasa menit ke-5).
+     bootstrap memuat cap segar (layak + kliring 24 jam + jasa langsung/gate 0).
      Idempoten dan setia pada pagar kolom — meta hanya di-persist bila ada
      yang benar-benar berubah. */
   if (apiSweepLedgerAuto_(ss, meta, null)) apiUpdateMeta_(ss, meta);
@@ -2998,7 +2998,7 @@ function apiSync_(req, cfg) {
        requester tidak ditolak REV_CONFLICT oleh sapuannya sendiri.
        Idempoten: tanpa baris basi = tanpa tulis, tanpa kenaikan revisi. */
     apiSweepExpiredHolds_(ss, meta, revisions);
-    /* Sapuan pencairan otomatis (tiket 24 jam + jasa menit ke-5) menyusul —
+    /* Sapuan pencairan otomatis (tiket 24 jam + jasa langsung/gate 0) menyusul —
        kenaikan revisi ledger ikut masuk respons dengan pola yang sama. */
     apiSweepLedgerAuto_(ss, meta, revisions);
     apiUpdateMeta_(ss, meta);
@@ -5422,7 +5422,7 @@ function apiSweepExpiredHolds_(ss, meta, revisions) {
  * Sapu PENCAIRAN OTOMATIS ledger — jantung dari alur "semua otomatis":
  *  - Baris `ditahan` milik jadwal yang sudah TIBA → dilepas ke `layak`
  *    (jaga-jaga bila pelepasan klien yang lama tak sempat tercatat).
- *  - `layak` unggul 5 menit sejak tiba → `servicePaidOutAt` terisi
+ *  - `layak` langsung sejak tiba (gate 0) → `servicePaidOutAt` terisi
  *    (jasa agen tercatat terkirim ke rekening agen).
  *  - `layak` (kliring 0 = langsung) → `dicairkan` + `paidOutAt`
  *    (tiket pengemudi tercatat terkirim ke rekening pengemudi).
@@ -5475,7 +5475,7 @@ function apiSweepLedgerAuto_(ss, meta, revisions) {
       touched = true;
     }
     if (status !== 'layak' && status !== 'dicairkan') continue;
-    /* Jasa agen: tepat menit ke-5 sejak tiba — jendela ulasan pelanggan penuh. */
+    /* Jasa agen: langsung sejak tiba (gate 0) — tanpa jeda. */
     if (now >= t0 + API_LEDGER_SERV_GATE_MS && !String(e.servicePaidOutAt || '')) {
       e.servicePaidOutAt = nowIso;
       touched = true;

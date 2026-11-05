@@ -273,7 +273,7 @@ export default function Settlement() {
 
       <div className="bg-white rounded-3xl shadow-card p-5">
         <h3 className="font-extrabold text-[16px] flex items-center gap-2"><Icon name="banknote" className="w-5 h-5 text-emerald-600" />Riwayat Pencairan Jasa — Agen</h3>
-        <p className="text-[12px] text-slate-500 font-medium mt-1">Jasa agen tercatat terkirim ke rekening agen (dari KYC) tepat 5 menit setelah bus tiba — otomatis, mengikuti jendela ulasan pelanggan. Untuk tiket jualan langsung pengemudi, 50% jasa jadi komisi pengemudi — jasa bersih agen tampil di kolomnya sendiri.</p>
+        <p className="text-[12px] text-slate-500 font-medium mt-1">Jasa agen tercatat terkirim ke rekening agen (dari KYC) langsung begitu bus tiba — otomatis. Untuk tiket jualan langsung pengemudi, 50% jasa jadi komisi pengemudi — jasa bersih agen tampil di kolomnya sendiri.</p>
         {(servicePending.length > 0 && serviceAutoAt) ? (
           <div className="mt-2 bg-emerald-50 text-emerald-700 rounded-xl px-3 py-2 text-[12px] font-semibold">{servicePending.length} pos jasa akan otomatis tercatat terkirim paling cepat di {serviceAutoAt}</div>
         ) : null}
@@ -310,7 +310,7 @@ export default function Settlement() {
             );
           })}
         </tbody></table></div>
-        {serviceRows.length === 0 ? <Empty icon="banknote" msg="Belum ada jasa yang tercatat terkirim — muncul 5 menit setelah tag tiba." /> : null}
+        {serviceRows.length === 0 ? <Empty icon="banknote" msg="Belum ada jasa yang tercatat terkirim — muncul begitu tag tiba." /> : null}
       </div>
     </div>
   );
