@@ -80,7 +80,7 @@ export default function Finance({ ag, st }) {
       <div className="bg-white rounded-3xl shadow-card p-5 mt-4"><div className="flex items-center gap-2"><h3 className="font-extrabold text-[15px]">Riwayat Jasa</h3><div className="flex-1"></div>
         <button onClick={exportCSV} className="bg-green-500 text-white text-[12px] font-extrabold px-4 py-2 rounded-xl">Export Excel</button>
         <button onClick={() => window.print()} className="bg-slate-100 text-[12px] font-extrabold px-4 py-2 rounded-xl">Export PDF</button></div>
-        <div className="overflow-x-auto mt-2"><table className="data w-full min-w-[820px]"><thead><tr><th>Manifest</th><th>Keberangkatan</th><th>Rute</th><th>Nominal Jasa</th><th>Komisi Sopir</th><th>Jasa Bersih</th><th>Tgl Cair / Status</th></tr></thead><tbody>
+        <div className="overflow-x-auto mt-2"><table className="data w-full min-w-[780px]"><thead><tr><th>Manifest</th><th>Rute</th><th>Nominal Jasa</th><th>Komisi Sopir</th><th>Jasa Bersih</th><th>Tgl Cair / Status</th></tr></thead><tbody>
           {groups.map((g) => {
             const s = schedById(g.sid);
             const r = s ? routeById(s.routeId) : null;
@@ -90,6 +90,7 @@ export default function Finance({ ag, st }) {
             const jasa = g.items.reduce((a, e) => a + (Number(e.service) || 0), 0);
             const bersih = Math.max(0, jasa - vs);
             const berangkat = loc(s?.departedAt) || (s ? `${s.date || ''} ${s.time || ''}`.trim() : '');
+            const tiba = loc(s?.arrivedAt);
             /* Status kelompok: jasa cair otomatis 5 menit setelah tiba —
                semua terkirim (cap servicePaidOutAt) → Dicairkan + jam. */
             const allCair = g.items.every((e) => e.servicePaidOutAt);
@@ -99,8 +100,7 @@ export default function Finance({ ag, st }) {
             return (
               <tr key={g.sid || g.items[0]?.id}>
                 <td><button onClick={() => openModal(<ManifestModal sid={g.sid} />)} title="Manifest" className="bg-sky-100 text-sky-700 p-2 rounded-lg"><Icon name="users" className="w-4 h-4" /></button></td>
-                <td className="text-[12.5px] font-bold">{berangkat || '-'}</td>
-                <td className="text-[12.5px] font-semibold">{r ? `${r.from} → ${r.to}` : '-'}</td>
+                <td className="text-[12.5px] font-semibold">{r ? `${r.from} → ${r.to}` : '-'}{berangkat ? <span className="block text-[11px] text-slate-400 font-semibold">Berangkat {berangkat}</span> : null}{tiba ? <span className="block text-[11px] text-slate-400 font-semibold">Tiba {tiba}</span> : null}</td>
                 <td className="font-extrabold text-green-700">+{fmtRp(jasa)}</td>
                 <td className="font-extrabold text-red-600">{vs > 0 ? `-${fmtRp(vs)}` : <span className="text-slate-300">–</span>}</td>
                 <td className="font-extrabold">{fmtRp(bersih)}</td>
