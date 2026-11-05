@@ -18,6 +18,7 @@ export default function Wallet() {
   const me = drvOfUser(user);
   const entries = me ? ledgerByDriver(me.id) : [];
   const bookings = DB.load('bookings', []);
+  const codeOf = (e) => bookings.find((b) => b.id === e.bookingId)?.code || '-';
   /* Tanggal + jam:menit waktu perangkat (bukan UTC server) untuk tampilan. */
   const loc = (iso) => {
     if (!iso) return '';
@@ -62,12 +63,22 @@ export default function Wallet() {
             const s = schedById(e.scheduleId);
             const r = s ? routeById(s.routeId) : null;
             const bg = LEDGER_BADGE[e.status] || ['b-wait', e.status];
-            const bk = bookings.find((b) => b.id === e.bookingId);
             const vs = vsOf(e);
             const berangkat = loc(s?.departedAt);
             return (
               <tr key={e.id}>
-                <td className="font-mono font-extrabold">{bk?.code || '-'}{bk && ['paid', 'done'].includes(bk.status) ? <button onClick={() => openModal(<TicketView bid={bk.id} />)} className="mt-1 flex items-center gap-1 text-sky-600 hover:bg-sky-50 rounded-lg px-1.5 py-0.5 text-[11px] font-extrabold" title="Lihat E-Tiket"><Icon name="eye" className="w-3.5 h-3.5" />E-Tiket</button> : null}</td>
+                <td className="font-mono font-extrabold">{(() => {
+                  /* Kode = tombol lihat tiket — hanya bila bookingnya ada
+                     dan sudah lunas, pola sama dengan manifest tugas
+                     pengemudi (Tasks.jsx). */
+                  const bk = bookings.find((b) => b.id === e.bookingId);
+                  if (!(bk && ['paid', 'done'].includes(bk.status))) return codeOf(e);
+                  return (
+                    <button onClick={() => openModal(<TicketView bid={bk.id} />)} className="text-sky-700 hover:bg-sky-50 rounded-lg px-1.5 py-1 -ml-1.5 transition" title="Lihat Tiket">
+                      {codeOf(e)}
+                    </button>
+                  );
+                })()}</td>
                 <td className="text-[12.5px] font-semibold">{r ? `${r.from} → ${r.to}` : '-'}<br /><span className="text-slate-400">{(e.seats || []).join(', ') || '-'}</span>{berangkat ? <span className="block text-[11px] text-slate-400 font-semibold">Berangkat {berangkat}</span> : null}</td>
                 <td className="font-extrabold text-green-700">+{fmtRp(e.ticket)}</td>
                 <td className="font-extrabold text-green-700">{vs > 0 ? `+${fmtRp(vs)}` : <span className="text-slate-300">–</span>}</td>
