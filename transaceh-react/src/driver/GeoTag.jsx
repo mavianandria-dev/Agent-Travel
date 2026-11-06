@@ -19,10 +19,21 @@ function matchTarget(target, j) {
   return areaNameMatches(target, cands) ? (a.county || a.city || a.town || a.municipality || a.state_district || a.village || target) : null;
 }
 
+/** Nama daerah hasil reverse geocode tanpa syarat cocok target — dipakai
+ *  mode bebas (pengakuan tiba): pin apa pun diterima, daerahnya sekadar info. */
+function areaNameOf(j) {
+  const a = j.address || {};
+  const area = a.county || a.city || a.town || a.municipality || a.state_district || a.village;
+  if (area) return String(area);
+  return String(j.display_name || '').split(',')[0].trim() || '-';
+}
+
 /** Panel tagging berpeta: pin peta → alamat Nominatim → cek daerah. Tag utuh
  *  (koordinat, alamat, daerah, jam) baru dipegang bila daerahnya cocok; tombol
- *  konfirmasi di modal mengharuskan tag ini ada. */
-export function GeoTagPanel({ target, tag, setTag }) {
+ *  konfirmasi di modal mengharuskan tag ini ada. Mode `bebas`: tanpa syarat
+ *  cocok daerah — pin apa pun diterima, untuk menangkap posisi saat menandai
+ *  (pengakuan "Tiba tanpa catatan berangkat", kejadian sudah lewat). */
+export function GeoTagPanel({ target, tag, setTag, bebas }) {
   const [phase, setPhase] = useState('idle'); // idle | busy | err
   const [msg, setMsg] = useState('');
   const rvTimer = useRef(null);
@@ -37,6 +48,21 @@ export function GeoTagPanel({ target, tag, setTag }) {
       .then((j) => {
         if (seq !== rvSeq.current) return;
         const addr = String(j.display_name || '');
+        if (bebas) {
+          /* Mode bebas: pin apa pun diterima — ini posisi saat menandai,
+             bukan bukti lokasi kejadian yang sudah lewat. */
+          setTag({
+            lat: Math.round(lat * 1e6) / 1e6,
+            lng: Math.round(lng * 1e6) / 1e6,
+            acc: 0, /* pin peta: akurasi GPS tidak diketahui — biarkan 0 */
+            addr: addr.slice(0, 200),
+            area: String(areaNameOf(j)).slice(0, 80),
+            ok: true,
+            at: new Date().toISOString()
+          });
+          setPhase('idle'); setMsg('');
+          return;
+        }
         const area = matchTarget(target, j);
         if (area) {
           setTag({
@@ -69,8 +95,8 @@ export function GeoTagPanel({ target, tag, setTag }) {
   return (
     <div>
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="badge bg-sky-100 text-sky-700 !text-[11px] px-2 py-0.5"><Icon name="map-pin" className="w-3.5 h-3.5" /> daerah tag: {target}</span>
-        {ok ? <span className="badge bg-green-100 text-green-700 !text-[11px] px-2 py-0.5">Tercocok</span> : <span className="text-[11px] font-extrabold text-amber-600">wajib sebelum lanjut</span>}
+        <span className="badge bg-sky-100 text-sky-700 !text-[11px] px-2 py-0.5"><Icon name="map-pin" className="w-3.5 h-3.5" /> {bebas ? 'posisi saat menandai' : 'daerah tag: ' + target}</span>
+        {ok ? <span className="badge bg-green-100 text-green-700 !text-[11px] px-2 py-0.5">{bebas ? 'Tercatat' : 'Tercocok'}</span> : <span className="text-[11px] font-extrabold text-amber-600">wajib sebelum lanjut</span>}
       </div>
       <MapPicker
         value={ok ? tag.lat + ', ' + tag.lng : ''}
@@ -130,18 +156,21 @@ export function ArriveGeoModal({ sid }) {
 }
 
 /** Pengakuan "Tandai Tiba" pada jadwal lewat yang tak tercatat berangkat —
- *  alasan wajib: satu klik ini melepas dana dan menutup jalur refund otomatis
- *  admin, jadi harus berjejak kuat. */
+ *  alasan + tag lokasi wajib: satu klik ini melepas dana dan menutup jalur
+ *  refund otomatis admin, jadi harus berjejak kuat. Tag memakai mode bebas:
+ *  posisi saat menandai (kejadian sudah lewat, tak bisa divalidasi daerah). */
 export function AckArriveModal({ sid }) {
   const { closeModal, toast, refresh, user } = useApp();
   const s = schedById(sid);
   const [why, setWhy] = useState('');
+  const [tag, setTag] = useState(null);
   if (!s) return <div className="p-6 font-bold text-slate-500">Jadwal tidak ditemukan</div>;
   const r = routeById(s.routeId);
   const submit = () => {
     const t = why.trim();
+    if (!tag || !tag.ok) { toast('Tag lokasi wajib dipasang sebelum menandai tiba.', 'err'); return; }
     if (t.length < 10) { toast('Alasan wajib diisi minimal 10 karakter.', 'err'); return; }
-    if (!setScheduleTripStatus(sid, 'arrived', { reason: t, by: user?.name || user?.email || 'pengemudi' })) {
+    if (!setScheduleTripStatus(sid, 'arrived', { reason: t, by: user?.name || user?.email || 'pengemudi', geo: tag })) {
       toast('Status perjalanan tidak bisa diubah.', 'err');
       return;
     }
@@ -162,14 +191,19 @@ export function AckArriveModal({ sid }) {
         ② admin tidak bisa memproses refund otomatis lagi.<br />
         Jika perjalanan benar-benar terjadi, tulis jelas kapan itu terjadi dan mengapa penandainya terlewat.
       </div>
+      <div className="mt-3">
+        <div className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wide">Tag lokasi — posisi Anda saat menandai tiba (wajib)</div>
+        <div className="mt-1.5"><GeoTagPanel bebas tag={tag} setTag={setTag} /></div>
+      </div>
       <label className="block mt-3">
         <span className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wide">Alasan pengakuan (minimal 10 karakter)</span>
         <textarea value={why} onChange={(e) => setWhy(e.target.value)} rows={3} placeholder="Contoh: perjalanan benar terjadi pukul 10:15, saya lupa klik berangkat karena sinyal" className="mt-1.5 w-full text-[13px] border-2 border-slate-200 rounded-2xl px-3 py-2.5 focus-ring" />
       </label>
       <div className="mt-4 flex gap-2">
         <button onClick={closeModal} className="flex-1 bg-slate-100 text-slate-600 font-extrabold text-[13px] py-2.5 rounded-xl">Batal</button>
-        <button onClick={submit} className="flex-[2] bg-blue-600 text-white font-extrabold text-[13px] py-2.5 rounded-xl active:scale-[.98] transition">Tandai Tiba</button>
+        <button onClick={submit} disabled={!tag || !tag.ok || why.trim().length < 10} className="flex-[2] bg-blue-600 text-white font-extrabold text-[13px] py-2.5 rounded-xl active:scale-[.98] transition disabled:opacity-50 disabled:cursor-not-allowed">Tandai Tiba</button>
       </div>
+      <div className="mt-2 text-center text-[11px] text-slate-400">Tombol aktif setelah pin lokasi dipasang dan alasan terisi.</div>
     </div>
   );
 }

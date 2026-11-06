@@ -154,7 +154,7 @@ function LateArriveModal({ sid }) {
         <div><span className="text-slate-400">Rute</span><br /><b>{r ? r.from + ' → ' + r.to : '-'}</b> • {fmtDate(s.date)} {s.time}</div>
         <div><span className="text-slate-400">Ditandai tiba</span> <b>{s.arrivedAt ? fmtClock(new Date(s.arrivedAt).getTime()) : '-'}</b></div>
         <div><span className="text-slate-400">Alasan pengakuan pengemudi</span><br /><b>{s.arriveAckReason || '—'}</b></div>
-        {geo && geo.ok ? <div><span className="text-slate-400">Tag lokasi tiba</span> <b>{geo.area || '-'}{geo.addr ? ' • ' + geo.addr : ''}</b></div> : null}
+        {geo && geo.ok ? <div><span className="text-slate-400">Posisi saat menandai tiba</span> <b>{geo.area || '-'}{geo.addr ? ' • ' + geo.addr : ''}</b></div> : null}
       </div>
       <button onClick={closeModal} className="w-full mt-4 bg-slate-100 font-extrabold text-[13px] py-2.5 rounded-xl">Tutup</button>
     </div>
