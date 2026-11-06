@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { routeById, vehicleById, bookingsOf, vehName, vehLayout, schedSeatCap, takenSeats, seatsLeft, audit, setScheduleTripStatus, scheduleNeedsReview, scheduleInHistory, schedById, setScheduleDelay, cancelDelayRequest, reportTripDelay, createDriverBooking, confirmDriverBookingPayment, splitFare, tripProgress, bookedPassengers, departureTiming, scheduleIsPast, scheduleMaintenance, maintenancePeriodLabel, scheduleEffectiveDepartureMs, DRIVER_SALE_WINDOW_HOURS, DRIVER_SALE_CUTOFF_MIN } from '@/lib/domain.js';
+import { routeById, vehicleById, bookingsOf, vehName, vehLayout, schedSeatCap, takenSeats, seatsLeft, audit, setScheduleTripStatus, scheduleNeedsReview, scheduleInHistory, schedById, setScheduleDelay, cancelDelayRequest, reportTripDelay, createDriverBooking, confirmDriverBookingPayment, splitFare, tripProgress, bookedPassengers, departureTiming, scheduleIsPast, scheduleMaintenance, maintenancePeriodLabel, scheduleEffectiveDepartureMs, DRIVER_SALE_WINDOW_HOURS, DRIVER_SALE_CUTOFF_MIN, notify } from '@/lib/domain.js';
 import { IS_SHEETS } from '@/lib/runtime.js';
 import { seatInfo } from '@/lib/sheetsApi.js';
 import { refreshSnapshot, pullSnapshotSoft } from '@/lib/remote.js';
@@ -790,6 +790,77 @@ function DriverSaleCutoffModal({ sid }) {
   );
 }
 
+/** Ambang alarm tugas: alarm menyala 10 menit SETELAH waktunya terlewat
+ *  (jam berangkat efektif untuk alarm berangkat, ETA untuk alarm tiba). */
+const ALARM_LATE_MS = 10 * 60 * 1000;
+
+/** Efek alarm tugas (tanpa tampilan): selama `active` —
+ *  - bunyi 3 bip pendek + getar [300-200-300-200-300], berulang tiap 30 detik;
+ *  - notifikasi SEKALI saat alarm mulai: jalur lonca (notify, anti dobel
+ *    harian) + jalur browser (hanya saat halaman tak terlihat).
+ *  Perangkat tanpa dukungan / izin ditolak → jalur terkait diam, alarm
+ *  tetap tampil visual. Padam sendiri saat `active` kembali false. */
+function TaskAlarmEffect({ active, title, body, userEmail }) {
+  const sentRef = useRef(false);
+  /* Bunyi + getar. AudioContext dibuat sekali per periode aktif; autoplay
+     policy bisa menahan context sampai interaksi pertama — resume diam-diam. */
+  useEffect(() => {
+    if (!active) { sentRef.current = false; return undefined; }
+    let ctx = null;
+    const fire = () => {
+      try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (Ctx) {
+          if (!ctx) ctx = new Ctx();
+          if (ctx.state === 'suspended' && typeof ctx.resume === 'function') {
+            const r = ctx.resume();
+            if (r && typeof r.catch === 'function') r.catch(() => {});
+          }
+          [0, 0.26, 0.52].forEach((at) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.value = 880;
+            const t0 = ctx.currentTime + at;
+            gain.gain.setValueAtTime(0.0001, t0);
+            gain.gain.exponentialRampToValueAtTime(0.22, t0 + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.18);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(t0);
+            osc.stop(t0 + 0.2);
+          });
+        }
+      } catch { /* tanpa suara — alarm tetap visual */ }
+      try {
+        if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') navigator.vibrate([300, 200, 300, 200, 300]);
+      } catch { /* tanpa getar — alarm tetap visual */ }
+    };
+    fire();
+    const iv = setInterval(fire, 30000);
+    return () => { clearInterval(iv); try { if (ctx) ctx.close(); } catch { /* diam */ } ctx = null; };
+  }, [active]);
+  /* Notifikasi sekali saat alarm mulai. */
+  useEffect(() => {
+    if (!active || sentRef.current) return;
+    sentRef.current = true;
+    /* Jalur A — lonca: lewati bila notifikasi berjudul sama sudah ada hari ini
+       (aman dari kirim ulang saat halaman dimuat ulang di tengah alarm). */
+    try {
+      const startDay = new Date();
+      startDay.setHours(0, 0, 0, 0);
+      const dup = DB.load('notifications', []).some((n) => n.title === title && new Date(n.time).getTime() >= startDay.getTime());
+      if (!dup) notify(userEmail, title, body, 'app');
+    } catch { /* diam */ }
+    /* Jalur B — browser: hanya saat halaman tak terlihat; saat terlihat,
+       banner di kartu sudah cukup. */
+    try {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && document.hidden) new Notification(title, { body });
+    } catch { /* diam */ }
+  }, [active, title, body, userEmail]);
+  return null;
+}
+
 /** Papan tugas pengemudi. Prop focusOnly — dipakai halaman "Tugas Saat Ini":
  *  menampilkan HANYA SATU card tugas paling mendekati jadwal (perjalanan yang
  *  berjalan, atau jadwal berikutnya) — card yang sama juga diberi highlight
@@ -804,6 +875,21 @@ export default function Tasks({ focusOnly = false }) {
   useEffect(() => {
     const iv = setInterval(() => { setNow(Date.now()); setClock((x) => x + 1); }, 30000);
     return () => clearInterval(iv);
+  }, []);
+  /* Izin notifikasi browser untuk alarm tugas: diminta SEKALI pada sentuhan
+     pertama di halaman (pola ramah — tanpa popup saat load). Ditolak atau
+     tidak didukung → jalur browser diam, jalur lonca tetap jalan. */
+  useEffect(() => {
+    const ask = () => {
+      try {
+        if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+          const p = Notification.requestPermission();
+          if (p && typeof p.catch === 'function') p.catch(() => {});
+        }
+      } catch { /* diam */ }
+    };
+    document.addEventListener('pointerdown', ask, { once: true });
+    return () => document.removeEventListener('pointerdown', ask);
   }, []);
   /* Tarik snapshot berkala (mode Sheets): Apps Script tak punya kanal push —
      jadwal baru/berubah dari agen, booking & pembayaran pelanggan baru
@@ -858,6 +944,14 @@ export default function Tasks({ focusOnly = false }) {
     const mt = scheduleMaintenance(s);
     const mtActive = !!mt && !['ontrip', 'arrived'].includes(s.tripStatus);
     const prog = s.tripStatus === 'ontrip' ? tripProgress(s, r, now) : null;
+    /* Alarm berangkat: masih terjadwal + tombol Berangkat memang tampil +
+       jam berangkat EFEKTIF terlewati 10 menit (jam efektif menghormati
+       delay yang disetujui — delayUntil). */
+    const depMs = scheduleEffectiveDepartureMs(s);
+    const depAlarm = !late && !mtActive && (s.tripStatus === 'scheduled' || !s.tripStatus)
+      && Number.isFinite(depMs) && now >= depMs + ALARM_LATE_MS;
+    /* Alarm tiba: masih dalam perjalanan + ETA terlewati 10 menit. */
+    const arrAlarm = !late && s.tripStatus === 'ontrip' && prog && prog.totalMin > 0 && now >= prog.end + ALARM_LATE_MS;
     /* Titik jemput penumpang — hanya baris yang benar-benar ada di manifest
        (kursi yang dipesan), lalu dikelompokkan per titik jemput. */
     const seatOrder = vehLayout(v).filter((c) => c.type === 'seat' || c.type === 'off').map((c) => c.sid);
@@ -926,14 +1020,30 @@ export default function Tasks({ focusOnly = false }) {
         {delayActive ? <div className="mt-2.5 bg-amber-50 border border-amber-200 rounded-2xl p-2.5 text-[12px] font-semibold text-amber-900">Delay {s.delayMinutes} menit • estimasi {fmtClock(s.delayUntil)} — {s.delayReason}</div> : null}
         {tripInfo ? <div className="mt-2.5 bg-sky-50 border border-sky-200 rounded-2xl p-2.5 text-[12px] font-semibold text-sky-900">Info keterlambatan: {tripInfo.reason}{tripInfo.note ? ' • ' + tripInfo.note : ''} ({fmtClock(tripInfo.at)})</div> : null}
         {mtActive ? <div className="mt-2.5 bg-red-50 border-2 border-red-200 rounded-2xl p-2.5 text-[12px] font-semibold text-red-800"><b>Maintenance armada</b>{mt.legacy ? ' — status armada sedang maintenance.' : ' ' + maintenancePeriodLabel(mt) + '.'} Jadwal ini tidak berangkat; booking pelanggan ditangani agen. Manifest tetap dapat dilihat.</div> : null}
+        {/* ALARM BERANGKAT — jam efektif terlewati 10 menit, masih terjadwal.
+            Saran delay hanya teks: tombol Delay memang sudah ada di kartu. */}
+        {depAlarm ? (
+          <div className="mt-2.5 bg-red-50 border-2 border-red-200 rounded-2xl p-2.5 text-[12px] font-semibold text-red-800 animate-pulse">
+            <Icon name="timer" className="w-3.5 h-3.5 inline" /> <b>Jam berangkat sudah lewat ({fmtClock(depMs)})</b> — segera konfirmasi Berangkat. {s.delayReqStatus === 'menunggu' ? `Permintaan delay +${s.delayReqMinutes}m diajukan ⏳` : 'Belum bisa berangkat? Ajukan Delay dari tombol Delay di kartu ini.'}
+          </div>
+        ) : null}
+        {/* ALARM TIBA — ETA terlewati 10 menit, masih dalam perjalanan. */}
+        {arrAlarm ? (
+          <div className="mt-2.5 bg-red-50 border-2 border-red-200 rounded-2xl p-2.5 text-[12px] font-semibold text-red-800 animate-pulse">
+            <Icon name="timer" className="w-3.5 h-3.5 inline" /> <b>Estimasi tiba sudah lewat ({fmtClock(prog.end)})</b> — segera konfirmasi Tiba di Tujuan.
+          </div>
+        ) : null}
+        {/* Efek alarm: bip + getar berulang, notifikasi sekali saat mulai. */}
+        {depAlarm ? <TaskAlarmEffect active title={`Alarm berangkat — ${r?.from} → ${r?.to} ${s.time || ''}`.trim()} body={`Jadwal ${s.date || ''} ${s.time || ''} sudah lewat ${fmtClock(depMs)}. Segera konfirmasi Berangkat atau ajukan Delay.`.trim()} userEmail={user?.email} /> : null}
+        {arrAlarm ? <TaskAlarmEffect active title={`Alarm tiba — ${r?.from} → ${r?.to} ${s.time || ''}`.trim()} body={`Estimasi tiba ${fmtClock(prog.end)} sudah lewat. Segera konfirmasi Tiba di Tujuan.`} userEmail={user?.email} /> : null}
         <div className="flex flex-wrap gap-1.5 mt-3 items-center">
           <button onClick={() => openModal(<ManifestModal sid={s.id} />)} className="badge bg-sky-100 text-sky-700 cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="users" className="w-3.5 h-3.5" /> Manifest ({paxCount})</button>
           {late && !mtActive ? <button onClick={finish} className="badge bg-blue-600 text-white cursor-pointer !text-[12px] py-1.5 active:scale-95 transition">Tandai Tiba</button> : null}
-          {!late && !mtActive && (s.tripStatus === 'scheduled' || !s.tripStatus) ? <button onClick={() => openModal(<StartTripModal sid={s.id} />)} className="badge bg-green-500 text-white cursor-pointer !text-[12px] py-1.5 active:scale-95 transition">Berangkat →</button> : null}
+          {!late && !mtActive && (s.tripStatus === 'scheduled' || !s.tripStatus) ? <button onClick={() => openModal(<StartTripModal sid={s.id} />)} className={'badge text-white cursor-pointer !text-[12px] py-1.5 active:scale-95 transition ' + (depAlarm ? 'bg-red-600 animate-pulse' : 'bg-green-500')}>Berangkat →</button> : null}
           {s.delayReqStatus === 'menunggu' && (s.tripStatus === 'scheduled' || !s.tripStatus) ? <button onClick={() => openModal(<DelayModal sid={s.id} mode="departure" />)} className="badge bg-amber-500 text-white cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="timer" className="w-3.5 h-3.5" /> Permintaan +{s.delayReqMinutes}m ⏳</button> : null}
           {!late && !mtActive && (s.tripStatus === 'scheduled' || !s.tripStatus) ? <button onClick={() => openModal(<DelayModal sid={s.id} mode="departure" />)} className="badge bg-amber-100 text-amber-700 cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="clock" className="w-3.5 h-3.5" /> Delay</button> : null}
           {!late && !mtActive && (s.tripStatus === 'scheduled' || !s.tripStatus) && bk.length ? <button onClick={() => openModal(<CancelTripModal sid={s.id} by="pengemudi" />)} className="badge bg-red-100 text-red-600 cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="calendar-x" className="w-3.5 h-3.5" /> Batalkan</button> : null}
-          {!late && s.tripStatus === 'ontrip' ? <button onClick={finish} className="badge bg-blue-600 text-white cursor-pointer !text-[12px] py-1.5 active:scale-95 transition">Tiba di Tujuan</button> : null}
+          {!late && s.tripStatus === 'ontrip' ? <button onClick={finish} className={'badge text-white cursor-pointer !text-[12px] py-1.5 active:scale-95 transition ' + (arrAlarm ? 'bg-red-600 animate-pulse' : 'bg-blue-600')}>Tiba di Tujuan</button> : null}
           {s.tripStatus === 'ontrip' && s.status !== 'cancelled' ? <button onClick={() => openModal(<DelayModal sid={s.id} mode="ontrip" />)} className="badge bg-sky-100 text-sky-700 cursor-pointer !text-[12px] py-1.5 active:scale-95 transition"><Icon name="clock" className="w-3.5 h-3.5" /> Info Delay</button> : null}
           {/* Tombol tetap tampil walau bukan waktunya — kliknya yang diperiksa:
               terlalu awal (di luar jendela 12 jam) → modal peringatan; terlalu
