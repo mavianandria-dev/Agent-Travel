@@ -158,7 +158,7 @@ export function AckArriveModal({ sid }) {
       <div className="mt-3 rounded-2xl border-2 p-3 text-[12px] font-semibold bg-red-50 border-red-200 text-red-800 leading-snug">
         <b>{r?.from} → {r?.to}</b><br />
         Tidak ada catatan berangkat untuk jadwal ini. Menandai <b>Tiba</b> artinya:<br />
-        ① uang tiket dianggap sah dan dilepas ke agen,<br />
+        ① uang tiket dianggap sah dan dilepas,<br />
         ② admin tidak bisa memproses refund otomatis lagi.<br />
         Jika perjalanan benar-benar terjadi, tulis jelas kapan itu terjadi dan mengapa penandainya terlewat.
       </div>
