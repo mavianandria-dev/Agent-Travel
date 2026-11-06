@@ -230,13 +230,16 @@ export function PaymentModal({ booking, onDone }) {
     setPaying(false);
     payingRef.current = false;
     if (res && res.ok === false) {
-      /* Tulisan ditolak server dan cache di-rollback — penjelasan lengkap
+      /* Tulisan ditolak server dan cache di-rollback — penjelasan teknis
          sudah melayang sebagai toast dari handler sync (alasan persisnya
          bisa hold kedaluwarsa menurut jam server, revisi koleksi, atau
-         sesi habis). Pesanan tetap belum lunas: wizard dibawa balik ke
-         langkah Pilih Kursi dengan pilihan dikosongkan — wajib memilih
-         ulang, jangan ditinggal di layar ringkasan yang basi. */
+         sesi habis). Pesanan dinyatakan mati: DIBATALKAN eksplisit —
+         tanpa ini booking pending ber-hold mati menggantung di server dan
+         manifest agen bertambah baris "belum lunas" begitu pelanggan
+         memesan ulang. Pelanggan dikabiri lewat lonca. */
       closeModal();
+      cancelBookingDomain(booking.id, { reason: 'Pembayaran ditolak server — pesanan dibatalkan otomatis', by: 'sistem' });
+      notify(booking.userEmail, 'Pembayaran gagal diproses — ' + (booking.code || ''), 'Maaf, pembayaranmu tidak terkonfirmasi server (waktu tahan kursi sudah lewat). Pesanan dibatalkan otomatis dan kursi dilepas — vouchermu kembali. Silakan pilih kursi lagi untuk memesan ulang.', 'app');
       clearCheckoutDraft();
       refresh();
       setBw((cur) => ({ ...cur, step: 4, seats: [], passengers: [] }));

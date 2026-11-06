@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { routeById, vehicleById, bookingsOf, vehName, vehLayout, schedSeatCap, takenSeats, seatsLeft, audit, setScheduleTripStatus, scheduleNeedsReview, scheduleInHistory, schedById, setScheduleDelay, cancelDelayRequest, reportTripDelay, createDriverBooking, confirmDriverBookingPayment, splitFare, tripProgress, bookedPassengers, departureTiming, scheduleIsPast, scheduleMaintenance, maintenancePeriodLabel, scheduleEffectiveDepartureMs, DRIVER_SALE_WINDOW_HOURS, DRIVER_SALE_CUTOFF_MIN, notify } from '@/lib/domain.js';
+import { routeById, vehicleById, bookingsOf, vehName, vehLayout, schedSeatCap, takenSeats, seatsLeft, audit, setScheduleTripStatus, scheduleNeedsReview, scheduleInHistory, schedById, setScheduleDelay, cancelDelayRequest, reportTripDelay, createDriverBooking, confirmDriverBookingPayment, cancelBooking, splitFare, tripProgress, bookedPassengers, departureTiming, scheduleIsPast, scheduleMaintenance, maintenancePeriodLabel, scheduleEffectiveDepartureMs, DRIVER_SALE_WINDOW_HOURS, DRIVER_SALE_CUTOFF_MIN, notify } from '@/lib/domain.js';
 import { IS_SHEETS } from '@/lib/runtime.js';
 import { seatInfo } from '@/lib/sheetsApi.js';
 import { refreshSnapshot, pullSnapshotSoft } from '@/lib/remote.js';
@@ -588,9 +588,13 @@ function DriverBookingModal({ sid }) {
     setPaying(false);
     if (fl && fl.ok === false) {
       /* Tulisan ditolak server, cache di-rollback — pesanan belum lunas dan
-         penjelasan alasan sudah melayang dari handler sync. Layar bayar yang
+         penjelasan alasan sudah melayang dari handler sync. Pesanan lama
+         DIBATALKAN eksplisit (sama dengan alur pelanggan): tanpa ini booking
+         pending ber-hold mati menggantung dan manifest agen bisa bertambah
+         baris "belum lunas" saat penumpang dipesan ulang. Layar bayar yang
          basi dibalik ke langkah Pilih Kursi dengan pilihan dikosongkan
          (modal tetap terbuka) — wajib memilih kursi kembali. */
+      cancelBooking(made.id, { reason: 'Pembayaran ditolak server — pesanan dibatalkan otomatis', by: 'sistem' });
       setMade(null);
       setStep(1);
       setSeats([]);
