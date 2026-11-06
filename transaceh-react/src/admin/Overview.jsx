@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { DB } from '@/lib/db.js';
 import { schedById, routeById, splitFare, fareModelOf, vehicleById, driverById, vehName, takenSeats, schedSeatCap, scheduleInHistory, tripProgress } from '@/lib/domain.js';
 import { fmtRp, todayStr } from '@/lib/utils.js';
-import { StatCard, useChart, BadgeStatus, fmtDate, EtaBar } from '@/components/ui.jsx';
+import { StatCard, useChart, BadgeStatus, fmtDate, EtaBar, Icon } from '@/components/ui.jsx';
 import { IS_SHEETS } from '@/lib/runtime.js';
 import { pullSnapshotSoft } from '@/lib/remote.js';
 
@@ -78,10 +78,13 @@ function UpcomingDepartures() {
           const dr = driverById(s.driverId);
           const ag = ags.find((a) => a.id === s.agencyId);
           const prog = s.tripStatus === 'ontrip' ? tripProgress(s, r, now) : null;
+          /* Alarm tiba (paritas dengan agen): ETA terlewati 10 menit dan
+             pengemudi belum konfirmasi Tiba. */
+          const arrAlarm = prog && prog.totalMin > 0 && now >= prog.end + 10 * 60 * 1000;
           return (
             <tr key={s.id}>
-              <td className="font-bold">{fmtDate(s.date)}<br /><span className="text-sky-600">{s.time}</span> {s.tripStatus && s.tripStatus !== 'scheduled' ? <BadgeStatus st={s.tripStatus} /> : null}</td>
-              <td className="font-semibold">{r ? r.from + ' → ' + r.to : '-'}<EtaBar prog={prog} now={now} /></td>
+              <td className="font-bold">{fmtDate(s.date)}<br /><span className="text-sky-600">{s.time}</span> {s.tripStatus && s.tripStatus !== 'scheduled' ? <BadgeStatus st={s.tripStatus} /> : null}{arrAlarm ? <span className="badge bg-red-100 text-red-700 animate-pulse ml-1" title="Estimasi tiba sudah lewat 10 menit — pengemudi belum konfirmasi Tiba"><Icon name="timer" className="w-3 h-3 inline pointer-events-none" /> Belum konfirmasi tiba</span> : null}</td>
+              <td className="font-semibold">{r ? r.from + ' → ' + r.to : '-'}{prog ? <div className="mt-1.5"><EtaBar prog={prog} ariaCtx={(s.date || '') + ' ' + (s.time || '')} /></div> : null}</td>
               <td className="text-[12.5px] font-semibold">{ag?.name || '-'}</td>
               <td className="text-[12.5px] font-medium">{vehName(v)}{v?.plate ? <span className="text-slate-400"> • {v.plate}</span> : null}<br /><span className="text-slate-500">{s.driverName || dr?.name || v?.drvName || '—'}</span></td>
               <td className="font-extrabold">{takenSeats(s.id).booked.length}/{schedSeatCap(s.id)}</td>

@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import Chart from 'chart.js/auto';
 import { useApp } from '@/store/AppContext.jsx';
-import { fmtRp } from '@/lib/utils.js';
+import { fmtRp, fmtClock } from '@/lib/utils.js';
 
 const MAP = {
   armchair: Armchair, 'arrow-left': ArrowLeft, 'arrow-right': ArrowRight, 'badge-percent': BadgePercent,
@@ -86,22 +86,28 @@ export function BadgeStatus({ st }) {
   return <span className={`badge ${x[0]}`}>{x[1]}</span>;
 }
 
-/* Bar progres ETA perjalanan — kolom Rute jadwal agen & tabel admin.
-   `prog` dari tripProgress(), `now` dari jam ticker pemanggil — dikirim
-   sebagai prop agar tidak ada Date.now() saat render (purity). Isi biru
-   selama ETA belum lewat, merah begitu estimasi terlewat. */
-export function EtaBar({ prog, now }) {
+/* Pill progres ETA perjalanan — desain satu-sumber untuk pengemudi (Tugas),
+   agen (Jadwal), dan admin (Overview): pill bulat dengan isi gradasi
+   hijau→emerald→sky selebar pct%, kiri jam berangkat, kanan persen + jam
+   estimasi tiba, lengkap dengan atribut aria progressbar. `prog` dari
+   tripProgress() — prop murni, tanpa Date.now() saat render (purity).
+   `ariaCtx` mengisi konteks aria (mis. tanggal + jam jadwal). */
+export function EtaBar({ prog, ariaCtx = '' }) {
   if (!prog || !prog.totalMin || prog.arrived) return null;
-  const over = Math.max(0, Math.round((now - prog.end) / 60000));
-  const late = over > 0;
   return (
-    <div className="mt-1.5 max-w-[240px]">
-      <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-        <div className={`h-full rounded-full transition-all duration-500 ${late ? 'bg-red-500' : 'bg-gradient-to-r from-sky-500 to-blue-600'}`} style={{ width: prog.pct + '%' }}></div>
-      </div>
-      <div className={`text-[10.5px] font-bold mt-0.5 ${late ? 'text-red-600' : 'text-slate-400'}`}>
-        {late ? 'Estimasi tiba terlewat ' + over + ' mnt' : 'Progres perjalanan ' + prog.pct + '% • sisa ' + prog.remainMin + ' mnt'}
-      </div>
+    <div
+      role="progressbar"
+      aria-label={'Progres perjalanan ' + ariaCtx + ' ' + prog.pct + ' persen'}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={prog.pct}
+      aria-valuetext={'Berangkat ' + fmtClock(prog.start) + ', estimasi tiba ' + fmtClock(prog.end)}
+      title={'Berangkat ' + fmtClock(prog.start) + ' • Estimasi tiba ' + fmtClock(prog.end) + ' • sisa ±' + prog.remainMin + ' menit'}
+      className="badge relative overflow-hidden bg-slate-100 text-[#0b2447] !text-[12px] py-1.5 px-3 gap-2 min-w-[240px] justify-between ring-1 ring-slate-200"
+    >
+      <div className="absolute inset-y-0 left-0 bg-gradient-to-r from-green-200 via-emerald-300 to-sky-300 transition-[width] duration-700 ease-out" style={{ width: prog.pct + '%' }} />
+      <span className="relative z-10 flex items-center gap-1.5 font-extrabold whitespace-nowrap"><Icon name="car-front" className="w-3.5 h-3.5" /> Berangkat {fmtClock(prog.start)}</span>
+      <span className="relative z-10 font-extrabold whitespace-nowrap">{prog.pct}% <span className="font-bold text-slate-500">• ETA {fmtClock(prog.end)}</span></span>
     </div>
   );
 }

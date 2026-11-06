@@ -6,7 +6,7 @@ import { IS_SHEETS } from '@/lib/runtime.js';
 import { seatInfo } from '@/lib/sheetsApi.js';
 import { refreshSnapshot, pullSnapshotSoft } from '@/lib/remote.js';
 import { fmtClock, fmtRp } from '@/lib/utils.js';
-import { Icon, Empty, BadgeStatus, fmtDate, CabinGrid } from '@/components/ui.jsx';
+import { Icon, Empty, BadgeStatus, fmtDate, CabinGrid, EtaBar } from '@/components/ui.jsx';
 import { FareChain } from '@/components/FareChain.jsx';
 import { TicketView } from '@/components/TicketView.jsx';
 import { pickupArea, pickupOptions, pickupOf } from '@/lib/pickups.js';
@@ -989,22 +989,7 @@ export default function Tasks({ focusOnly = false }) {
         <div className="flex items-center gap-3 flex-wrap">
           <div className="bg-[#0b2447] text-white rounded-2xl px-3.5 py-2 text-center"><div className="text-[11px] font-bold opacity-70">{fmtDate(s.date)}</div><div className="font-extrabold text-[16px]">{s.time}</div></div>
           <div className="flex-1 min-w-[180px]"><div className="font-extrabold text-[15px]">{r.from} → {r.to}</div><div className="text-[12px] text-slate-500 font-medium">{vehName(v)} {v?.plate} • {tk.booked.length}/{schedSeatCap(s.id)} penumpang{tk.blocked.length ? ` • ${tk.blocked.length} tutup` : ''}</div></div>
-          {prog ? (
-            <div
-              role="progressbar"
-              aria-label={'Progres perjalanan ' + (s.date || '') + ' ' + (s.time || '') + ' ' + prog.pct + ' persen'}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={prog.pct}
-              aria-valuetext={'Berangkat ' + fmtClock(prog.start) + ', estimasi tiba ' + fmtClock(prog.end)}
-              title={'Berangkat ' + fmtClock(prog.start) + ' • Estimasi tiba ' + fmtClock(prog.end) + ' • sisa ±' + prog.remainMin + ' menit'}
-              className="badge relative overflow-hidden bg-slate-100 text-[#0b2447] !text-[12px] py-1.5 px-3 gap-2 min-w-[240px] justify-between ring-1 ring-slate-200"
-            >
-              <div className="absolute inset-y-0 left-0 bg-gradient-to-r from-green-200 via-emerald-300 to-sky-300 transition-[width] duration-700 ease-out" style={{ width: prog.pct + '%' }} />
-              <span className="relative z-10 flex items-center gap-1.5 font-extrabold whitespace-nowrap"><Icon name="car-front" className="w-3.5 h-3.5" /> Berangkat {fmtClock(prog.start)}</span>
-              <span className="relative z-10 font-extrabold whitespace-nowrap">{prog.pct}% <span className="font-bold text-slate-500">• ETA {fmtClock(prog.end)}</span></span>
-            </div>
-          ) : null}
+          {prog ? <EtaBar prog={prog} ariaCtx={(s.date || '') + ' ' + (s.time || '')} /> : null}
           {isFocus ? <span className="badge bg-sky-600 text-white !text-[10px] px-2 py-0.5">TERDEKAT</span> : null}
           <BadgeStatus st={s.tripStatus || 'scheduled'} />
         </div>
