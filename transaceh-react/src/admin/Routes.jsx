@@ -101,7 +101,7 @@ function RequestSection() {
     const r = decideRouteRequest(id, true, '');
     refresh();
     if (r?.error) { toast(r.error, 'err'); return; }
-    toast(r?.createdRouteId ? 'Rute baru dibuat untuk agen pengusul' : 'Titik jemput ditambahkan ke rute');
+    toast(r?.createdRouteId ? 'Rute baru dibuat untuk agen pengusul' : r?.req?.type === 'edit-rute' ? 'Perubahan rute diterapkan' : 'Titik jemput ditambahkan ke rute');
   };
   const reject = (id) => {
     decideRouteRequest(id, false, note);
@@ -111,14 +111,14 @@ function RequestSection() {
   };
   const card = (q) => {
     const ag = agencyById(q.agencyId);
-    const oldPrice = q.type === 'ubah-harga' ? priceForAgency(DB.load('routes', []).find((x) => x.id === q.routeId), q.agencyId) : 0;
-    const typeLabel = q.type === 'rute-baru' ? 'Rute Baru' : q.type === 'ubah-harga' ? 'Ubah Harga' : 'Titik Jemput';
+    const oldPrice = (q.type === 'ubah-harga' || q.type === 'edit-rute') ? priceForAgency(DB.load('routes', []).find((x) => x.id === q.routeId), q.agencyId) : 0;
+    const typeLabel = q.type === 'rute-baru' ? 'Rute Baru' : q.type === 'ubah-harga' ? 'Ubah Harga' : q.type === 'edit-rute' ? 'Edit Rute' : 'Titik Jemput';
     return (
       <div key={q.id} className="mt-2 bg-slate-50 rounded-2xl px-3.5 py-2.5">
         <div className="flex items-center gap-2 text-[13px] font-bold flex-wrap">
           <span className="badge bg-sky-100 text-sky-700">{typeLabel}</span>
           <span>{q.from} → {q.to}</span>
-          {q.type === 'ubah-harga' ? <span className="text-slate-400 font-medium">{fmtRp(oldPrice)} → <b className="text-slate-700">{fmtRp(q.price)}</b></span>
+          {(q.type === 'ubah-harga' || q.type === 'edit-rute') ? <span className="text-slate-400 font-medium">{fmtRp(oldPrice)} → <b className="text-slate-700">{fmtRp(q.price)}</b></span>
           : q.price ? <span className="text-slate-400 font-medium">{fmtRp(q.price)}</span> : null}
           <span className="text-slate-400 font-medium">• {ag ? ag.name : q.agencyId}</span>
           <div className="flex-1"></div>

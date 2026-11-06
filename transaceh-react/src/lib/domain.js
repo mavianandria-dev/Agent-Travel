@@ -3118,7 +3118,7 @@ export function decideRouteRequest(id,approve,adminNote){
   const r=arr.find(x=>x.id===id);
   if(!r||r.status!=='pending') return null;
   let validVehicleIds=null;
-  if(approve&&r.type==='rute-baru'){
+  if(approve&&(r.type==='rute-baru'||r.type==='edit-rute')){
     const fleet=DB.load('vehicles',[]);
     validVehicleIds=(Array.isArray(r.vehicleIds)?r.vehicleIds:[]).filter(vid=>fleet.some(v=>v.id===vid&&v.agencyId===r.agencyId&&v.status==='aktif'));
     if(!validVehicleIds.length) return {error:'Armada usulan tidak valid untuk agen ini'};
@@ -3140,6 +3140,25 @@ export function decideRouteRequest(id,approve,adminNote){
       const routes=DB.load('routes',[]);
       const tgt=routes.find(x=>x.id===r.routeId)||routes.find(x=>x.from===r.from&&x.to===r.to&&(x.agencyIds||[]).includes(r.agencyId));
       if(tgt&&Number(r.price)>0){ tgt.prices={...(tgt.prices||{}),[r.agencyId]:Number(r.price)}; DB.save('routes',routes); }
+    }else if(r.type==='edit-rute'){
+      /* Usulan edit rute: satu persetujuan menerapkan SEMUA perubahan —
+         harga (per-agen), jarak/durasi (bila diisi), titik jemput (ganti
+         bila diisi), jemput rumah, dan armada. Armada milik agen DIGANTI;
+         armada agensi lain pada rute bersama dipertahankan. */
+      const routes=DB.load('routes',[]);
+      const tgt=routes.find(x=>x.id===r.routeId)||routes.find(x=>x.from===r.from&&x.to===r.to&&(x.agencyIds||[]).includes(r.agencyId));
+      if(tgt){
+        if(Number(r.price)>0) tgt.prices={...(tgt.prices||{}),[r.agencyId]:Number(r.price)};
+        if((r.distance||'').trim()&&r.distance!=='-') tgt.distance=(r.distance||'').trim();
+        if((r.duration||'').trim()&&r.duration!=='-') tgt.duration=(r.duration||'').trim();
+        tgt.homePickup=r.homePickup!==false;
+        const pts=normalizePoints(Array.isArray(r.pickups)?r.pickups:[]);
+        if(pts.length) tgt.pickups=pts;
+        const fleet=DB.load('vehicles',[]);
+        const ownOld=(tgt.vehicleIds||[]).filter(vid=>{const v=fleet.find(x=>x.id===vid);return v&&String(v.agencyId)===String(r.agencyId);});
+        tgt.vehicleIds=[...(tgt.vehicleIds||[]).filter(vid=>!ownOld.includes(vid)),...validVehicleIds];
+        DB.save('routes',routes);
+      }
     }else{
       const routes=DB.load('routes',[]);
       const tgt=routes.find(x=>x.id===r.routeId)||routes.find(x=>x.from===r.from&&x.to===r.to&&(x.agencyIds||[]).includes(r.agencyId));
