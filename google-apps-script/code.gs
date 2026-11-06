@@ -3679,6 +3679,44 @@ function apiRouteAllowsAgency_(route, agencyId) {
   return true;
 }
 
+/** Pola pelepasan rute oleh agen ("Hapus" pada card Rute Saya): agen hanya
+ *  boleh mengurangi kehadiran DIRINYA SENDIRI — agencyIds menyusut tepat
+ *  satu anggota (ownAgency), prices hanya kehilangan kunci ownAgency,
+ *  vehicleIds hanya kehilangan armada milik ownAgency, dan active hanya
+ *  boleh false bila agen tersisa kosong. Field di luar daftar itu tetap
+ *  divalidasi ketat oleh pemanggil (loop changed-fields). Mengembalikan
+ *  true hanya bila SEMUA syarat terpenuhi — bukan bukaan umum. */
+function apiRouteReleaseAllowed_(ctx, rec, old, ownAgency) {
+  if (!ownAgency) return false;
+  var oldIds = Array.isArray(old.agencyIds) ? old.agencyIds.map(String) : (old.agencyId ? [String(old.agencyId)] : []);
+  var newIds = Array.isArray(rec.agencyIds) ? rec.agencyIds.map(String) : (rec.agencyId ? [String(rec.agencyId)] : []);
+  if (oldIds.indexOf(ownAgency) < 0) return false;
+  var kept = oldIds.filter(function (x) { return x !== ownAgency; });
+  if (JSON.stringify(kept) !== JSON.stringify(newIds)) return false;
+  var oldPrices = old.prices || {};
+  var newPrices = rec.prices || {};
+  var expKeys = Object.keys(oldPrices).sort().filter(function (k) { return k !== ownAgency; });
+  if (JSON.stringify(expKeys) !== JSON.stringify(Object.keys(newPrices).sort())) return false;
+  for (var p = 0; p < expKeys.length; p++) {
+    if (String(oldPrices[expKeys[p]]) !== String(newPrices[expKeys[p]])) return false;
+  }
+  var oldV = Array.isArray(old.vehicleIds) ? old.vehicleIds.map(String) : [];
+  var newV = Array.isArray(rec.vehicleIds) ? rec.vehicleIds.map(String) : [];
+  var addedV = newV.filter(function (x) { return oldV.indexOf(x) < 0; });
+  if (addedV.length) return false;
+  for (var v = 0; v < oldV.length; v++) {
+    if (newV.indexOf(oldV[v]) >= 0) continue;
+    var veh = (ctx.pending.vehicles && ctx.pending.vehicles[oldV[v]]) ||
+      (ctx.currentMap.vehicles && ctx.currentMap.vehicles[oldV[v]]);
+    if (!veh || String(veh.agencyId || '') !== ownAgency) return false;
+  }
+  if (String(rec.active) !== String(old.active)) {
+    if (newIds.length) return false;
+    if (rec.active !== false) return false;
+  }
+  return true;
+}
+
 function apiSyncValidateRoutes_(ctx, target) {
   var currentMap = ctx.currentMap.routes || {};
   if (ctx.role === 'superadmin') return;
@@ -3695,10 +3733,14 @@ function apiSyncValidateRoutes_(ctx, target) {
       throw apiError_('FORBIDDEN', 'Rute ini bukan milik agensi Anda.');
     }
     var changed = apiSyncChangedFields_(rec, old);
+    /* Pelepasan rute (releaseRoute) diizinkan sebagai pengecualian terarah:
+       pola divalidasi penuh oleh apiRouteReleaseAllowed_ — pola lain yang
+       menyentuh field non-pengemudi tetap ditolak. */
+    var release = apiRouteReleaseAllowed_(ctx, rec, old, ownAgency);
     for (var i = 0; i < changed.length; i++) {
-      if (changed[i] !== 'driverId' && changed[i] !== 'driverIds') {
-        throw apiError_('FORBIDDEN', 'Agen hanya boleh mengubah penugasan pengemudi pada rute.');
-      }
+      if (changed[i] === 'driverId' || changed[i] === 'driverIds') continue;
+      if (release && ['agencyIds', 'agencyId', 'prices', 'vehicleIds', 'active'].indexOf(changed[i]) >= 0) continue;
+      throw apiError_('FORBIDDEN', 'Agen hanya boleh mengubah penugasan pengemudi pada rute.');
     }
     var beforeIds = Array.isArray(old.driverIds) ? old.driverIds.map(String) : [];
     var afterIds = Array.isArray(rec.driverIds) ? rec.driverIds.map(String) : [];

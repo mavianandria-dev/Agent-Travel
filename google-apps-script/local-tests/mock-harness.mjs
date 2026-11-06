@@ -1423,6 +1423,25 @@ res = sync({ drivers: { baseRev: revOf('drivers'), upserts: [], deletes: ['d_1']
 ok('pengemudi yang masih terpasang di armada tidak boleh dihapus',
   res.ok === false && res.error.code === 'VALIDATION', res);
 
+/* Pelepasan rute oleh agen (releaseRoute): pola terarah diizinkan — agen
+   keluar dari agencyIds/prices, armadanya lepas, agen terakhir menonaktifkan
+   rute. Pola lain tetap dilarang dan rute yang sudah dilepas tak bisa
+   dikuasai ulang. */
+const relRouteBase = revOf('routes');
+res = sync({ routes: { baseRev: relRouteBase, upserts: [{ id: 'rt_rel', from: 'Sigli', to: 'Bireuen', distance: '-', duration: '-', prices: { ag_1: 120000 }, agencyIds: ['ag_1'], vehicleIds: ['v_1'], active: true }], deletes: [] } }, adminToken);
+ok('superadmin menyiapkan rute khusus uji pelepasan', res.ok === true && res.data.revisions.routes === relRouteBase + 1, res);
+const rtRel = readRec('routes', 'rt_rel');
+const relBase1 = revOf('routes');
+res = sync({ routes: { baseRev: relBase1, upserts: [Object.assign({}, rtRel, { agencyIds: [], prices: {}, vehicleIds: [], active: false })], deletes: [] } }, agenToken);
+ok('sync agen boleh melepas dirinya dari rute (agen terakhir → nonaktif)', res.ok === true && res.data.revisions.routes === relBase1 + 1, res);
+const rtRelAfter = readRec('routes', 'rt_rel');
+ok('rute hasil pelepasan nonaktif tanpa agen & tanpa armada',
+  rtRelAfter.active === false && (rtRelAfter.agencyIds || []).length === 0 && (rtRelAfter.vehicleIds || []).length === 0, rtRelAfter);
+res = sync({ routes: { baseRev: revOf('routes'), upserts: [Object.assign({}, rtRelAfter, { agencyIds: ['ag_1'], prices: { ag_1: 120000 }, active: true })], deletes: [] } }, agenToken);
+ok('sync agen tidak boleh menguasai ulang rute yang sudah dilepas', res.ok === false && res.error.code === 'FORBIDDEN', res);
+res = sync({ routes: { baseRev: revOf('routes'), upserts: [Object.assign({}, readRec('routes', 'rt_1'), { agencyIds: ['ag_2'], prices: { ag_2: 160000 }, from: 'Rute Hack' })], deletes: [] } }, agenToken);
+ok('sync pelepasan rute tidak boleh membawa perubahan field lain', res.ok === false && res.error.code === 'FORBIDDEN', res);
+
 /* Multi-koleksi: agen membuat akun pengemudi + data driver + armada + jadwal. */
 const syncUserBase = revOf('users');
 const syncDriverBase = revOf('drivers');

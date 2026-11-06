@@ -3157,6 +3157,63 @@ export function decideRouteRequest(id,approve,adminNote){
   return {req:r,createdRouteId};
 }
 
+/** Agen melepas diri dari rute ("Hapus" pada card Rute Saya). Semua jadwal
+ *  mendatang milik agen pada rute ini dibatalkan otomatis memakai semantik
+ *  cancelScheduleByOperator penuh: refund 100% booking lunas, voucher
+ *  kembali, ledger non-cair di-void, penumpang dikabiri. Perjalanan yang
+ *  sedang berjalan (ontrip) dan riwayat lampau DIBIARKAN UTUH. Record rute
+ *  TETAP dipertahankan (riwayat masih merujuknya) — agen hanya dikeluarkan
+ *  dari agencyIds/prices dan armadanya dilepas dari rute; bila agen terakhir,
+ *  rute dinonaktifkan agar tidak bisa dipesan siapa pun. Gagal seluruhnya
+ *  bila ada jadwal mendatang yang tak bisa dibatalkan (dana sudah dicairkan
+ *  atau sedang maintenance) — tanpa pembatalan parsial. */
+export function releaseRoute(routeId, agencyId, { reason = '' } = {}) {
+  const routes = DB.load('routes', []);
+  const r = routes.find((x) => x.id === routeId);
+  if (!r) return { ok: false, msg: 'Rute tidak ditemukan' };
+  const ids = (r.agencyIds && r.agencyIds.length) ? r.agencyIds : (r.agencyId ? [r.agencyId] : []);
+  if (!ids.includes(agencyId)) return { ok: false, msg: 'Rute ini bukan milik agensi Anda' };
+  const why = String(reason || '').trim() || 'Rute dilepas oleh agen';
+
+  /* Pra-cek: semua jadwal mendatang WAJIB bisa dibatalkan — bila ada yang
+     dananya sudah dicairkan atau sedang maintenance, gagalkan pelepasan
+     SEBELUM tindakan pertama supaya tidak ada keadaan setengah jadi. */
+  const schedules = DB.load('schedules', []);
+  const future = schedules.filter((s) => s.agencyId === agencyId && s.routeId === routeId
+    && s.status !== 'cancelled' && s.tripStatus !== 'cancelled'
+    && !['ontrip', 'arrived', 'missed'].includes(s.tripStatus)
+    && !scheduleIsPast(s, 0));
+  const ledger = DB.load('ledger', []);
+  if (future.some((s) => ledger.some((e) => e.scheduleId === s.id && e.status === 'dicairkan'))) {
+    return { ok: false, msg: 'Dana salah satu jadwal mendatang sudah dicairkan — hubungi admin' };
+  }
+  if (future.some((s) => scheduleMaintenance(s) && (s.tripStatus || 'scheduled') === 'scheduled')) {
+    return { ok: false, msg: 'Ada jadwal mendatang yang sedang maintenance — selesaikan dulu lewat alur maintenance' };
+  }
+
+  let cancelled = 0;
+  let refund = 0;
+  future.forEach((s) => {
+    const res = cancelScheduleByOperator(s.id, why, 'agen');
+    if (res && res.ok) { cancelled += 1; refund += res.total || 0; }
+  });
+
+  /* Lepas agen dari rute: keanggotaan, harga khusus, dan armada miliknya. */
+  const ownVeh = new Set(DB.load('vehicles', []).filter((v) => v.agencyId === agencyId).map((v) => v.id));
+  const rest = ids.filter((x) => x !== agencyId);
+  r.agencyIds = rest;
+  if (r.prices) delete r.prices[agencyId];
+  r.vehicleIds = (r.vehicleIds || []).filter((vid) => !ownVeh.has(vid));
+  if (r.agencyId === agencyId) r.agencyId = rest[0] || null;
+  if (!rest.length) r.active = false;
+  DB.save('routes', routes);
+
+  const ag = agencyById(agencyId);
+  audit('route_release', r.from + ' → ' + r.to + ' • ' + (ag?.name || agencyId) + ' • ' + cancelled + ' jadwal dibatalkan • refund ' + refund);
+  DB.load('users', []).filter((u) => u.role === 'superadmin').forEach((u) => notify(u.email, 'Agen melepas rute', (ag?.name || agencyId) + ' melepas rute ' + r.from + ' → ' + r.to + ' — ' + cancelled + ' jadwal mendatang dibatalkan (refund ' + refund + ').', 'app'));
+  return { ok: true, cancelled, refund, remaining: rest.length };
+}
+
 /* ---------- KYC / kelengkapan data agen travel ----------
    Dialur setelah agen mendaftar: login tetap bisa, tapi akun baru bisa
    ber-operasi penuh setelah kelengkapan data disetujui super admin. */

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { saveRouteRequest, priceForAgency, isRouteSuspended, vehicleById, vehName, fleetAvailable } from '@/lib/domain.js';
+import { saveRouteRequest, priceForAgency, isRouteSuspended, vehicleById, vehName, fleetAvailable, releaseRoute, scheduleIsPast } from '@/lib/domain.js';
 import { PICKUP_ORIGIN } from '@/lib/pickups.js';
 import { estimateRoute, routeMeta } from '@/lib/geo.js';
 import { fmtRp, REGIONS } from '@/lib/utils.js';
@@ -164,6 +164,58 @@ function RouteArmadaModal({ ag, route }) {
   );
 }
 
+/* Konfirmasi pelepasan rute ("Hapus" pada card): konsekuensi dihitung live
+   dari data nyata — jadwal mendatang, booking lunas + total refund, booking
+   belum bayar. Semantik pembatalan sama dengan CancelTripModal (refund 100%,
+   voucher kembali, penumpang dikabiri); riwayat & keuangan tetap utuh. */
+function DeleteRouteModal({ ag, route }) {
+  const { closeModal, toast, refresh } = useApp();
+  const schedules = DB.load('schedules', []).filter((s) => s.agencyId === ag.id && s.routeId === route.id);
+  const future = schedules.filter((s) => s.status !== 'cancelled' && s.tripStatus !== 'cancelled'
+    && !['ontrip', 'arrived', 'missed'].includes(s.tripStatus) && !scheduleIsPast(s, 0));
+  const ontrip = schedules.filter((s) => s.tripStatus === 'ontrip');
+  const futIds = new Set(future.map((s) => s.id));
+  const bks = DB.load('bookings', []).filter((b) => futIds.has(b.scheduleId));
+  const paid = bks.filter((b) => b.status === 'paid');
+  const pending = bks.filter((b) => b.status === 'pending');
+  const refund = paid.reduce((a, b) => a + (Number(b.total) || 0), 0);
+  const submit = () => {
+    const res = releaseRoute(route.id, ag.id, { reason: 'Rute dilepas oleh agen' });
+    if (!res.ok) { toast(res.msg, 'err'); return; }
+    closeModal();
+    refresh();
+    toast(res.cancelled
+      ? 'Rute dilepas — ' + res.cancelled + ' jadwal dibatalkan • refund 100% ' + fmtRp(res.refund)
+      : 'Rute dilepas dari daftar Rute Saya', 'ok');
+  };
+  return (
+    <div className="p-6">
+      <h3 className="font-extrabold text-[17px] flex items-center gap-2"><Icon name="trash-2" className="w-5 h-5 text-red-500" />Hapus Rute?</h3>
+      <div className="text-[12.5px] font-semibold text-slate-500 mt-1">{route.from} <Icon name="arrow-right" className="w-3.5 h-3.5 text-sky-600 inline" /> {route.to}</div>
+      <div className="mt-3 bg-red-50 border border-red-100 rounded-2xl p-3 text-[12.5px] font-semibold text-red-800">
+        <div className="font-extrabold">Yang terjadi jika dihapus:</div>
+        <div className="mt-1 space-y-1">
+          {future.length ? (
+            <>
+              <div>• <b>{future.length} jadwal mendatang</b> pada rute ini dibatalkan otomatis.</div>
+              <div>• <b>{paid.length} booking lunas</b> → refund 100% <b>{fmtRp(refund)}</b> diproses 1–3 hari kerja; penumpang otomatis diberi tahu.</div>
+              {pending.length ? <div>• <b>{pending.length} booking belum bayar</b> → batal tanpa refund, voucher kembali.</div> : null}
+            </>
+          ) : (
+            <div>• Tidak ada jadwal mendatang — rute langsung lepas dari daftar Rute Anda.</div>
+          )}
+          {ontrip.length ? <div>• {ontrip.length} perjalanan sedang berjalan dibiarkan selesai normal.</div> : null}
+          <div>• Riwayat transaksi &amp; keuangan <b>tetap utuh</b> dan tidak bisa diulang — rute harus diusulkan lagi lewat admin bila dipakai kembali.</div>
+        </div>
+      </div>
+      <div className="flex gap-2 mt-4">
+        <button onClick={() => closeModal()} className="flex-1 bg-slate-100 hover:bg-slate-200 font-extrabold text-[13px] py-3 rounded-2xl">Batal</button>
+        <button onClick={submit} className="flex-1 bg-red-500 hover:bg-red-600 text-white font-extrabold text-[13px] py-3 rounded-2xl flex items-center justify-center gap-1.5"><Icon name="trash-2" className="w-4 h-4" />Ya, Hapus Rute</button>
+      </div>
+    </div>
+  );
+}
+
 export default function Routes({ ag }) {
   const { openModal } = useApp();
   const routes = DB.load('routes', []).filter((r) => (r.agencyIds || []).includes(ag.id));
@@ -181,7 +233,8 @@ export default function Routes({ ag }) {
               {isRouteSuspended(r, ag.id) ? <div className="text-[12px] font-bold text-red-500 mt-1">Disuspend admin: {r.suspensions[ag.id].reason}</div> : null}
               <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">{r.homePickup !== false ? <span className="badge bg-green-100 text-green-700"><Icon name="map-pin" className="w-3 h-3" />Jemput rumah tersedia</span> : null}</div>
               <div className="flex items-center gap-2 mt-1.5"><span className="text-[13px] font-extrabold">Harga Anda: {fmtRp(priceForAgency(r, ag.id))}<span className="text-slate-400 font-medium">/kursi</span></span><div className="flex-1"></div>
-                <button onClick={(e) => { e.stopPropagation(); openModal(<EditPriceModal ag={ag} route={r} />); }} className="text-sky-600 text-[12px] font-extrabold px-3 py-1.5 rounded-xl bg-sky-50 hover:bg-sky-100">Ubah Harga</button></div>
+                <button onClick={(e) => { e.stopPropagation(); openModal(<EditPriceModal ag={ag} route={r} />); }} className="text-sky-600 text-[12px] font-extrabold px-3 py-1.5 rounded-xl bg-sky-50 hover:bg-sky-100">Ubah Harga</button>
+                <button onClick={(e) => { e.stopPropagation(); openModal(<DeleteRouteModal ag={ag} route={r} />); }} title="Lepas rute ini dari travel Anda" className="text-red-500 text-[12px] font-extrabold px-3 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 flex items-center gap-1"><Icon name="trash-2" className="w-3.5 h-3.5" />Hapus</button></div>
               <div className="flex flex-wrap gap-1 mt-2">{(r.pickups || []).map((p) => (<span key={p} className="badge bg-slate-100 text-slate-600"><Icon name="map-pin" className="w-3 h-3" />{p}</span>))}</div>
             </div>
           ))}
