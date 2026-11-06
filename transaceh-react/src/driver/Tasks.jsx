@@ -71,6 +71,16 @@ function fmtGap(minutes) {
   return m + ' menit';
 }
 
+/* Sisa hold pembayaran dalam mm:ss — dipanggil dari event & denyut interval,
+   BUKAN saat render (aturan purity). Dipakai layar bayar penjualan langsung
+   pengemudi, paritas dengan modal pembayaran pelanggan. */
+function fmtHoldLeft(holdExpiry) {
+  const ms = new Date(holdExpiry).getTime() - Date.now();
+  const mm = String(Math.max(0, Math.floor(ms / 60000))).padStart(2, '0');
+  const ss = String(Math.max(0, Math.floor((ms % 60000) / 1000))).padStart(2, '0');
+  return mm + ':' + ss;
+}
+
 /** Konfirmasi sebelum berangkat. Wajib tagging lokasi di daerah keberangkatan
  *  (kabupaten/kota hasil rute DARI) + alasan bila >60 menit lebih awal. */
 export function StartTripModal({ sid }) {
@@ -379,6 +389,13 @@ function DriverBookingModal({ sid }) {
   const [step, setStep] = useState(1);
   const [made, setMade] = useState(null);
   const [paying, setPaying] = useState(false);
+  /* Teks sisa waktu bayar (mm:ss) — diisi saat pesanan dibuat (event) dan
+     diperbarui denyut interval; TIDAK dihitung saat render (purity). Nilai
+     awal '05:00' hanya terlihat sebelum pesanan dibuat. */
+  const [holdLeft, setHoldLeft] = useState('05:00');
+  /* Ref pendamping paying: denyut interval membaca nilai termutakhir, bukan
+     snapshot closure — pola sama dengan modal pembayaran pelanggan. */
+  const payingRef = useRef(false);
   /* Cek server deteksi dini, pola sama dengan wizard pelanggan: kursi yang
      baru diklik ditandai 'checking'; baris datanya menampilkan indikator
      sampai cek lulus, baru field [Nama]/[No. HP] muncul. Overlay hasil cek
@@ -411,6 +428,32 @@ function DriverBookingModal({ sid }) {
   const left = available.length;
   const seatsRef = useRef(seats);
   useEffect(() => { seatsRef.current = seats; }, [seats]);
+  /* Denyut layar bayar per detik — pola sama dengan modal pembayaran
+     pelanggan: hitungan mundur dari holdExpiry, dan saat 00:00 pesanan
+     DIBATALKAN SEKETIKA (kursi lepas, tidak ada pending "belum lunas"
+     menggantung di manifest agen) lalu wizard balik ke Pilih Kursi dengan
+     pilihan dikosongkan — modal tetap terbuka, wajib memilih kursi lagi.
+     Penulisan pembayaran yang sedang berjalan (payingRef) tidak boleh
+     didahului denyut. */
+  useEffect(() => {
+    if (step !== 2 || !made) return undefined;
+    const iv = setInterval(() => {
+      const ms = new Date(made.holdExpiry).getTime() - Date.now();
+      if (ms <= 0 && !payingRef.current) {
+        clearInterval(iv);
+        cancelBooking(made.id, { reason: 'Hold kedaluwarsa — pesanan dibatalkan otomatis', by: 'sistem' });
+        toast('Hold kedaluwarsa — pesanan batal. Pilih kursi kembali', 'err');
+        setMade(null);
+        setStep(1);
+        setSeats([]);
+        setPax([]);
+        refresh();
+        return;
+      }
+      setHoldLeft(fmtHoldLeft(made.holdExpiry));
+    }, 1000);
+    return () => clearInterval(iv);
+  }, [step, made, toast, refresh]);
   /* Tarikan pasca-tabrakan — pola sama dengan wizard pelanggan: seatinfo
      sudah menjawab peta (overlay kuning), snapshot penuh mengikuti di
      belakang supaya proyeksi terisi & kuota segar juga. Dijaring paling 1x
@@ -572,6 +615,10 @@ function DriverBookingModal({ sid }) {
     });
     if (!res.ok) { toast(res.msg, 'err'); return; }
     setMade(res.booking);
+    /* Sisa waktu tampil BENAR sejak frame pertama — dihitung di event, bukan
+       menunggu denyut pertama (pesanan pakai-ulang: sisa hold lama, bukan
+       reset 5 menit — sama dengan alur pelanggan). */
+    setHoldLeft(fmtHoldLeft(res.booking.holdExpiry));
     setStep(2);
     refresh();
   };
@@ -579,13 +626,36 @@ function DriverBookingModal({ sid }) {
   const pay = async () => {
     if (paying) return;
     const res = confirmDriverBookingPayment(made.id);
-    if (!res.ok) { toast(res.msg, 'err'); return; }
+    if (!res.ok) {
+      /* Pembayaran ditolak lokal — penyebab dibedakan seperti alur pelanggan:
+         hold kedaluwarsa → pesanan mati, dibatalkan eksplisit + wizard balik
+         ke Pilih Kursi dengan pilihan dikosongkan (klik di detik terakhir
+         kalah balapan dengan denyut). Alasan lain (maintenance, jadwal
+         sudah berjalan/selesai) → pesanan tetap pending, toast saja. */
+      const b = DB.load('bookings', []).find((x) => x.id === made.id);
+      const holdDead = b && b.holdExpiry && new Date(b.holdExpiry).getTime() <= Date.now();
+      if (holdDead) {
+        cancelBooking(made.id, { reason: 'Hold kedaluwarsa — pesanan dibatalkan otomatis', by: 'sistem' });
+        toast('Hold kedaluwarsa — pesanan batal. Pilih kursi kembali', 'err');
+        setMade(null);
+        setStep(1);
+        setSeats([]);
+        setPax([]);
+        refresh();
+      } else {
+        toast(res.msg, 'err');
+        refresh();
+      }
+      return;
+    }
     /* Mode Sheets menulis optimistis: toast sukses menunggu konfirmasi
        server — bila ditolak, cache di-rollback dan handler sync sudah
        menampilkan toast merah dengan alasannya. */
     setPaying(true);
+    payingRef.current = true;
     const fl = await DB.flush();
     setPaying(false);
+    payingRef.current = false;
     if (fl && fl.ok === false) {
       /* Tulisan ditolak server, cache di-rollback — pesanan belum lunas dan
          penjelasan alasan sudah melayang dari handler sync. Pesanan lama
@@ -614,7 +684,7 @@ function DriverBookingModal({ sid }) {
     return (
       <div className="p-6">
         <div className="flex items-center justify-between"><h3 className="font-extrabold text-[17px] flex items-center gap-2"><Icon name="wallet" className="w-5 h-5 text-sky-600" />Pembayaran {made.payMethod}</h3><button onClick={closeModal} className="text-slate-400"><Icon name="x" className="w-5 h-5" /></button></div>
-        <div className="text-center bg-amber-50 border border-amber-200 rounded-2xl py-2.5 mt-3 font-extrabold text-amber-800 text-[13px]">Kursi ditahan 5 menit</div>
+        <div className="text-center bg-amber-50 border border-amber-200 rounded-2xl py-2.5 mt-3 font-extrabold text-amber-800 text-[14px]">Sisa waktu bayar: <span className="font-mono">{holdLeft}</span></div>
 
         {made.payMethod === 'QRIS' ? (
           <img src={'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + made.code + '-' + made.total} className="w-48 h-48 mx-auto mt-4 rounded-2xl border-4 border-[#0b2447]" alt="QRIS" />
