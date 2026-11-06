@@ -10,7 +10,7 @@ import Routes from './Routes.jsx';
 import Finance from './Finance.jsx';
 import Setting from './Setting.jsx';
 
-const TABS = [['dashboard','layout-dashboard','Dashboard'],['book','clipboard-list','Pesanan'],['sched','calendar-days','Jadwal'],['route','route','Rute'],['fleet','bus','Armada'],['driver','id-card','Pengemudi'],['fin','wallet','Keuangan'],['setting','settings','Setting']];
+const TABS = [['dashboard','layout-dashboard','Dashboard'],['sched','calendar-days','Jadwal'],['book','clipboard-list','Pesanan'],['route','route','Rute'],['fleet','bus','Armada'],['driver','id-card','Pengemudi'],['fin','wallet','Keuangan'],['setting','settings','Setting']];
 
 export default function Agen() {
   const { user, agenTab, setAgenTab, go } = useApp();

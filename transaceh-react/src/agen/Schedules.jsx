@@ -39,7 +39,17 @@ export default function Schedules({ ag }) {
   const all = DB.load('schedules', []).filter((s) => s.agencyId === agency.id).sort((a, b) => (a.date + b.time).localeCompare(b.date + b.time));
   const bookedIds = new Set(DB.load('bookings', []).map((b) => b.scheduleId));
   const upcoming = all.filter((s) => !scheduleInHistory(s));
-  const history = all.filter(scheduleInHistory);
+  /* Riwayat tampil terbaru dulu — dan baris "telah tiba" diutamakan paling
+     atas supaya jadwal yang baru selesai langsung terlihat tanpa menggulung
+     (dulu: mewarisi urutan menaik, jadwal terbaru justru di dasar tabel).
+     Jadwal batal bertanggal masa depan tidak merebut baris teratas dari
+     yang telah tiba. */
+  const history = all.filter(scheduleInHistory).sort((a, b) => {
+    const aa = a.tripStatus === 'arrived' ? 0 : 1;
+    const bb = b.tripStatus === 'arrived' ? 0 : 1;
+    if (aa !== bb) return aa - bb;
+    return (b.date + b.time).localeCompare(a.date + a.time);
+  });
   const missed = all.filter((s) => s.tripStatus === 'missed' && !s.reviewedAt);
   /* Permintaan delay > 180 mnt dari pengemudi yang menunggu keputusan agen. */
   const reqList = all.filter((s) => s.delayReqStatus === 'menunggu');
