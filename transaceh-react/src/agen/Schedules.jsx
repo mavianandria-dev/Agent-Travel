@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { agencyOf, routeById, vehicleById, vehName, driverById, takenSeats, schedSeatCap, schedReady, scheduleInHistory, scheduleHasTransactions, bookingsOf, audit, scheduleMaintenance, maintenancePeriodLabel, schedById, scheduleDepartureMs, resolveDelayRequest } from '@/lib/domain.js';
+import { agencyOf, routeById, vehicleById, vehName, driverById, takenSeats, schedSeatCap, schedReady, scheduleInHistory, scheduleHasTransactions, bookingsOf, audit, scheduleMaintenance, maintenancePeriodLabel, schedById, scheduleDepartureMs, resolveDelayRequest, tripProgress } from '@/lib/domain.js';
 import { fmtRp, fmtClock } from '@/lib/utils.js';
 import { Icon, BadgeStatus, fmtDate } from '@/components/ui.jsx';
 import { ManifestModal } from './Bookings.jsx';
@@ -27,6 +27,13 @@ export default function Schedules({ ag }) {
     window.addEventListener('focus', pull);
     return () => window.removeEventListener('focus', pull);
   }, [refresh]);
+  /* Jam lokal: badge waktu-nyata (alarm "belum konfirmasi tiba") harus
+     bergerak sendiri tiap 30 detik, pola sama dengan halaman Tugas. */
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const iv = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(iv);
+  }, []);
   const agency = ag || agencyOf(user);
   if (!agency) return <div className="bg-white rounded-3xl shadow-card p-5 text-center font-bold text-slate-400">Data travel tidak ditemukan</div>;
   const all = DB.load('schedules', []).filter((s) => s.agencyId === agency.id).sort((a, b) => (a.date + b.time).localeCompare(b.date + b.time));
@@ -88,9 +95,26 @@ export default function Schedules({ ag }) {
           const hasTransactions = scheduleHasTransactions(s.id);
           const mt = scheduleMaintenance(s);
           const historical = tab === 'history' || ['ontrip', 'arrived', 'missed'].includes(s.tripStatus);
+          /* Alarm tiba (cermin alarm pengemudi): masih dalam perjalanan +
+             ETA terlewati 10 menit — agen melihat tanda yang sama. */
+          const prog = s.tripStatus === 'ontrip' ? tripProgress(s, r, now) : null;
+          const arrAlarm = prog && prog.totalMin > 0 && now >= prog.end + 10 * 60 * 1000;
+          /* Info perjalanan + tag lokasi (JSON string → area/addr). */
+          const parseGeo = (str) => { try { const g = JSON.parse(str); return g && g.ok ? g : null; } catch { return null; } };
+          const depGeo = parseGeo(s.departGeo);
+          const arrGeo = parseGeo(s.arriveGeo);
+          const tripLine = [
+            s.departedAt ? 'Berangkat ' + fmtClock(new Date(s.departedAt).getTime()) : null,
+            s.arrivedAt ? 'Tiba ' + fmtClock(new Date(s.arrivedAt).getTime()) : null,
+          ].filter(Boolean).join(' · ');
+          const geoLine = [
+            depGeo ? 'Berangkat: ' + (depGeo.area || depGeo.addr || '-') : null,
+            arrGeo ? 'Tiba: ' + (arrGeo.area || arrGeo.addr || '-') : null,
+          ].filter(Boolean).join(' • ');
+          const geoFull = [depGeo?.addr, arrGeo?.addr].filter(Boolean).join(' • ');
           return (
-            <tr key={s.id}><td className="font-bold">{fmtDate(s.date)}<br /><span className="text-sky-600">{s.time}</span> {!bookedIds.has(s.id) ? <span className="badge bg-slate-200 text-slate-700 ml-1">Tidak ada pemesan</span> : null} {mt ? <span className="badge bg-red-100 text-red-700 italic ml-1">{mt.legacy ? 'MAINTENANCE' : 'MAINTENANCE ' + maintenancePeriodLabel(mt)}</span> : null} {s.tripStatus !== 'scheduled' ? <BadgeStatus st={s.tripStatus} /> : null}{s.tripStatus === 'scheduled' && s.delayUntil && new Date(s.delayUntil).getTime() > Date.now() ? <span className="badge bg-amber-100 text-amber-700 ml-1" title={'Estimasi ' + s.delayUntil}>Delay {s.delayMinutes}m</span> : null}{s.delayReqStatus === 'menunggu' ? <span className="badge bg-amber-500 text-white ml-1" title={'Permintaan +' + s.delayReqMinutes + ' mnt oleh ' + (s.delayReqBy || 'pengemudi')}><Icon name="timer" className="w-3 h-3 inline pointer-events-none" /> Permintaan {s.delayReqMinutes}m</span> : null}</td>
-              <td className="font-semibold">{r?.from} → {r?.to}</td>
+            <tr key={s.id}><td className="font-bold">{fmtDate(s.date)}<br /><span className="text-sky-600">{s.time}</span> {!bookedIds.has(s.id) ? <span className="badge bg-slate-200 text-slate-700 ml-1">Tidak ada pemesan</span> : null} {mt ? <span className="badge bg-red-100 text-red-700 italic ml-1">{mt.legacy ? 'MAINTENANCE' : 'MAINTENANCE ' + maintenancePeriodLabel(mt)}</span> : null} {s.tripStatus !== 'scheduled' ? <BadgeStatus st={s.tripStatus} /> : null}{s.tripStatus === 'scheduled' && s.delayUntil && new Date(s.delayUntil).getTime() > Date.now() ? <span className="badge bg-amber-100 text-amber-700 ml-1" title={'Estimasi ' + s.delayUntil}>Delay {s.delayMinutes}m</span> : null}{s.delayReqStatus === 'menunggu' ? <span className="badge bg-amber-500 text-white ml-1" title={'Permintaan +' + s.delayReqMinutes + ' mnt oleh ' + (s.delayReqBy || 'pengemudi')}><Icon name="timer" className="w-3 h-3 inline pointer-events-none" /> Permintaan {s.delayReqMinutes}m</span> : null}{arrAlarm ? <span className="badge bg-red-100 text-red-700 animate-pulse ml-1" title="Estimasi tiba sudah lewat 10 menit — pengemudi belum konfirmasi Tiba"><Icon name="timer" className="w-3 h-3 inline pointer-events-none" /> Belum konfirmasi tiba</span> : null}{s.lateCompletion ? <button onClick={() => openModal(<LateArriveModal sid={s.id} />)} className="badge bg-violet-100 text-violet-700 ml-1 cursor-pointer" title="Tiba ditandai tanpa catatan berangkat — klik untuk alasan pengakuan">Tiba tanpa berangkat</button> : null}</td>
+              <td className="font-semibold">{r?.from} → {r?.to}{tripLine ? <span className="block text-[11px] text-slate-400 font-semibold">{tripLine}</span> : null}{geoLine ? <span className="block text-[11px] text-slate-400 font-medium" title={geoFull}><Icon name="map-pin" className="w-3 h-3 inline pointer-events-none" /> {geoLine}</span> : null}</td>
               <td className="text-[12.5px] font-medium">{vehName(v)}{v?.plate ? <span className="text-slate-400"> • {v.plate}</span> : null}<br /><span className="text-slate-500">{drvNama}</span><br /><span className="text-[11.5px] text-slate-400">Pengganti: {back || '—'}</span></td>
               <td className="font-extrabold">{fmtRp(s.price)}</td>
               <td><div className="flex items-center gap-1.5"><div className="w-16 h-2 bg-slate-100 rounded-full"><div className="h-full bg-sky-500 rounded-full" style={{ width: (tk.booked.length / capN) * 100 + '%' }}></div></div><b className="text-[12px]">{tk.booked.length}/{capN}</b>{tk.blocked.length ? <span className="badge bg-amber-100 text-amber-700" title="Kursi ditutup">{tk.blocked.length} tutup</span> : null}</div></td>
@@ -106,6 +130,33 @@ export default function Schedules({ ag }) {
         })}
       </tbody></table></div>
       {list.length === 0 ? <div className="text-center text-[13px] font-semibold text-slate-400 py-7">{tab === 'upcoming' ? 'Belum ada jadwal mendatang.' : 'Belum ada riwayat jadwal.'}</div> : null}
+    </div>
+  );
+}
+
+/* Detail pengakuan "Tiba tanpa catatan berangkat" — modal dari badge di
+   baris jadwal. Menampilkan alasan wajib pengemudi (arriveAckReason),
+   waktu tiba, dan tag lokasi tiba bila ada. */
+function LateArriveModal({ sid }) {
+  const { closeModal } = useApp();
+  const s = schedById(sid);
+  if (!s) return <div className="p-6 font-bold text-slate-500">Jadwal tidak ditemukan</div>;
+  const r = routeById(s.routeId);
+  let geo = null;
+  try { geo = JSON.parse(s.arriveGeo || 'null'); } catch { /* tanpa tag lokasi */ }
+  return (
+    <div className="p-6">
+      <div className="flex items-center justify-between">
+        <h3 className="font-extrabold text-[16px] flex items-center gap-2"><Icon name="triangle-alert" className="w-5 h-5 text-violet-600" />Tiba tanpa Catatan Berangkat</h3>
+        <button onClick={closeModal} className="text-slate-400"><Icon name="x" className="w-5 h-5" /></button>
+      </div>
+      <div className="mt-3 bg-violet-50 border-2 border-violet-200 rounded-2xl p-3.5 text-[12.5px] font-semibold space-y-1">
+        <div><span className="text-slate-400">Rute</span><br /><b>{r ? r.from + ' → ' + r.to : '-'}</b> • {fmtDate(s.date)} {s.time}</div>
+        <div><span className="text-slate-400">Ditandai tiba</span> <b>{s.arrivedAt ? fmtClock(new Date(s.arrivedAt).getTime()) : '-'}</b></div>
+        <div><span className="text-slate-400">Alasan pengakuan pengemudi</span><br /><b>{s.arriveAckReason || '—'}</b></div>
+        {geo && geo.ok ? <div><span className="text-slate-400">Tag lokasi tiba</span> <b>{geo.area || '-'}{geo.addr ? ' • ' + geo.addr : ''}</b></div> : null}
+      </div>
+      <button onClick={closeModal} className="w-full mt-4 bg-slate-100 font-extrabold text-[13px] py-2.5 rounded-xl">Tutup</button>
     </div>
   );
 }

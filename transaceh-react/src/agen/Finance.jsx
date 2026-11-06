@@ -4,6 +4,49 @@ import { agencyOf, routeById, schedById, viaSopirOf } from '@/lib/domain.js';
 import { fmtRp } from '@/lib/utils.js';
 import { StatCard, Icon } from '@/components/ui.jsx';
 import { ManifestModal } from './Bookings.jsx';
+import { TicketView } from '@/components/TicketView.jsx';
+
+/* Rincian tiket jualan langsung pengemudi untuk satu keberangkatan —
+   sumber angka "Komisi Sopir" di tabel Riwayat Jasa (baris lama tanpa
+   field viaSopir dihitung ulang dari bookingnya, helper domain). */
+function ViaSopirModal({ sid }) {
+  const { closeModal, openModal } = useApp();
+  const s = schedById(sid);
+  const r = s ? routeById(s.routeId) : null;
+  const bookings = DB.load('bookings', []);
+  const items = DB.load('ledger', []).filter((e) => e.scheduleId === sid && e.status !== 'void' && viaSopirOf(e, bookings) > 0);
+  const total = items.reduce((a, e) => a + viaSopirOf(e, bookings), 0);
+  const codeOf = (e) => bookings.find((b) => b.id === e.bookingId);
+  return (
+    <div className="p-6">
+      <div className="flex items-center justify-between">
+        <h3 className="font-extrabold text-[16px] flex items-center gap-2"><Icon name="car-front" className="w-5 h-5 text-red-500" />Rincian Tiket Via Pengemudi</h3>
+        <button onClick={closeModal} className="text-slate-400"><Icon name="x" className="w-5 h-5" /></button>
+      </div>
+      <div className="text-[13px] font-bold mt-2">{r ? `${r.from} → ${r.to}` : '-'}{s ? <> • {s.date} {s.time}</> : null}</div>
+      <table className="data w-full mt-3"><thead><tr><th>&nbsp;</th><th>Kode</th><th>Kursi</th><th>Nominal Tiket</th><th>Komisi Via Sopir</th></tr></thead><tbody>
+        {items.map((e) => {
+          const b = codeOf(e);
+          return (
+            <tr key={e.id}>
+              <td>{b && ['paid', 'done'].includes(b.status) ? <button onClick={() => openModal(<TicketView bid={b.id} />)} title="Lihat Tiket" className="text-sky-600 hover:bg-sky-50 rounded-lg p-1 -ml-1"><Icon name="eye" className="w-4 h-4" /></button> : <span className="text-slate-200">-</span>}</td>
+              <td className="font-mono font-extrabold">{b?.code || '-'}</td>
+              <td className="text-[12.5px] font-semibold">{(e.seats || []).join(', ') || '-'}</td>
+              <td className="font-extrabold text-green-700">+{fmtRp(e.ticket)}</td>
+              <td className="font-extrabold text-red-600">-{fmtRp(viaSopirOf(e, bookings))}</td>
+            </tr>
+          );
+        })}
+        {items.length === 0 ? <tr><td colSpan={5} className="text-center text-slate-400 font-semibold py-4">Tidak ada tiket via pengemudi pada keberangkatan ini.</td></tr> : null}
+      </tbody></table>
+      <div className="flex justify-between items-center mt-3 bg-red-50 border-2 border-red-100 rounded-2xl px-3.5 py-2.5">
+        <span className="font-extrabold text-[13px] text-red-800">Total Komisi Via Sopir</span>
+        <span className="font-extrabold text-[14px] text-red-700">-{fmtRp(total)}</span>
+      </div>
+      <button onClick={closeModal} className="w-full mt-4 bg-slate-100 font-extrabold text-[13px] py-2.5 rounded-xl">Tutup</button>
+    </div>
+  );
+}
 
 export default function Finance({ ag, st }) {
   const { user, toast, tick, openModal } = useApp();
@@ -102,7 +145,7 @@ export default function Finance({ ag, st }) {
                 <td><button onClick={() => openModal(<ManifestModal sid={g.sid} />)} title="Manifest" className="bg-sky-100 text-sky-700 p-2 rounded-lg"><Icon name="users" className="w-4 h-4" /></button></td>
                 <td className="text-[12.5px] font-semibold">{r ? `${r.from} → ${r.to}` : '-'}{berangkat ? <span className="block text-[11px] text-slate-400 font-semibold">Berangkat {berangkat}</span> : null}{tiba ? <span className="block text-[11px] text-slate-400 font-semibold">Tiba {tiba}</span> : null}</td>
                 <td className="font-extrabold text-green-700">+{fmtRp(jasa)}</td>
-                <td className="font-extrabold text-red-600">{vs > 0 ? `-${fmtRp(vs)}` : <span className="text-slate-300">–</span>}</td>
+                <td className="font-extrabold text-red-600">{vs > 0 ? <button onClick={() => openModal(<ViaSopirModal sid={g.sid} />)} title="Lihat rincian tiket via pengemudi" className="underline decoration-dotted underline-offset-2 rounded px-1 hover:bg-red-50 transition">-{fmtRp(vs)}</button> : <span className="text-slate-300">–</span>}</td>
                 <td className="font-extrabold">{fmtRp(bersih)}</td>
                 <td><span className={`badge ${badge[0]}`}>{badge[1]}</span>{cairAt ? <span className="block text-[11px] font-bold text-slate-600 mt-0.5">{cairAt}</span> : null}{!allCair && !anyTahan ? <span className="block text-[10px] font-semibold text-sky-600 mt-0.5">Otomatis</span> : null}</td>
               </tr>

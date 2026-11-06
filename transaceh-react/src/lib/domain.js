@@ -2890,6 +2890,19 @@ export function setScheduleTripStatus(sid, st, { reason = '', by = '', geo = nul
   DB.save('schedules', arr);
   if (st === 'arrived') releaseLedger(sid);
 
+  /* Agen & superadmin ikut dikabiri perjalanan pengemudi — termasuk
+     pengakuan tiba tanpa catatan berangkat beserta alasannya.
+     (Mode Sheets: klien hanya boleh membuat notifikasi untuk diri sendiri,
+     jadi di sana info mengalir lewat badge jadwal agen.) */
+  const rtTrip = routeById(s.routeId);
+  notifyScheduleStakeholders(
+    s,
+    (st === 'ontrip' ? 'Perjalanan dimulai — ' : 'Perjalanan tiba — ') + (rtTrip ? rtTrip.from + ' → ' + rtTrip.to : (s.time || '')),
+    'Jadwal ' + (s.date || '') + ' ' + (s.time || '') + (st === 'ontrip'
+      ? ' ditandai BERANGKAT' + (by ? ' oleh ' + by : '') + '.'
+      : ' ditandai TIBA' + (by ? ' oleh ' + by : '') + '.' + (s.lateCompletion ? ' TANPA catatan berangkat — alasan pengakuan: ' + (s.arriveAckReason || '-') : ''))
+  );
+
   const bk = DB.load('bookings', []);
   const cancelledPending = [];
   bk.forEach((b) => {
