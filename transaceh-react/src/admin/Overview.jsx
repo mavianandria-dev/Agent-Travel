@@ -1,7 +1,10 @@
+import { useEffect, useState } from 'react';
 import { DB } from '@/lib/db.js';
-import { schedById, routeById, splitFare, fareModelOf } from '@/lib/domain.js';
+import { schedById, routeById, splitFare, fareModelOf, vehicleById, driverById, vehName, takenSeats, schedSeatCap, scheduleInHistory, tripProgress } from '@/lib/domain.js';
 import { fmtRp, todayStr } from '@/lib/utils.js';
-import { StatCard, useChart } from '@/components/ui.jsx';
+import { StatCard, useChart, BadgeStatus, fmtDate, EtaBar } from '@/components/ui.jsx';
+import { IS_SHEETS } from '@/lib/runtime.js';
+import { pullSnapshotSoft } from '@/lib/remote.js';
 
 export function Overview() {
   const bookings = DB.load('bookings', []);
@@ -40,6 +43,53 @@ export function Overview() {
           ))}
         </div>
       </div>
+      <UpcomingDepartures />
     </>
+  );
+}
+
+/* Keberangkatan akan datang lintas agen untuk admin — kolom Rute memakai
+   bar progres ETA (EtaBar). Jam lokal 30 detik hidup di komponen ini saja
+   supaya chart pada Overview tidak ikut dibuat ulang tiap tick. */
+function UpcomingDepartures() {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const iv = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(iv);
+  }, []);
+  /* Snapshot segar saat dibuka/focus — pola sama dengan halaman agen. */
+  useEffect(() => {
+    if (!IS_SHEETS) return undefined;
+    const pull = () => pullSnapshotSoft().then((pulled) => { if (pulled) setNow(Date.now()); });
+    pull();
+    window.addEventListener('focus', pull);
+    return () => window.removeEventListener('focus', pull);
+  }, []);
+  const SHOWN = 15;
+  const upcoming = DB.load('schedules', []).filter((s) => !scheduleInHistory(s)).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  const ags = DB.load('agencies', []);
+  return (
+    <div className="bg-white rounded-3xl shadow-card p-4 sm:p-5 mt-4">
+      <h3 className="font-extrabold text-[15px]">Keberangkatan Akan Datang <span className="text-slate-400 font-bold text-[12px]">({upcoming.length} jadwal{upcoming.length > SHOWN ? ' • ' + SHOWN + ' terdekat' : ''})</span></h3>
+      <div className="table-wrap mt-3"><table className="data w-full min-w-[720px]"><thead><tr><th>Tanggal / Jam</th><th>Rute</th><th>Agen</th><th>Armada / Pengemudi</th><th>Terisi</th></tr></thead><tbody>
+        {upcoming.slice(0, SHOWN).map((s) => {
+          const r = routeById(s.routeId);
+          const v = vehicleById(s.vehicleId);
+          const dr = driverById(s.driverId);
+          const ag = ags.find((a) => a.id === s.agencyId);
+          const prog = s.tripStatus === 'ontrip' ? tripProgress(s, r, now) : null;
+          return (
+            <tr key={s.id}>
+              <td className="font-bold">{fmtDate(s.date)}<br /><span className="text-sky-600">{s.time}</span> {s.tripStatus && s.tripStatus !== 'scheduled' ? <BadgeStatus st={s.tripStatus} /> : null}</td>
+              <td className="font-semibold">{r ? r.from + ' → ' + r.to : '-'}<EtaBar prog={prog} now={now} /></td>
+              <td className="text-[12.5px] font-semibold">{ag?.name || '-'}</td>
+              <td className="text-[12.5px] font-medium">{vehName(v)}{v?.plate ? <span className="text-slate-400"> • {v.plate}</span> : null}<br /><span className="text-slate-500">{s.driverName || dr?.name || v?.drvName || '—'}</span></td>
+              <td className="font-extrabold">{takenSeats(s.id).booked.length}/{schedSeatCap(s.id)}</td>
+            </tr>
+          );
+        })}
+        {upcoming.length === 0 ? <tr><td colSpan={5} className="text-center text-slate-400 font-semibold py-4">Tidak ada jadwal akan datang.</td></tr> : null}
+      </tbody></table></div>
+    </div>
   );
 }

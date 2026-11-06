@@ -86,6 +86,26 @@ export function BadgeStatus({ st }) {
   return <span className={`badge ${x[0]}`}>{x[1]}</span>;
 }
 
+/* Bar progres ETA perjalanan — kolom Rute jadwal agen & tabel admin.
+   `prog` dari tripProgress(), `now` dari jam ticker pemanggil — dikirim
+   sebagai prop agar tidak ada Date.now() saat render (purity). Isi biru
+   selama ETA belum lewat, merah begitu estimasi terlewat. */
+export function EtaBar({ prog, now }) {
+  if (!prog || !prog.totalMin || prog.arrived) return null;
+  const over = Math.max(0, Math.round((now - prog.end) / 60000));
+  const late = over > 0;
+  return (
+    <div className="mt-1.5 max-w-[240px]">
+      <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+        <div className={`h-full rounded-full transition-all duration-500 ${late ? 'bg-red-500' : 'bg-gradient-to-r from-sky-500 to-blue-600'}`} style={{ width: prog.pct + '%' }}></div>
+      </div>
+      <div className={`text-[10.5px] font-bold mt-0.5 ${late ? 'text-red-600' : 'text-slate-400'}`}>
+        {late ? 'Estimasi tiba terlewat ' + over + ' mnt' : 'Progres perjalanan ' + prog.pct + '% • sisa ' + prog.remainMin + ' mnt'}
+      </div>
+    </div>
+  );
+}
+
 export function PillRadios({ options, value, onChange }) {
   return (
     <div className="flex flex-wrap gap-1.5 mt-1">
