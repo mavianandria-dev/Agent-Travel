@@ -120,7 +120,16 @@ export default function Finance({ ag, st }) {
         <StatCard icon="hand-coins" label="Layak Cair" val={fmtRp(layak)} sub="layak" color="bg-gradient-to-br from-green-400 to-emerald-600" />
         <StatCard icon="banknote" label="Sudah Dicairkan" val={fmtRp(done)} sub="dicairkan" color="bg-gradient-to-br from-sky-400 to-blue-600" />
       </div>
-      <div className="bg-white rounded-3xl shadow-card p-5 mt-4"><div className="flex items-center gap-2"><h3 className="font-extrabold text-[15px]">Riwayat Jasa</h3><div className="flex-1"></div>
+      <div className="bg-white rounded-3xl shadow-card p-5 mt-4"><div className="flex items-center gap-2"><h3 className="font-extrabold text-[15px]">Riwayat Jasa</h3>
+        {/* Info rekening agen (dari KYC, format "BANK NoRek a.n. Nama") —
+            sumber sama dengan tabel Settlement admin; kosong = badge peringatan.
+            Teks panjang dipotong rapi agar tombol Export tak terdorong. */}
+        {(agency.bank || '').trim() ? (
+          <span title={agency.bank} className="flex items-center gap-1.5 min-w-0 text-[11.5px] font-bold text-slate-500 bg-slate-50 rounded-xl px-2.5 py-1.5"><Icon name="landmark" className="w-3.5 h-3.5 text-sky-600 shrink-0" /><span className="truncate">{agency.bank}</span></span>
+        ) : (
+          <span className="badge bg-red-100 text-red-600 shrink-0">Rekening kosong</span>
+        )}
+        <div className="flex-1"></div>
         <button onClick={exportCSV} className="bg-green-500 text-white text-[12px] font-extrabold px-4 py-2 rounded-xl">Export Excel</button>
         <button onClick={() => window.print()} className="bg-slate-100 text-[12px] font-extrabold px-4 py-2 rounded-xl">Export PDF</button></div>
         <div className="overflow-x-auto mt-2"><table className="data w-full min-w-[780px]"><thead><tr><th>Manifest</th><th>Rute</th><th>Nominal Jasa</th><th>Komisi Sopir</th><th>Jasa Bersih</th><th>Tgl Cair / Status</th></tr></thead><tbody>
