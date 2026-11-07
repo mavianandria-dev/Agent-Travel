@@ -384,7 +384,9 @@ function DriverBookingModal({ sid }) {
   );
   const [seats, setSeats] = useState([]);
   const [pax, setPax] = useState([]);
-  const [pickup, setPickup] = useState(pickupOptions(r)[0] || '-');
+  /* Titik jemput default KOSONG — pengemudi memilih sadar dari daftar rute;
+     submit diblok sampai dipilih (rute tanpa daftar titik dikecualikan). */
+  const [pickup, setPickup] = useState('');
   const [payMethod, setPayMethod] = useState('QRIS');
   const [step, setStep] = useState(1);
   const [made, setMade] = useState(null);
@@ -547,6 +549,20 @@ function DriverBookingModal({ sid }) {
     }, 1000);
     return () => clearInterval(iv);
   }, [step, made?.id]);
+  /* Gulir otomatis ke form Data Penumpang saat kursi PERTAMA dipilih
+     (transisi 0 → 1 kursi): form barunya muncul di bawah denah dan di layar
+     sempit tak terlihat. Efek hanya memanggil scrollIntoView — tanpa
+     setState — aman dari aturan set-state-in-effect; penanda ref mencegah
+     gulir ulang untuk kursi kedua dan seterusnya, lalu mengizinkan lagi
+     bila pilihan kosong dan kursi pertama dipilih ulang. */
+  const paxRef = useRef(null);
+  const hadSeatsRef = useRef(false);
+  useEffect(() => {
+    if (seats.length > 0 && !hadSeatsRef.current && paxRef.current) {
+      paxRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    hadSeatsRef.current = seats.length > 0;
+  }, [seats.length]);
   const rows = [...pax].sort((a, b) => seatOrder.indexOf(a.seat) - seatOrder.indexOf(b.seat));
   if (!s) return <div className="p-6 font-bold text-slate-500">Jadwal tidak ditemukan</div>;
 
@@ -557,7 +573,10 @@ function DriverBookingModal({ sid }) {
      muncul, tanpa teks pengganti. Rincian ikut tertahan karena FareChain
      memaksa jumlah kursi minimal 1: tabel "x1 / Rp …" tampil duluan tanpa
      kursi nyata cuma membingungkan. */
-  const paidReady = seats.length > 0 && !checkBusy;
+  /* Blok pembayaran + rincian harga muncul saat: kursi terpilih & lulus cek
+     server DAN titik jemput dipilih (rute tanpa daftar titik dianggap lepas —
+     tak ada pilihan yang bisa dibuat, jika tidak modal jadi buntu). */
+  const paidReady = seats.length > 0 && !checkBusy && (pickupOptions(r).length ? !!pickup : true);
 
   const fare = splitFare(s, seats.length, 0, 'driver');
   /* Modal-Pengemudi Model B: Tiket = harga rute PENUH dengan jasa agen utuh
@@ -597,6 +616,10 @@ function DriverBookingModal({ sid }) {
       toast('Nama dan HP wajib diisi untuk semua penumpang', 'err');
       return;
     }
+    /* Titik jemput wajib dipilih — tanpa ini fallback domain akan diam-diam
+       memakai titik pertama rute padahal form tampil kosong. Rute yang belum
+       punya daftar titik jemput dikecualikan (disimpan '-' seperti semula). */
+    if (pickupOptions(r).length && !pickup) { toast('Pilih titik jemput dulu', 'err'); return; }
     /* Cek server TIDAK diulang di sini — sudah berlaku tiap klik kursi di
        denah; hakim final tetap validasi server saat pembayaran. */
     if (IS_SHEETS) {
@@ -735,14 +758,7 @@ function DriverBookingModal({ sid }) {
           </div>
         </div>
 
-        <div>
-          <label className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wide">Titik Jemput</label>
-          <select value={pickup} onChange={(e) => setPickup(e.target.value)} className="mt-1 w-full text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">
-            {pickupOptions(r).map((p) => (<option key={p} value={p}>{p}</option>))}
-          </select>
-        </div>
-
-        <div>
+        <div ref={paxRef}>
           <label className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wide">Data Penumpang</label>
           {!rows.length ? (
             <div className="mt-1 bg-amber-50 border border-amber-200 rounded-2xl p-3 text-[12.5px] font-semibold text-amber-800 flex gap-2"><Icon name="mouse-pointer-click" className="w-5 h-5 shrink-0" />Klik kursi pada denah armada. 1 kursi untuk 1 penumpang.</div>
@@ -784,10 +800,23 @@ function DriverBookingModal({ sid }) {
           )}
         </div>
 
+        <div>
+          <label className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wide">Titik Jemput</label>
+          {pickupOptions(r).length ? (
+            <select value={pickup} onChange={(e) => setPickup(e.target.value)} className="mt-1 w-full text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">
+              <option value="">— Pilih titik jemput —</option>
+              {pickupOptions(r).map((p) => (<option key={p} value={p}>{p}</option>))}
+            </select>
+          ) : (
+            <div className="mt-1 text-[12px] font-semibold text-slate-500 bg-slate-50 rounded-xl px-3 py-2.5">Rute ini belum punya daftar titik jemput.</div>
+          )}
+        </div>
+
         {paidReady ? (
           /* Metode pembayaran + rincian harga hadir SETELAH kursi dipilih DAN
-             cek server atas semua kursi terpilih lulus; sebelum itu tak ada
-             blok pembayaran (tanpa teks pengganti). */
+             cek server atas semua kursi terpilih lulus DAN titik jemput
+             dipilih; sebelum itu tak ada blok pembayaran (tanpa teks
+             pengganti). */
           <div>
             <label className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wide">Metode Pembayaran</label>
             <div className="grid grid-cols-3 gap-2 mt-1">
