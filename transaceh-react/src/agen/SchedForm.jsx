@@ -15,6 +15,11 @@ const dstr = (y, m, d) => y + '-' + pad2(m + 1) + '-' + pad2(d);
 const fmtShort = (k) => { const [, m, d] = k.split('-'); return Number(d) + ' ' + MONTHS[Number(m) - 1].slice(0, 3); };
 const shiftMonth = (c, d) => { const t = new Date(c.y, c.m + d, 1); return { y: t.getFullYear(), m: t.getMonth() }; };
 
+/* Jam & menit "terkini + 2 menit" untuk default JAM KEBERANGKATAN (mode tambah
+   jadwal). Dipanggil sekali lewat lazy initializer useState — bukan di badan
+   render — supaya aman dari aturan purity oxlint. */
+const nowHM = () => { const d = new Date(); d.setMinutes(d.getMinutes() + 2); return [pad2(d.getHours()), pad2(d.getMinutes())]; };
+
 /* Wheel angka: geser naik/turun (drag/touch/scroll), snap, ketuk untuk lompat. */
 function Wheel({ items, value, onChange }) {
   const ref = useRef(null);
@@ -140,8 +145,13 @@ export function SchedFormModal({ agId, onDone, sched }) {
 
   const [vehicleId, setVehicleId] = useState(editing ? sched.vehicleId : '');
   const [routeId, setRouteId] = useState(editing ? sched.routeId : '');
-  const [hh, setHh] = useState(editing ? String(sched.time || '07:00').slice(0, 2) : '07');
-  const [mm, setMm] = useState(editing ? String(sched.time || '07:00').slice(3, 5) : '00');
+  /* Default jam keberangkatan = waktu terkini + 2 menit saat modal dibuka
+     (mode tambah); mode edit tetap memakai jam jadwal yang sudah ada. Satu
+     acuan waktu dihitung sekali supaya jam & menit tidak terpotong pergantian
+     menit. */
+  const [initHM] = useState(() => nowHM());
+  const [hh, setHh] = useState(editing ? String(sched.time || '07:00').slice(0, 2) : initHM[0]);
+  const [mm, setMm] = useState(editing ? String(sched.time || '07:00').slice(3, 5) : initHM[1]);
   const [dates, setDates] = useState(() => new Set(editing && sched.date ? [sched.date] : []));
   /* Mode edit membuka kalender pada bulan jadwal, bukan bulan berjalan. */
   const [cal, setCal] = useState(() => {
@@ -198,9 +208,10 @@ export function SchedFormModal({ agId, onDone, sched }) {
      terpilih — umumnya yang berubah hanya armada/rutenya. */
   const resetDates = () => setDates(new Set(editing && sched.date ? [sched.date] : []));
   const changeVehicle = (id) => {
-    const first = routesForVehicle(id)[0];
+    /* Rute tidak dipilih otomatis — agen memilih rute secara sadar
+       (default kosong: "— Pilih rute —"). */
     setVehicleId(id);
-    setRouteId(first?.id || '');
+    setRouteId('');
     resetDates();
   };
   const changeRoute = (id) => {
@@ -347,12 +358,17 @@ export function SchedFormModal({ agId, onDone, sched }) {
           {routeOptions.length ? (
             <>
               <select value={routeId} onChange={(e) => changeRoute(e.target.value)} className="w-full mt-1 text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">
+                <option value="">— Pilih rute —</option>
                 {routeOptions.map((r) => <option key={r.id} value={r.id}>{r.from} → {r.to} • {fmtRp(priceForAgency(r, agId))}</option>)}
               </select>
-              <div className="mt-2 bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2.5">
-                <div className="text-[15px] font-extrabold">{finalPrice > 0 ? fmtRp(finalPrice) : '— belum ada harga —'}</div>
-                <div className="text-[11.5px] text-slate-500 font-medium mt-0.5">Harga otomatis dari rute • jasa agen {fmtRp(agencyById(agId)?.serviceFee ?? DEFAULT_SERVICE)}/kursi (ditentukan admin per agen).</div>
-              </div>
+              {route ? (
+                <div className="mt-2 bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2.5">
+                  <div className="text-[15px] font-extrabold">{finalPrice > 0 ? fmtRp(finalPrice) : '— belum ada harga —'}</div>
+                  <div className="text-[11.5px] text-slate-500 font-medium mt-0.5">Harga otomatis dari rute • jasa agen {fmtRp(agencyById(agId)?.serviceFee ?? DEFAULT_SERVICE)}/kursi (ditentukan admin per agen).</div>
+                </div>
+              ) : (
+                <div className="mt-2 text-[11.5px] text-slate-500 font-medium bg-slate-50 rounded-xl px-3 py-2">Pilih rute — harga otomatis muncul di sini.</div>
+              )}
               {unknownDuration ? (
                 <div className="mt-1.5 text-[11.5px] font-bold text-red-700 bg-red-50 border-2 border-red-200 rounded-xl px-3 py-2">Durasi rute belum diketahui — jadwal tidak bisa disimpan. Lengkapi durasi rute dulu.</div>
               ) : null}
