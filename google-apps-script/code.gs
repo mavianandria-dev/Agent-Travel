@@ -828,7 +828,7 @@ var API_MAIN_TABLES = {
     ],
     children: [
       { table: 'booking_passengers', path: 'passengers', kind: 'list', cols: [
-        'name', 'phone', 'seat', 'pickup', 'pickupCoords'
+        'name', 'phone', 'seat', 'pickup', 'pickupCoords', 'n:umur', 'gender'
       ] },
       { table: 'booking_seats', path: 'seats', kind: 'list', scalar: true,
         cols: ['val'] },

@@ -384,9 +384,6 @@ function DriverBookingModal({ sid }) {
   );
   const [seats, setSeats] = useState([]);
   const [pax, setPax] = useState([]);
-  /* Titik jemput default KOSONG — pengemudi memilih sadar dari daftar rute;
-     submit diblok sampai dipilih (rute tanpa daftar titik dikecualikan). */
-  const [pickup, setPickup] = useState('');
   const [payMethod, setPayMethod] = useState('QRIS');
   const [step, setStep] = useState(1);
   const [made, setMade] = useState(null);
@@ -564,6 +561,26 @@ function DriverBookingModal({ sid }) {
     hadSeatsRef.current = seats.length > 0;
   }, [seats.length]);
   const rows = [...pax].sort((a, b) => seatOrder.indexOf(a.seat) - seatOrder.indexOf(b.seat));
+  /* Baris final: HP & titik jemput baris tercentang "sama" diwarisi baris
+     PERTAMA (urut layout, tidak berantai — baris pertama selalu memakai
+     nilainya sendiri); penanda samePhone/samePickup dibuang — hanya
+     penolong form, tidak ikut tersimpan. */
+  const rRows = rows.map((p, i) => {
+    const { samePhone, samePickup, ...rest } = p;
+    const out = { ...rest, phone: i > 0 && samePhone ? String(rows[0]?.phone || '').trim() : String(p.phone || '').trim() };
+    if (i > 0 && samePickup) out.pickup = rows[0]?.pickup || '';
+    return out;
+  });
+  /* Status kelengkapan satu kursi — aturan sama dengan validasi Simpan
+     (nama, HP, umur 1–120, jenis kelamin, titik jemput bila rute punya
+     daftar). Dipakai badge kepala kartu: hijau "Lengkap" / kuning "Belum". */
+  const seatDone = (st) => {
+    const rp = rRows.find((x) => x.seat === st) || {};
+    return !!String(rp.name || '').trim() && !!String(rp.phone || '').trim()
+      && Number(rp.umur) >= 1 && Number(rp.umur) <= 120
+      && ['Laki-laki', 'Perempuan'].includes(rp.gender)
+      && (!pickupOptions(r).length || !!rp.pickup);
+  };
   if (!s) return <div className="p-6 font-bold text-slate-500">Jadwal tidak ditemukan</div>;
 
   const checkBusy = Object.keys(seatChecks).length > 0;
@@ -576,7 +593,7 @@ function DriverBookingModal({ sid }) {
   /* Blok pembayaran + rincian harga muncul saat: kursi terpilih & lulus cek
      server DAN titik jemput dipilih (rute tanpa daftar titik dianggap lepas —
      tak ada pilihan yang bisa dibuat, jika tidak modal jadi buntu). */
-  const paidReady = seats.length > 0 && !checkBusy && (pickupOptions(r).length ? !!pickup : true);
+  const paidReady = seats.length > 0 && !checkBusy && (pickupOptions(r).length ? rRows.every((p) => p.pickup) : true);
 
   const fare = splitFare(s, seats.length, 0, 'driver');
   /* Modal-Pengemudi Model B: Tiket = harga rute PENUH dengan jasa agen utuh
@@ -597,7 +614,10 @@ function DriverBookingModal({ sid }) {
     const maxS = schedSeatCap(s.id);
     if (seats.length >= maxS) { toast('Maksimal ' + maxS + ' kursi per booking', 'warn'); return; }
     setSeats([...seats, st]);
-    setPax([...pax, { seat: st, name: '', phone: '' }]);
+    /* Kursi kedua dst: default tercentang "Apakah No. HP sama?" dan
+       "Apakah titik jemput sama?" — keduanya mengikuti baris pertama (urut
+       layout) sampai centang dilepas. */
+    setPax([...pax, { seat: st, name: '', phone: '', pickup: '', ...(seats.length ? { samePhone: true, samePickup: true } : {}) }]);
     if (IS_SHEETS) {
       setSeatChecks((c) => ({ ...c, [st]: 'checking' }));
       runSeatCheck();
@@ -612,14 +632,17 @@ function DriverBookingModal({ sid }) {
     if (!driver) { toast('Data pengemudi tidak ditemukan', 'err'); return; }
     if (!seats.length) { toast('Pilih minimal satu kursi', 'err'); return; }
     if (rows.length !== seats.length) { toast('Data penumpang belum lengkap', 'err'); return; }
-    if (rows.some((p) => !String(p.name || '').trim() || !String(p.phone || '').trim())) {
-      toast('Nama dan HP wajib diisi untuk semua penumpang', 'err');
-      return;
-    }
-    /* Titik jemput wajib dipilih — tanpa ini fallback domain akan diam-diam
+    /* Baris final (rRows): HP & titik jemput tercentang "sama" sudah diwarisi
+       baris PERTAMA (urut layout) — validasi menyaring hasil akhir, bukan isi
+       mentah form. Umur 1–120 & jenis kelamin wajib. */
+    const badPax = rRows.some((p) => !String(p.name || '').trim() || !String(p.phone || '').trim()
+      || !(Number(p.umur) >= 1 && Number(p.umur) <= 120)
+      || !['Laki-laki', 'Perempuan'].includes(p.gender));
+    if (badPax) { toast('Nama, HP, umur & jenis kelamin wajib diisi untuk semua penumpang', 'err'); return; }
+    /* Titik jemput wajib per kursi — tanpa ini fallback domain akan diam-diam
        memakai titik pertama rute padahal form tampil kosong. Rute yang belum
        punya daftar titik jemput dikecualikan (disimpan '-' seperti semula). */
-    if (pickupOptions(r).length && !pickup) { toast('Pilih titik jemput dulu', 'err'); return; }
+    if (pickupOptions(r).length && rRows.some((p) => !p.pickup)) { toast('Pilih titik jemput semua penumpang', 'err'); return; }
     /* Cek server TIDAK diulang di sini — sudah berlaku tiap klik kursi di
        denah; hakim final tetap validasi server saat pembayaran. */
     if (IS_SHEETS) {
@@ -628,13 +651,17 @@ function DriverBookingModal({ sid }) {
       const failed = seats.filter((st) => seatChecks[st] === 'fail');
       if (failed.length) { toast('Kursi ' + failed.join(', ') + ' belum terkonfirmasi server — ketuk Cek Ulang.', 'err'); return; }
     }
+    /* Kirim penumpang & kursi dalam URUTAN SAMA (layout): createDriverBooking
+       menzip passengers[i]↔seats[i], padahal `rows` urut layout sedangkan
+       `seats` urut pilih — bila berbeda, nama bisa tertukar kursi di manifest.
+       rRows sudah nilai final (penanda form dibuang, warisan terisi). */
+    const sendRows = rRows;
     const res = createDriverBooking(sid, {
-      passengers: rows,
-      seats,
+      passengers: sendRows,
+      seats: sendRows.map((p) => p.seat),
       driverId: driver.id,
       payMethod,
       discount: 0,
-      pickup,
     });
     if (!res.ok) { toast(res.msg, 'err'); return; }
     setMade(res.booking);
@@ -764,16 +791,30 @@ function DriverBookingModal({ sid }) {
             <div className="mt-1 bg-amber-50 border border-amber-200 rounded-2xl p-3 text-[12.5px] font-semibold text-amber-800 flex gap-2"><Icon name="mouse-pointer-click" className="w-5 h-5 shrink-0" />Klik kursi pada denah armada. 1 kursi untuk 1 penumpang.</div>
           ) : (
             <div className="space-y-2 mt-1">
-              {rows.map((p) => (
-                <div key={p.seat} className="bg-slate-50 border-2 border-slate-200 rounded-2xl p-3">
-                  <div className="flex items-center justify-between">
-                    <span className="badge bg-sky-600 text-white">Kursi {p.seat}</span>
-                    <button onClick={() => toggleSeat(p.seat)} className="text-red-500 hover:bg-red-50 p-1 rounded-lg" title="Lepas kursi"><Icon name="x" className="w-4 h-4" /></button>
+              {rows.map((p, i) => {
+                /* i = urutan tampil (urut layout); 0 = baris pertama — acuan
+                   "No. HP sama?" untuk baris di bawahnya. */
+                return (
+                <div key={p.seat} className="bg-white border border-slate-200 rounded-2xl shadow-sm p-3">
+                  {/* Kepala kartu: avatar kursi + nomor urut penumpang + status
+                     kelengkapan (aturan sama dengan tombol Simpan) + lepaskan. */}
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-500 to-[#0b2447] text-white font-extrabold text-[13px] flex items-center justify-center shrink-0">{p.seat}</div>
+                    <div className="min-w-0 flex-1">
+                      <div className="font-extrabold text-[13.5px] leading-tight">Penumpang {i + 1}</div>
+                      <div className="text-[11px] font-semibold text-slate-400">Kursi {p.seat}</div>
+                    </div>
+                    {seatDone(p.seat) ? (
+                      <span className="badge bg-green-100 text-green-700 shrink-0"><Icon name="circle-check-big" className="w-3 h-3" />Lengkap</span>
+                    ) : (
+                      <span className="badge bg-amber-100 text-amber-700 shrink-0"><Icon name="circle-alert" className="w-3 h-3" />Belum lengkap</span>
+                    )}
+                    <button onClick={() => toggleSeat(p.seat)} className="text-red-500 hover:bg-red-50 p-1 rounded-lg shrink-0" title="Lepas kursi"><Icon name="x" className="w-4 h-4" /></button>
                   </div>
                   {seatChecks[p.seat] === 'checking' ? (
                     /* Cek server berjalan: field [Nama]/[No. HP] baru muncul
                        setelah cek lulus — tak ada ketikan yang bisa hilang. */
-                    <div className="flex items-center gap-2 mt-2 text-[12.5px] font-bold text-slate-500 bg-white border border-slate-200 rounded-xl px-3 py-2">
+                    <div className="flex items-center gap-2 mt-2 text-[12.5px] font-bold text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
                       <Icon name="timer" className="w-4 h-4 shrink-0 animate-spin" />Memeriksa kursi {p.seat} di server…
                     </div>
                   ) : seatChecks[p.seat] === 'fail' ? (
@@ -790,25 +831,82 @@ function DriverBookingModal({ sid }) {
                     </div>
                   ) : (
                     <div className="grid grid-cols-2 gap-2 mt-2">
-                      <input value={p.name || ''} onChange={(e) => setPaxField(p.seat, 'name', e.target.value)} placeholder="Nama penumpang" className="text-[13px] font-semibold bg-white border border-slate-200 rounded-xl px-3 py-2 focus-ring" />
-                      <input value={p.phone || ''} onChange={(e) => setPaxField(p.seat, 'phone', e.target.value)} placeholder="No. HP" className="text-[13px] font-semibold bg-white border border-slate-200 rounded-xl px-3 py-2 focus-ring" />
+                      <div className={(i === 0 ? '' : 'col-span-2 ') + 'relative'}>
+                        <Icon name="user-round" className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <input value={p.name || ''} onChange={(e) => setPaxField(p.seat, 'name', e.target.value)} placeholder="Nama penumpang" className="w-full text-[13px] font-semibold bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 focus-ring" />
+                      </div>
+                      {i === 0 ? (
+                        <div className="relative">
+                          <Icon name="phone" className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                          <input value={p.phone || ''} onChange={(e) => setPaxField(p.seat, 'phone', e.target.value)} placeholder="No. HP" className="w-full text-[13px] font-semibold bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 focus-ring" />
+                        </div>
+                      ) : (
+                        /* Satu field gabungan: pertanyaan + kotak centang.
+                           Kolom No. HP muncul DI DALAM field yang sama saat
+                           centang dilepas; tercentang = HP ikut baris pertama
+                           (kolom disembunyikan). */
+                        <div className="col-span-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+                          <label className="flex items-center gap-2 cursor-pointer select-none">
+                            <input type="checkbox" checked={!!p.samePhone} onChange={(e) => setPaxField(p.seat, 'samePhone', e.target.checked)} className="w-4 h-4 accent-sky-600 shrink-0" />
+                            <span className="text-[12.5px] font-semibold text-slate-600">Apakah No. HP sama?</span>
+                          </label>
+                          {!p.samePhone ? (
+                            <div className="relative mt-1.5">
+                              <Icon name="phone" className="w-4 h-4 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                              <input value={p.phone || ''} onChange={(e) => setPaxField(p.seat, 'phone', e.target.value)} placeholder="No. HP" className="w-full text-[13px] font-semibold bg-white border border-slate-200 rounded-lg pl-8 pr-2.5 py-1.5 focus-ring" />
+                            </div>
+                          ) : null}
+                        </div>
+                      )}
+                      <div>
+                        <div className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wide mb-1">Umur</div>
+                        <input placeholder="cth. 34" type="number" min="1" max="120" value={p.umur ?? ''} onChange={(e) => setPaxField(p.seat, 'umur', e.target.value)} className="w-full text-[13px] font-semibold bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 focus-ring" />
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wide mb-1">Jenis kelamin</div>
+                        <select value={p.gender || ''} onChange={(e) => setPaxField(p.seat, 'gender', e.target.value)} className="w-full text-[13px] font-semibold bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 focus-ring">
+                          <option value="">Pilih…</option>
+                          <option value="Laki-laki">Laki-laki</option>
+                          <option value="Perempuan">Perempuan</option>
+                        </select>
+                      </div>
+                      {!pickupOptions(r).length ? (
+                        <div className="col-span-2 text-[11.5px] font-semibold text-slate-500 bg-slate-100 rounded-xl px-3 py-2">Rute ini belum punya daftar titik jemput.</div>
+                      ) : i === 0 ? (
+                        <div className="col-span-2 relative">
+                          <Icon name="map-pin" className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                          <select value={p.pickup || ''} onChange={(e) => setPaxField(p.seat, 'pickup', e.target.value)} className="w-full text-[13px] font-semibold bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 focus-ring">
+                            <option value="">— Pilih titik jemput —</option>
+                            {pickupOptions(r).map((pt) => (<option key={pt} value={pt}>{pt}</option>))}
+                          </select>
+                        </div>
+                      ) : (
+                        /* Kursi ke-2 dst: satu kotak gabungan — centang
+                           "Apakah titik jemput sama?" (default tercentang =
+                           ikut baris pertama, dihitung rRows); dilepas →
+                           dropdown muncul DI DALAM kotak yang sama. */
+                        <div className="col-span-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+                          <label className="flex items-center gap-2 cursor-pointer select-none">
+                            <input type="checkbox" checked={!!p.samePickup} onChange={(e) => setPaxField(p.seat, 'samePickup', e.target.checked)} className="w-4 h-4 accent-sky-600 shrink-0" />
+                            <span className="text-[12.5px] font-semibold text-slate-600">Apakah titik jemput sama?</span>
+                          </label>
+                          {!p.samePickup ? (
+                            <div className="relative mt-1.5">
+                              <Icon name="map-pin" className="w-4 h-4 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                              <select value={p.pickup || ''} onChange={(e) => setPaxField(p.seat, 'pickup', e.target.value)} className="w-full text-[13px] font-semibold bg-white border border-slate-200 rounded-lg pl-8 pr-2.5 py-1.5 focus-ring">
+                                <option value="">— Pilih titik jemput —</option>
+                                {pickupOptions(r).map((pt) => (<option key={pt} value={pt}>{pt}</option>))}
+                              </select>
+                            </div>
+                          ) : null}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </div>
-          )}
-        </div>
-
-        <div>
-          <label className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wide">Titik Jemput</label>
-          {pickupOptions(r).length ? (
-            <select value={pickup} onChange={(e) => setPickup(e.target.value)} className="mt-1 w-full text-[13px] font-semibold border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">
-              <option value="">— Pilih titik jemput —</option>
-              {pickupOptions(r).map((p) => (<option key={p} value={p}>{p}</option>))}
-            </select>
-          ) : (
-            <div className="mt-1 text-[12px] font-semibold text-slate-500 bg-slate-50 rounded-xl px-3 py-2.5">Rute ini belum punya daftar titik jemput.</div>
           )}
         </div>
 

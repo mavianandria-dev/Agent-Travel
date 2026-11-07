@@ -57,6 +57,11 @@ export default function TicketDetail({ bid }) {
   const pax = bookedPassengers(b);
   const firstPax = pax[0] || null;
   const pickupText = (pickupOf(firstPax, b) || '-') + ((firstPax?.pickupCoords || b.pickupCoords) ? ' • ' + (firstPax?.pickupCoords || b.pickupCoords) : '');
+  /* Titik jemput kini per penumpang: bila label kursi berbeda (mis. satu
+     dijemput di rumah, lainnya di titik), baris "Jemput" dan pengingat
+     standby membuka daftar per kursi. Booking lama selalu kasus satu
+     titik — tampilannya tak berubah. */
+  const pickupUniq = [...new Set(pax.map((p) => pickupOf(p, b) || '-'))];
   const tripStatus = s.tripStatus && s.tripStatus !== 'scheduled' ? s.tripStatus : (b.tripStatus || 'scheduled');
   const delayActive = s.tripStatus === 'scheduled' && s.delayUntil && new Date(s.delayUntil).getTime() > Date.now();
   const tripDelayInfo = s.tripStatus === 'ontrip' && Array.isArray(s.tripDelayInfo) ? s.tripDelayInfo[0] : null;
@@ -156,7 +161,18 @@ export default function TicketDetail({ bid }) {
           <div className="mt-4 bg-slate-50 rounded-2xl p-3.5 text-[13px] font-semibold space-y-1">
             <div className="font-extrabold text-[12px] text-slate-400 tracking-wider">PENUMPANG</div>
             {pax.length ? pax.map((p) => (<div key={p.seat} className="flex justify-between border-t border-slate-200 pt-1.5"><span>{p.name} <span className="text-slate-400">({p.phone})</span></span><span className="badge bg-sky-600 text-white">{p.seat}</span></div>)) : <div className="border-t border-slate-200 pt-1.5 text-slate-400">Data penumpang tidak tersedia</div>}
-            <div className="flex justify-between border-t pt-1.5"><span>Jemput</span><b>{pickupText}</b></div>
+            {pickupUniq.length > 1 ? (
+              /* Beragam: daftar jemput per kursi — koordinat disembunyikan
+                 agar rapi (label rumah sudah memuat alamatnya). */
+              <div className="border-t pt-1.5">
+                <div>Jemput</div>
+                <div className="mt-1 space-y-0.5 pl-3">
+                  {pax.map((p) => (<div key={p.seat} className="text-[12.5px]"><b>Kursi {p.seat}</b><span className="text-slate-400"> — </span>{pickupOf(p, b) || '-'}</div>))}
+                </div>
+              </div>
+            ) : (
+              <div className="flex justify-between border-t pt-1.5"><span>Jemput</span><b>{pickupText}</b></div>
+            )}
             <div className="flex justify-between"><span>Travel</span><b>{ag.name} • {ag.phone}</b></div>
             {isB ? (
               /* Model B: rantai satu-sejalan dengan checkout & layar bayar —
@@ -247,7 +263,19 @@ export default function TicketDetail({ bid }) {
           {tripStatus === 'missed' ? <div className="mt-3 bg-amber-50 border border-amber-200 rounded-2xl p-3 text-[12.5px] font-semibold text-amber-900">Jadwal ini terlewat. Admin akan menindaklanjuti refund sesuai kebijakan travel.</div> : null}
           {tripStatus === 'cancelled' ? <div className="mt-3 bg-red-50 border border-red-200 rounded-2xl p-3 text-[12.5px] font-semibold text-red-800">Perjalanan dibatalkan. Refund, bila ada, diproses sesuai kebijakan travel.</div> : null}
           {b.status === 'cancelled' && Number(b.refundAmount) > 0 ? <div className="mt-3 bg-green-50 border border-green-200 rounded-2xl p-3 text-[12.5px] font-semibold text-green-900">Refund {fmtRp(b.refundAmount)} • {b.refundStatus === 'done' ? 'Selesai' : b.refundStatus === 'diproses' ? 'Sedang diproses' : 'Menunggu diproses'}</div> : null}
-          <div className="mt-3 bg-sky-50 rounded-2xl p-3 text-[12.5px] font-semibold text-sky-900">Titik jemput: <b>{pickupText}</b> — harap standby 15 menit sebelum berangkat.</div>
+          <div className="mt-3 bg-sky-50 rounded-2xl p-3 text-[12.5px] font-semibold text-sky-900">
+            {pickupUniq.length > 1 ? (
+              /* Beragam: pengingat standby per titik masing-masing kursi. */
+              <>
+                <div>Titik jemput per kursi — harap standby 15 menit sebelum berangkat di titik masing-masing:</div>
+                <div className="mt-1 space-y-0.5">
+                  {pax.map((p) => (<div key={p.seat}><b>Kursi {p.seat}</b><span className="opacity-70"> — </span>{pickupOf(p, b) || '-'}</div>))}
+                </div>
+              </>
+            ) : (
+              <div>Titik jemput: <b>{pickupText}</b> — harap standby 15 menit sebelum berangkat.</div>
+            )}
+          </div>
         </div>
         {b.status === 'done' && !b.rating ? (
           <div className="bg-white rounded-3xl shadow-card p-5">

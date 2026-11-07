@@ -33,6 +33,65 @@ const validCoords = (s) => {
   return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
 };
 
+/* Susun penumpang urut tampil (urutan kursi terpilih) lalu selesaikan HP
+   dan titik jemput: baris dengan centang "Apakah No. HP sama?" mewarisi HP
+   baris PERTAMA; baris dengan centang "Apakah titik jemput sama?" mewarisi
+   titik baris pertama (tidak berantai) — termasuk alamat + koordinat rumah
+   bila baris pertama memilih rumah. Penanda samePhone/samePickup dibuang —
+   hanya penolong form, tidak ikut tersimpan.
+   Umur/jenis kelamin hanya ikut bila terisi (booking lama tetap bentuk sama). */
+const resolvePax = (seatsArr, passengers) => {
+  const list = seatsArr.map((st) => passengers.find((x) => x.seat === st)).filter(Boolean);
+  const firstPhone = String(list[0]?.phone || '').trim();
+  const first = list[0] || {};
+  return list.map((p, i) => {
+    const { samePhone, samePickup, ...rest } = p;
+    const out = { ...rest, phone: i > 0 && samePhone ? firstPhone : String(p.phone || '').trim() };
+    if (i > 0 && samePickup) {
+      out.pickup = first.pickup || '';
+      if (first.pickup === HOME_PICKUP) {
+        out.pickupAddr = String(first.pickupAddr || '').trim();
+        out.pickupCoords = String(first.pickupCoords || '').trim();
+      } else {
+        delete out.pickupAddr;
+        delete out.pickupCoords;
+      }
+    }
+    const umur = Number(p.umur);
+    if (umur >= 1 && umur <= 120) out.umur = umur;
+    if (p.gender) out.gender = String(p.gender);
+    return out;
+  });
+};
+
+/* Modal pemilih titik jemput rumah untuk satu kursi — satu-satunya tempat
+   peta; kartu kursi hanya menampilkan hasilnya (alamat + koordinat).
+   Komponen module-level: modal disimpan sebagai node di context. */
+function HomePickupModal({ seat, addr, coords, center, onDone }) {
+  const { closeModal } = useApp();
+  const [txt, setTxt] = useState(addr || '');
+  const [pin, setPin] = useState(coords || '');
+  return (
+    <div className="p-6">
+      <div className="flex items-center gap-2">
+        <div className="min-w-0">
+          <h3 className="font-extrabold text-[16px]">Titik Jemput Rumah</h3>
+          <div className="text-[12px] font-semibold text-slate-500">Kursi {seat}</div>
+        </div>
+        <div className="flex-1"></div>
+        <button onClick={() => closeModal()} className="text-slate-400 shrink-0"><Icon name="x" className="w-5 h-5" /></button>
+      </div>
+      <input value={txt} onChange={(e) => setTxt(e.target.value)} placeholder="Alamat rumah lengkap (bisa diedit)" className="w-full text-[13px] font-semibold bg-white border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring mt-3" />
+      <div className="mt-2"><MapPicker value={pin} center={center} onChange={setPin} onAddress={(a, force) => setTxt(force || !txt.trim() ? a : txt)} /></div>
+      <div className="text-[11px] font-bold text-slate-400 flex items-center gap-1.5 mt-2"><Icon name="map-pin" className="w-3.5 h-3.5 shrink-0" />Geser pin / ketuk peta — alamat &amp; koordinat terisi otomatis.</div>
+      <div className="flex gap-2 mt-4">
+        <button onClick={() => closeModal()} className="flex-1 bg-slate-100 hover:bg-slate-200 font-extrabold text-[13px] py-3 rounded-2xl">Batal</button>
+        <button onClick={() => onDone(txt, pin)} className="flex-1 bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-[13px] py-3 rounded-2xl">Simpan Titik</button>
+      </div>
+    </div>
+  );
+}
+
 const STEP_LABELS = ['Rute', 'Tanggal', 'Armada', 'Kursi', 'Bayar'];
 
 /* Angka fee platform dibaca klien dari cache; snapshot server hanya diambil
@@ -283,7 +342,7 @@ export function PaymentModal({ booking, onDone }) {
 }
 
 export default function Search() {
-  const { bw, setBw, user, go, toast, refresh, tick, payMethod, setPayMethod, openModal, modal } = useApp();
+  const { bw, setBw, user, go, toast, refresh, tick, payMethod, setPayMethod, openModal, closeModal, modal } = useApp();
   void tick;
   /* Bulan yang dipandang pada langkah "Pilih Tanggal" (kunci y*12+m).
      null = turunkan dari tanggal yang sudah terpilih supaya kartu yang
@@ -479,11 +538,32 @@ export default function Search() {
             : 'Cek kursi ' + gate + ' belum lulus — ketuk Cek Ulang', 'warn');
         }
       }
-      const bad = bw.seats.some((st) => { const p = bw.passengers.find((x) => x.seat === st); return !p || !p.name || !p.phone; });
-      if (bad) return toast('Lengkapi nama & HP semua penumpang', 'warn');
-      if (bw.pickup === HOME_PICKUP) {
-        if (!bw.pickupAddr.trim()) return toast('Isi alamat jemput rumah', 'warn');
-        if (!validCoords(bw.pickupCoords)) return toast('Tentukan titik jemput di peta dulu', 'warn');
+      /* HP & titik jemput baris tercentang "sama" diwarisi baris pertama
+         oleh resolvePax — validasi menyaring hasil akhir, bukan isi mentah
+         form. */
+      const rPax = resolvePax(bw.seats, bw.passengers);
+      const bad = rPax.some((p) => !p.name || !p.phone
+        || !(p.umur >= 1 && p.umur <= 120) || !['Laki-laki', 'Perempuan'].includes(p.gender));
+      if (bad) return toast('Lengkapi nama, HP, umur & jenis kelamin semua penumpang', 'warn');
+      /* Titik jemput per kursi: semua kursi wajib punya pilihan — rute tanpa
+         daftar titik dikecualikan (mengikuti aturan form pengemudi). Jemput
+         rumah PER KURSI: tiap kursi yang memilih (atau mewarisi) rumah wajib
+         punya alamat + pin peta. */
+      const noTitik = pickupOptions(currentRoute).length === 0;
+      if (!noTitik && rPax.some((p) => !p.pickup)) {
+        return toast('Pilih titik jemput semua penumpang', 'warn');
+      }
+      const homeSeats = noTitik
+        ? (currentRoute.homePickup !== false ? bw.seats : [])
+        : rPax.filter((p) => p.pickup === HOME_PICKUP).map((p) => p.seat);
+      const badHome = homeSeats.find((st) => {
+        const hp = rPax.find((x) => x.seat === st) || {};
+        return !String(hp.pickupAddr || '').trim() || !validCoords(hp.pickupCoords);
+      });
+      if (badHome) {
+        const hp = rPax.find((x) => x.seat === badHome) || {};
+        if (!String(hp.pickupAddr || '').trim()) return toast('Isi alamat jemput rumah kursi ' + badHome, 'warn');
+        return toast('Tentukan pin peta jemput rumah kursi ' + badHome, 'warn');
       }
       /* Cek server TIDAK diulang di sini — cek sudah berlaku saat klik
          kursi (semua kursi terpilih dinilai dalam jawaban yang sama).
@@ -524,7 +604,11 @@ export default function Search() {
       const maxS = schedSeatCap(bw.scheduleId);
       if (bw.seats.length >= maxS) { toast('Maksimal ' + maxS + ' kursi per booking', 'warn'); return; }
       setBw((cur) => {
-        const passengers = cur.passengers.some((p) => p.seat === st) ? cur.passengers : [...cur.passengers, { seat: st, name: '', phone: '' }];
+        /* Kursi kedua dst: default tercentang "Apakah No. HP sama?" dan
+           "Apakah titik jemput sama?" — keduanya mengikuti baris pertama
+           sampai centang dilepas (cur.seats masih belum memuat kursi baru,
+           jadi length > 0 = kursi kedua dst). */
+        const passengers = cur.passengers.some((p) => p.seat === st) ? cur.passengers : [...cur.passengers, { seat: st, name: '', phone: '', ...(cur.seats.length ? { samePhone: true, samePickup: true } : {}) }];
         return { ...cur, seats: cur.seats.includes(st) ? cur.seats : [...cur.seats, st], passengers };
       });
       /* Ponsel: gulir SEKALI saja — tepat saat kursi pertama dipilih (dari
@@ -548,6 +632,14 @@ export default function Search() {
     if (!p) { p = { seat, name: '', phone: '' }; passengers.push(p); }
     p[f] = val;
     setBw({ ...bw, passengers });
+  };
+
+  /* Simpan hasil modal titik rumah: alamat + koordinat ditulis SEKALI dengan
+     setBw fungsional (dua field — dua setPax non-fungsional akan saling
+     menimpa), lalu modal ditutup. */
+  const saveHomePickup = (seat, addr, coords) => {
+    setBw((cur) => ({ ...cur, passengers: cur.passengers.map((p) => (p.seat === seat ? { ...p, pickupAddr: addr, pickupCoords: coords } : p)) }));
+    closeModal();
   };
 
   const applyVoucher = () => {
@@ -619,12 +711,25 @@ export default function Search() {
     const sub = fareCreate.subtotal;
     const total = fareCreate.total;
     const code = 'TA-' + Math.random().toString(36).slice(2, 7).toUpperCase();
-    const isHome = bw.pickup === HOME_PICKUP;
-    const pickupLabel = isHome ? 'Rumah: ' + bw.pickupAddr.trim() : bw.pickup || pickupOptions(routeById(s.routeId))[0] || '';
+    /* Titik jemput final per penumpang dari resolvePax (warisan "sama" sudah
+       diisi): rumah = label alamat MILIK KURSI itu + koordinatnya. Rute tanpa
+       daftar titik: paksa rumah bila tersedia (perilaku lama), selain itu '-'.
+       Penanda form (pickupAddr) dibuang dari simpanan. */
+    const sRoute = routeById(s.routeId);
+    const homeForced = pickupOptions(sRoute).length === 0 && sRoute.homePickup !== false;
+    const finalPax = resolvePax(bw.seats, bw.passengers);
     const booking = {
       id: uid('BK'), code, scheduleId: s.id, userEmail: user.email,
-      passengers: bw.passengers.filter((p) => bw.seats.includes(p.seat)).map((p) => ({ ...p, pickup: pickupLabel, pickupCoords: isHome ? bw.pickupCoords.trim() : '' })),
-      pickupCoords: isHome ? bw.pickupCoords.trim() : '',
+      passengers: finalPax.map((p) => {
+        const isHomeSeat = homeForced || p.pickup === HOME_PICKUP;
+        const { pickupAddr, ...rest } = p;
+        return {
+          ...rest,
+          pickup: isHomeSeat ? 'Rumah: ' + String(pickupAddr || '').trim() : (p.pickup || '-'),
+          pickupCoords: isHomeSeat ? String(p.pickupCoords || '').trim() : '',
+        };
+      }),
+      pickupCoords: (homeForced || finalPax.some((p) => p.pickup === HOME_PICKUP)) ? String((finalPax.find((p) => homeForced || p.pickup === HOME_PICKUP) || {}).pickupCoords || '').trim() : '',
       seats: [...bw.seats], subtotal: sub, discount, total, status: 'pending', payMethod,
       voucher: bw.voucher ? String(bw.voucher).toUpperCase() : '',
       createdAt: new Date().toISOString(), paidAt: null, holdExpiry: new Date(Date.now() + 5 * 60 * 1000).toISOString(), tripStatus: 'scheduled',
@@ -841,7 +946,44 @@ export default function Search() {
     const v = vehicleById(s.vehicleId);
     const r = routeById(s.routeId);
     const layout = vehLayout(v);
-    const pickup = bw.pickup || (pickupOptions(r)[0] || HOME_PICKUP);
+    /* Titik jemput kini per kursi (pilihan di kartu masing-masing) — jemput
+       rumah juga per kursi: pilih lewat MODAL (peta hanya di modal), kartu
+       menampilkan hasilnya. Rute tanpa daftar titik: paksa rumah bila
+       tersedia, selain itu bebas. */
+    const noTitik = pickupOptions(r).length === 0;
+    /* Buka modal titik rumah satu kursi — membawa alamat/koordinat yang
+       sudah ada agar bisa diedit; Simpan menulis keduanya sekali tulis. */
+    const openHome = (st) => {
+      const hp = bw.passengers.find((x) => x.seat === st) || {};
+      openModal(<HomePickupModal seat={st} addr={hp.pickupAddr || ''} coords={hp.pickupCoords || ''} center={CITY_COORDS[r.from]} onDone={(a, c) => saveHomePickup(st, a, c)} />);
+    };
+    /* Field alamat rumah per kursi — hasil modal, peta TIDAK tampil di kartu:
+       terisi → ringkasan alamat + koordinat + "Ubah"; kosong → kotak kuning
+       yang diketuk untuk membuka modal. */
+    const homeField = (st, p) => (String(p.pickupAddr || '').trim() && validCoords(p.pickupCoords) ? (
+      <button type="button" onClick={() => openHome(st)} className="col-span-2 text-left bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 active:scale-[.99] transition">
+        <div className="flex items-start gap-1.5"><Icon name="map-pin" className="w-3.5 h-3.5 shrink-0 mt-0.5 text-sky-600" /><span className="flex-1 min-w-0 text-[12.5px] font-bold text-slate-700 break-words">{String(p.pickupAddr).trim()}</span></div>
+        <div className="text-[11px] font-semibold text-slate-400 mt-0.5 pl-5">{p.pickupCoords} • <span className="text-sky-600 font-bold">Ubah</span></div>
+      </button>
+    ) : (
+      <button type="button" onClick={() => openHome(st)} className="col-span-2 text-left text-[12px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 flex items-center gap-1.5 active:scale-[.99] transition">
+        <Icon name="map-pin" className="w-3.5 h-3.5 shrink-0" />Alamat rumah belum diisi — ketuk untuk pilih di peta
+      </button>
+    ));
+    /* Status kelengkapan satu kursi — ATURAN SAMA PERSIS dengan validasi
+       Lanjut (nama, HP, umur 1–120, jenis kelamin, titik jemput, alamat+pin
+       rumah bila memilih/mewarisi rumah), dihitung dari hasil resolvePax.
+       Dipakai badge kepala kartu: hijau "Lengkap" / kuning "Belum lengkap". */
+    const rPax4 = resolvePax(bw.seats, bw.passengers);
+    const seatDone = (st) => {
+      const rp = rPax4.find((x) => x.seat === st) || {};
+      const isHome = noTitik ? r.homePickup !== false : rp.pickup === HOME_PICKUP;
+      return !!String(rp.name || '').trim() && !!String(rp.phone || '').trim()
+        && Number(rp.umur) >= 1 && Number(rp.umur) <= 120
+        && ['Laki-laki', 'Perempuan'].includes(rp.gender)
+        && (noTitik || !!rp.pickup)
+        && (!isHome || (String(rp.pickupAddr || '').trim() && validCoords(rp.pickupCoords)));
+    };
     return (
       <div className="grid md:grid-cols-2 gap-5">
         <div><h3 className="font-extrabold text-[16px]">Pilih Kursi <span className="text-[12px] font-semibold text-slate-400">— {layout.filter((c) => c.type === 'seat').length} penumpang</span></h3>
@@ -858,14 +1000,32 @@ export default function Search() {
             <div className="mt-3 bg-amber-50 border border-amber-200 rounded-2xl p-4 text-[13px] font-semibold text-amber-800 flex gap-2"><Icon name="mouse-pointer-click" className="w-5 h-5 shrink-0" />Klik kursi hijau pada layout armada untuk memilih. 1 akun bisa pesan beberapa kursi sekaligus.</div>
           ) : (
             <>
-              <div className="space-y-2.5 mt-3">{bw.seats.map((st) => (
-                <div key={st} className="bg-slate-50 border border-slate-200 rounded-2xl p-3">
-                  <div className="flex items-center justify-between"><span className="badge bg-sky-600 text-white">Kursi {st}</span><button onClick={() => setBw({ ...bw, seats: bw.seats.filter((x) => x !== st), passengers: bw.passengers.filter((p) => p.seat !== st) })} className="text-red-500 hover:bg-red-50 p-1 rounded-lg"><Icon name="x" className="w-4 h-4" /></button></div>
+              <div className="space-y-2.5 mt-3">{bw.seats.map((st, si) => {
+                /* p = data penumpang kursi ini; si = urutan tampil (0 = baris
+                   pertama — acuan "No. HP sama?" untuk baris di bawahnya). */
+                const p = bw.passengers.find((x) => x.seat === st) || {};
+                return (
+                <div key={st} className="bg-white border border-slate-200 rounded-2xl shadow-sm p-3">
+                  {/* Kepala kartu: avatar kursi + nomor urut penumpang + status
+                     kelengkapan (aturan sama dengan tombol Lanjut) + lepaskan. */}
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-500 to-[#0b2447] text-white font-extrabold text-[13px] flex items-center justify-center shrink-0">{st}</div>
+                    <div className="min-w-0 flex-1">
+                      <div className="font-extrabold text-[13.5px] leading-tight">Penumpang {si + 1}</div>
+                      <div className="text-[11px] font-semibold text-slate-400">Kursi {st}</div>
+                    </div>
+                    {seatDone(st) ? (
+                      <span className="badge bg-green-100 text-green-700 shrink-0"><Icon name="circle-check-big" className="w-3 h-3" />Lengkap</span>
+                    ) : (
+                      <span className="badge bg-amber-100 text-amber-700 shrink-0"><Icon name="circle-alert" className="w-3 h-3" />Belum lengkap</span>
+                    )}
+                    <button onClick={() => setBw({ ...bw, seats: bw.seats.filter((x) => x !== st), passengers: bw.passengers.filter((p) => p.seat !== st) })} className="text-red-500 hover:bg-red-50 p-1 rounded-lg shrink-0" title="Lepas kursi"><Icon name="x" className="w-4 h-4" /></button>
+                  </div>
                   {seatChecks[st] === 'checking' ? (
                     /* Cek server berjalan: field [Nama]/[No. HP] BARU muncul
                        setelah cek lulus — tidak ada ketikan yang bisa hilang
                        saat hasil mengembalikan kursi tutup otomatis. */
-                    <div className="flex items-center gap-2 mt-2 text-[12.5px] font-bold text-slate-500 bg-white border border-slate-200 rounded-xl px-3 py-2.5">
+                    <div className="flex items-center gap-2 mt-2 text-[12.5px] font-bold text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5">
                       <Icon name="timer" className="w-4 h-4 shrink-0 animate-spin" />Memeriksa kursi {st} di server…
                     </div>
                   ) : seatChecks[st] === 'fail' ? (
@@ -882,26 +1042,99 @@ export default function Search() {
                     </div>
                   ) : (
                     <div className="grid grid-cols-2 gap-2 mt-2">
-                      <input placeholder="Nama penumpang" value={((bw.passengers.find((p) => p.seat === st) || {}).name || '')} onChange={(e) => setPax(st, 'name', e.target.value)} className="text-[13px] font-semibold bg-white border border-slate-200 rounded-xl px-3 py-2 focus-ring" />
-                      <input placeholder="No. HP" value={((bw.passengers.find((p) => p.seat === st) || {}).phone || '')} onChange={(e) => setPax(st, 'phone', e.target.value)} className="text-[13px] font-semibold bg-white border border-slate-200 rounded-xl px-3 py-2 focus-ring" />
+                      <div className={(si === 0 ? '' : 'col-span-2 ') + 'relative'}>
+                        <Icon name="user-round" className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <input placeholder="Nama penumpang" value={p.name || ''} onChange={(e) => setPax(st, 'name', e.target.value)} className="w-full text-[13px] font-semibold bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 focus-ring" />
+                      </div>
+                      {si === 0 ? (
+                        <div className="relative">
+                          <Icon name="phone" className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                          <input placeholder="No. HP" value={p.phone || ''} onChange={(e) => setPax(st, 'phone', e.target.value)} className="w-full text-[13px] font-semibold bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 focus-ring" />
+                        </div>
+                      ) : (
+                        /* Satu field gabungan: pertanyaan + kotak centang.
+                           Kolom No. HP muncul DI DALAM field yang sama saat
+                           centang dilepas; tercentang = HP ikut baris pertama
+                           (kolom disembunyikan). */
+                        <div className="col-span-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+                          <label className="flex items-center gap-2 cursor-pointer select-none">
+                            <input type="checkbox" checked={!!p.samePhone} onChange={(e) => setPax(st, 'samePhone', e.target.checked)} className="w-4 h-4 accent-sky-600 shrink-0" />
+                            <span className="text-[12.5px] font-semibold text-slate-600">Apakah No. HP sama?</span>
+                          </label>
+                          {!p.samePhone ? (
+                            <div className="relative mt-1.5">
+                              <Icon name="phone" className="w-4 h-4 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                              <input placeholder="No. HP" value={p.phone || ''} onChange={(e) => setPax(st, 'phone', e.target.value)} className="w-full text-[13px] font-semibold bg-white border border-slate-200 rounded-lg pl-8 pr-2.5 py-1.5 focus-ring" />
+                            </div>
+                          ) : null}
+                        </div>
+                      )}
+                      <div>
+                        <div className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wide mb-1">Umur</div>
+                        <input placeholder="cth. 34" type="number" min="1" max="120" value={p.umur ?? ''} onChange={(e) => setPax(st, 'umur', e.target.value)} className="w-full text-[13px] font-semibold bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 focus-ring" />
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wide mb-1">Jenis kelamin</div>
+                        <select value={p.gender || ''} onChange={(e) => setPax(st, 'gender', e.target.value)} className="w-full text-[13px] font-semibold bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 focus-ring">
+                          <option value="">Pilih…</option>
+                          <option value="Laki-laki">Laki-laki</option>
+                          <option value="Perempuan">Perempuan</option>
+                        </select>
+                      </div>
+                      {noTitik ? (
+                        r.homePickup !== false ? (
+                          /* Rute tanpa daftar titik: rumah dipaksa — pilih
+                             lewat modal (peta hanya di modal). */
+                          <>
+                            <div className="col-span-2 text-[11.5px] font-semibold text-slate-500 bg-slate-100 rounded-xl px-3 py-2">Rute belum punya daftar titik — penumpang dijemput di rumah.</div>
+                            {homeField(st, p)}
+                          </>
+                        ) : (
+                          <div className="col-span-2 text-[11.5px] font-semibold text-slate-500 bg-slate-100 rounded-xl px-3 py-2">Rute ini belum punya daftar titik jemput.</div>
+                        )
+                      ) : si === 0 ? (
+                        <>
+                          <div className="col-span-2 relative">
+                            <Icon name="map-pin" className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                            <select value={p.pickup || ''} onChange={(e) => { setPax(st, 'pickup', e.target.value); if (e.target.value === HOME_PICKUP) openHome(st); }} className="w-full text-[13px] font-semibold bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 focus-ring">
+                              <option value="">— Pilih titik jemput —</option>
+                              {pickupOptions(r).map((pt) => (<option key={pt} value={pt}>{pt}</option>))}
+                              {r.homePickup !== false ? <option value={HOME_PICKUP}>Jemput di rumah</option> : null}
+                            </select>
+                          </div>
+                          {p.pickup === HOME_PICKUP ? homeField(st, p) : null}
+                        </>
+                      ) : (
+                        /* Kursi ke-2 dst: satu kotak gabungan — centang
+                           "Apakah titik jemput sama?" (default tercentang =
+                           ikut baris pertama, dihitung resolvePax); dilepas →
+                           dropdown muncul DI DALAM kotak yang sama. Warisan
+                           rumah ikut membawa alamat + koordinat baris-1. */
+                        <div className="col-span-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+                          <label className="flex items-center gap-2 cursor-pointer select-none">
+                            <input type="checkbox" checked={!!p.samePickup} onChange={(e) => setPax(st, 'samePickup', e.target.checked)} className="w-4 h-4 accent-sky-600 shrink-0" />
+                            <span className="text-[12.5px] font-semibold text-slate-600">Apakah titik jemput sama?</span>
+                          </label>
+                          {!p.samePickup ? (
+                            <>
+                              <div className="relative mt-1.5">
+                                <Icon name="map-pin" className="w-4 h-4 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                                <select value={p.pickup || ''} onChange={(e) => { setPax(st, 'pickup', e.target.value); if (e.target.value === HOME_PICKUP) openHome(st); }} className="w-full text-[13px] font-semibold bg-white border border-slate-200 rounded-lg pl-8 pr-2.5 py-1.5 focus-ring">
+                                  <option value="">— Pilih titik jemput —</option>
+                                  {pickupOptions(r).map((pt) => (<option key={pt} value={pt}>{pt}</option>))}
+                                  {r.homePickup !== false ? <option value={HOME_PICKUP}>Jemput di rumah</option> : null}
+                                </select>
+                              </div>
+                              {p.pickup === HOME_PICKUP ? homeField(st, p) : null}
+                            </>
+                          ) : null}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
-              ))}</div>
-              <label className="block text-[12px] font-extrabold mt-3 mb-1">TITIK JEMPUT (wilayah {r.from})</label>
-              <select value={pickup} onChange={(e) => setBw({ ...bw, pickup: e.target.value })} className="w-full text-[13px] font-semibold bg-white border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring">{pickupOptions(r).map((p) => (<option key={p} value={p}>{p}</option>))}{r.homePickup !== false ? <option value={HOME_PICKUP}>Jemput di rumah (isi alamat + pin peta)</option> : null}</select>
-              {pickup === HOME_PICKUP ? (
-                <div className="grid grid-cols-1 gap-2 mt-2">
-                  <input value={bw.pickupAddr} onChange={(e) => setBw({ ...bw, pickupAddr: e.target.value })} placeholder="Alamat rumah lengkap (bisa diedit)" className="text-[13px] font-semibold bg-white border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-ring" />
-                  <MapPicker
-                    value={bw.pickupCoords}
-                    center={CITY_COORDS[r.from]}
-                    onChange={(v) => setBw((cur) => ({ ...cur, pickupCoords: v }))}
-                    onAddress={(txt, force) => setBw((cur) => (force || !cur.pickupAddr.trim() ? { ...cur, pickupAddr: txt } : cur))}
-                  />
-                  <div className="text-[11px] font-bold text-slate-400 flex items-center gap-1.5"><Icon name="map-pin" className="w-3.5 h-3.5 shrink-0" />Geser pin / ketuk peta untuk menaruh titik jemput — koordinat &amp; alamat terisi otomatis.</div>
-                </div>
-              ) : null}
+                );
+              })}</div>
             </>
           )}
         </div>
@@ -920,6 +1153,18 @@ export default function Search() {
     const total = _fare.total;
     const schedAgency = schedById(bw.scheduleId)?.agencyId || '';
     const vouchers = DB.load('vouchers', []).filter((x) => x.active && (!x.agencyId || String(x.agencyId) === String(schedAgency)));
+    /* Ringkasan jemput per kursi dari resolvePax (warisan "sama" sudah
+       diisi): satu titik bila semua sama; "beragam" bila kursi memilih
+       titik/alamat berbeda. Rute tanpa daftar titik: rumah dipaksa. */
+    const homeForced5 = pickupOptions(r).length === 0 && r.homePickup !== false;
+    const rPax5 = resolvePax(bw.seats, bw.passengers);
+    const pickupLabels = rPax5.map((p) => {
+      const isHomeSeat = homeForced5 || p.pickup === HOME_PICKUP;
+      return isHomeSeat ? 'Rumah: ' + String(p.pickupAddr || '').trim() : (p.pickup || '-');
+    });
+    const uniqPickups = [...new Set(pickupLabels)];
+    const anyHome5 = pickupLabels.some((l) => l.startsWith('Rumah:'));
+    const firstHomeCoords = String((rPax5.find((p) => homeForced5 || p.pickup === HOME_PICKUP) || {}).pickupCoords || '').trim();
     return (
       <>
         <h3 className="font-extrabold text-[16px]">Ringkasan &amp; Pembayaran</h3>
@@ -929,7 +1174,7 @@ export default function Search() {
             {ag ? <div className="text-[11.5px] font-extrabold text-indigo-600 mt-0.5">{ag.name}</div> : null}
             <div className="text-[12.5px] font-semibold text-slate-600 mt-1">{fmtDate(s.date)} • {s.time} WIB • {vehName(v)} ({v.plate})</div>
             {s.tripStatus === 'scheduled' && s.delayUntil && new Date(s.delayUntil).getTime() > Date.now() ? <div className="text-[12px] font-extrabold text-amber-700 mt-1">Delay {s.delayMinutes} menit • estimasi {fmtClock(s.delayUntil)}</div> : null}
-            <div className="text-[12.5px] font-semibold text-slate-600">Kursi: <b>{bw.seats.join(', ')}</b> • Jemput: <b>{bw.pickup === HOME_PICKUP ? 'Rumah: ' + bw.pickupAddr : bw.pickup || (pickupOptions(r)[0] || '')}</b>{bw.pickup === HOME_PICKUP && bw.pickupCoords ? <b> ({bw.pickupCoords})</b> : null}</div>
+            <div className="text-[12.5px] font-semibold text-slate-600">Kursi: <b>{bw.seats.join(', ')}</b> • Jemput: <b>{uniqPickups.length === 1 ? (uniqPickups[0] || '-') : 'beragam per kursi'}</b>{anyHome5 && firstHomeCoords ? <b> ({firstHomeCoords})</b> : null}</div>
             <div className="mt-2"><FareChain s={s} fare={_fare} n={bw.seats.length} discLabel={discLabelOf(bw.voucher)} /></div>
             <div className="mt-3"><label className="text-[12px] font-extrabold">KODE VOUCHER</label>
               <div className="flex gap-2 mt-1"><input value={bw.voucher} onChange={(e) => setBw({ ...bw, voucher: e.target.value.toUpperCase() })} placeholder="cth: HEMAT20" className="flex-1 text-[13px] font-bold uppercase bg-white border-2 border-slate-200 rounded-xl px-3 py-2 focus-ring" /><button onClick={applyVoucher} className="bg-[#0b2447] text-white text-[12px] font-extrabold px-4 rounded-xl">Pakai</button></div>

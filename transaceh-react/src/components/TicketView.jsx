@@ -39,6 +39,10 @@ export function TicketView({ bid }) {
   const pax = bookedPassengers(b);
   const firstPax = pax[0] || null;
   const pickupText = (pickupOf(firstPax, b) || '-') + ((firstPax?.pickupCoords || b.pickupCoords) ? ' • ' + (firstPax?.pickupCoords || b.pickupCoords) : '');
+  /* Titik jemput kini per penumpang: bila label kursi berbeda (mis. satu
+     dijemput di rumah, lainnya di titik), baris "Jemput" membuka daftar per
+     kursi. Booking lama selalu kasus satu titik — tampilannya tak berubah. */
+  const pickupUniq = [...new Set(pax.map((p) => pickupOf(p, b) || '-'))];
   const mt = maintenanceBookingInfo(b);
   const mtActive = mt?.state === 'choice_pending';
   const qrInvalid = !!mt && mt.state !== 'replaced';
@@ -62,7 +66,18 @@ export function TicketView({ bid }) {
         <div className="mt-4 bg-slate-50 rounded-2xl p-3.5 text-[13px] font-semibold space-y-1">
           <div className="font-extrabold text-[12px] text-slate-400 tracking-wider">PENUMPANG</div>
           {pax.length ? pax.map((p) => (<div key={p.seat} className="flex justify-between border-t border-slate-200 pt-1.5"><span>{p.name} <span className="text-slate-400">({p.phone})</span></span><span className="badge bg-sky-600 text-white">{p.seat}</span></div>)) : <div className="border-t border-slate-200 pt-1.5 text-slate-400">Data penumpang tidak tersedia</div>}
-          <div className="flex justify-between border-t pt-1.5"><span>Jemput</span><b>{pickupText}</b></div>
+          {pickupUniq.length > 1 ? (
+            /* Beragam: daftar jemput per kursi — koordinat disembunyikan agar
+               rapi (label rumah sudah memuat alamatnya). */
+            <div className="border-t pt-1.5">
+              <div>Jemput</div>
+              <div className="mt-1 space-y-0.5 pl-3">
+                {pax.map((p) => (<div key={p.seat} className="text-[12.5px]"><b>Kursi {p.seat}</b><span className="text-slate-400"> — </span>{pickupOf(p, b) || '-'}</div>))}
+              </div>
+            </div>
+          ) : (
+            <div className="flex justify-between border-t pt-1.5"><span>Jemput</span><b>{pickupText}</b></div>
+          )}
           <div className="flex justify-between"><span>Travel</span><b>{ag.name} • {ag.phone}</b></div>
           {isB ? (
             <div className="mt-2 pt-1"><FareChain s={s} fare={qB} n={(b.seats || []).length} discLabel={discLabelOf(b.voucher || b.voucherCode)} showTotal={false} /></div>

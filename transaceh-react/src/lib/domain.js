@@ -2694,8 +2694,14 @@ export function createDriverBooking(sid, { passengers = [], seats = [], driverId
       name: String(p.name || '').trim() || 'Penumpang',
       phone: String(p.phone || '').trim() || '-',
       seat: seats[i],
-      pickup: pickupPoint,
-      pickupCoords: '',
+      /* Titik jemput per penumpang — bila baris tidak membawanya (panggilan
+         lama), jatuh ke fallback pickupPoint seperti semula. */
+      pickup: String(p.pickup || '').trim() || pickupPoint,
+      pickupCoords: String(p.pickupCoords || '').trim(),
+      /* Umur (1–120) & jenis kelamin ikut bila terisi — baris tanpa field
+         (panggilan/uji lama) tetap bentuk sama seperti sebelumnya. */
+      ...(Number(p.umur) >= 1 && Number(p.umur) <= 120 ? { umur: Number(p.umur) } : {}),
+      ...(p.gender ? { gender: String(p.gender) } : {}),
     })),
     seats,
     subtotal: Math.max(0, Number(fare.subtotal) || 0),

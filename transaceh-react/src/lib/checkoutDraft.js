@@ -7,6 +7,7 @@
 import { DB } from '@/lib/db.js';
 import { todayStr } from '@/lib/utils.js';
 import { schedById, schedReady, takenSeats, routeById, isRouteSuspended, routeBookable } from '@/lib/domain.js';
+import { HOME_PICKUP } from './pickups.js';
 
 const KEY_RAW = 'at_checkout_draft';
 const TTL_MS = 30 * 60 * 1000;
@@ -76,6 +77,19 @@ export function resumeCheckout() {
     notices.push('Kursi ' + clash.join(', ') + ' sudah terisi — silakan pilih kursi lain.');
   }
   if (!draft.seats.length && draft.step >= 4) draft.step = 4;
+
+  /* Draft lama (sebelum titik jemput per-kursi): nilai tunggal bw.pickup
+     dipakai mengisi semua kursi agar tamu tidak memilih ulang dari nol. */
+  if (draft.pickup && draft.passengers.some((p) => !p.pickup)) {
+    draft.passengers = draft.passengers.map((p) => ({ ...p, pickup: p.pickup || draft.pickup }));
+  }
+  /* Alamat rumah lama BERSAMA → disalin ke tiap kursi yang memilih rumah
+     (kini alamat + pin peta milik masing-masing kursi). */
+  if (draft.pickupAddr && draft.passengers.some((p) => p.pickup === HOME_PICKUP)) {
+    draft.passengers = draft.passengers.map((p) => (p.pickup === HOME_PICKUP
+      ? { ...p, pickupAddr: p.pickupAddr || draft.pickupAddr, pickupCoords: p.pickupCoords || draft.pickupCoords || '' }
+      : p));
+  }
 
   return { draft, notices };
 }
