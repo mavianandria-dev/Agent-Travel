@@ -1,8 +1,10 @@
+import { Fragment, useState } from 'react';
 import { useApp } from '@/store/AppContext.jsx';
 import { DB } from '@/lib/db.js';
-import { agencyOf, routeById, schedById, viaSopirOf } from '@/lib/domain.js';
+import { agencyOf, driverById, routeById, schedById, viaSopirOf } from '@/lib/domain.js';
 import { fmtRp } from '@/lib/utils.js';
-import { StatCard, Icon } from '@/components/ui.jsx';
+import { StatCard, Icon, Empty } from '@/components/ui.jsx';
+import DriverLedgerTable from '@/components/DriverLedgerTable.jsx';
 import { ManifestModal } from './Bookings.jsx';
 import { TicketView } from '@/components/TicketView.jsx';
 
@@ -52,6 +54,10 @@ export default function Finance({ ag, st }) {
   const { user, toast, tick, openModal } = useApp();
   void tick;
   void st;
+  /* Menu export (Excel/PDF) terbuka-tutup — satu tombol ikon printer. */
+  const [expMenu, setExpMenu] = useState(false);
+  /* Kartu rincian tiket "terselip" — satu keberangkatan terbuka sekali. */
+  const [openLedger, setOpenLedger] = useState(null);
   const agency = ag || agencyOf(user);
   if (!agency) return <div className="bg-white rounded-3xl shadow-card p-5 text-center font-bold text-slate-400">Data travel tidak ditemukan</div>;
 
@@ -94,6 +100,20 @@ export default function Finance({ ag, st }) {
   };
   groups.sort((a, b) => depKey(b).localeCompare(depKey(a)));
 
+  /* Riwayat pencairan TIKET pengemudi agensi ini — mirror tabel Settlement
+     admin DITAMBAH status belum cair: ditahan + layak + dicairkan (void
+     sudah tersaring di ledger), satu baris per keberangkatan, urut
+     keberangkatan terbaru di atas (depKey di atas). */
+  const driverRows = ledger.slice().sort((a, b) => (b.paidOutAt || b.releasedAt || b.createdAt || '').localeCompare(a.paidOutAt || a.releasedAt || a.createdAt || ''));
+  const depGroups = [];
+  const seenSched = {};
+  driverRows.forEach((e) => {
+    const sid = String(e.scheduleId || '');
+    if (!seenSched[sid]) { seenSched[sid] = { sid, items: [] }; depGroups.push(seenSched[sid]); }
+    seenSched[sid].items.push(e);
+  });
+  depGroups.sort((a, b) => depKey(b).localeCompare(depKey(a)));
+
   const exportCSV = () => {
     let csv = 'Kode,Kursi,Rute,Tanggal,Jam,Tiket,Jasa,Fee,Total,Status\n';
     active.forEach((e) => {
@@ -130,8 +150,20 @@ export default function Finance({ ag, st }) {
           <span className="badge bg-red-100 text-red-600 shrink-0">Rekening kosong</span>
         )}
         <div className="flex-1"></div>
-        <button onClick={exportCSV} className="bg-green-500 text-white text-[12px] font-extrabold px-4 py-2 rounded-xl">Export Excel</button>
-        <button onClick={() => window.print()} className="bg-slate-100 text-[12px] font-extrabold px-4 py-2 rounded-xl">Export PDF</button></div>
+        {/* Satu tombol ikon printer — menu kecil berisi kedua export
+            (Excel CSV unduh, PDF lewat dialog cetak). Klik di luar menutup. */}
+        <div className="relative shrink-0">
+          <button onClick={() => setExpMenu((v) => !v)} title="Export laporan" className="bg-slate-100 hover:bg-slate-200 p-2.5 rounded-xl flex items-center"><Icon name="printer" className="w-4 h-4 text-slate-600" /></button>
+          {expMenu ? (
+            <>
+              <div className="fixed inset-0 z-30" onClick={() => setExpMenu(false)} />
+              <div className="absolute right-0 top-full mt-1.5 w-44 bg-white border-2 border-slate-100 rounded-2xl shadow-pop p-1.5 z-40">
+                <button onClick={() => { setExpMenu(false); exportCSV(); }} className="w-full flex items-center gap-2 text-[12.5px] font-bold px-3 py-2.5 rounded-xl hover:bg-slate-50 text-left"><Icon name="file-spreadsheet" className="w-4 h-4 text-green-600 shrink-0" />Excel (CSV)</button>
+                <button onClick={() => { setExpMenu(false); window.print(); }} className="w-full flex items-center gap-2 text-[12.5px] font-bold px-3 py-2.5 rounded-xl hover:bg-slate-50 text-left"><Icon name="file-text" className="w-4 h-4 text-sky-600 shrink-0" />PDF / Cetak</button>
+              </div>
+            </>
+          ) : null}
+        </div></div>
         <div className="overflow-x-auto mt-2"><table className="data w-full min-w-[780px]"><thead><tr><th>Manifest</th><th>Rute</th><th>Nominal Jasa</th><th>Komisi Sopir</th><th>Jasa Bersih</th><th>Tgl Cair / Status</th></tr></thead><tbody>
           {groups.map((g) => {
             const s = schedById(g.sid);
@@ -162,6 +194,63 @@ export default function Finance({ ag, st }) {
           })}
         </tbody></table></div>
         {groups.length === 0 ? <p className="text-[12.5px] text-slate-400 font-semibold mt-3">Belum ada transaksi jasa — baris muncul saat ada tiket lunas.</p> : null}</div>
+
+      {/* Mirror tabel "Riwayat Pencairan Pengemudi (Tiket)" Settlement admin,
+          difilter ke pengemudi agensi ini (ledger.agencyId). Baris per
+          keberangkatan; klik baris → kartu rincian per tiket terselip. */}
+      <div className="bg-white rounded-3xl shadow-card p-5 mt-4">
+        <h3 className="font-extrabold text-[16px] flex items-center gap-2"><Icon name="hand-coins" className="w-5 h-5 text-sky-600" />Riwayat Pencairan Pengemudi (Tiket)</h3>
+        <p className="text-[12px] text-slate-500 font-medium mt-1">Pencairan berjalan <b>otomatis</b>: begitu bus tiba, dana tiket langsung tercatat terkirim ke rekening pengemudi. Tidak ada tombol — laporan ini bukti siapa sudah berhak berapa. Komisi via sopir (50% jasa untuk tiket jualan langsung) tampil di kolomnya sendiri. Baris <b>Ditahan</b> = tiket sudah lunas tapi bus belum tiba.</p>
+        <div className="table-wrap mt-3"><table className="data w-full min-w-[860px]"><thead><tr>
+          <th>Rute</th><th>Pengemudi / Bank</th><th>Total Nominal Tiket</th><th>Total Komisi Via Sopir</th><th>Total Bersih</th><th>Tgl Cair / Status</th>
+        </tr></thead><tbody>
+          {depGroups.map((g) => {
+            const s = schedById(g.sid);
+            const r = s ? routeById(s.routeId) : null;
+            const first = g.items[0];
+            const d = first.driverId ? driverById(first.driverId) : null;
+            const bank = (d?.bank || '').trim();
+            const berangkat = loc(s?.departedAt) || (s ? `${s.date || ''} ${s.time || ''}`.trim() : '');
+            const tiba = loc(s?.arrivedAt || first.releasedAt);
+            const tiket = g.items.reduce((a, e) => a + (Number(e.ticket) || 0), 0);
+            /* Komisi via sopir dijumlah per tiket — helper domain; baris
+               lama dihitung ulang dari bookingnya. */
+            const vs = g.items.reduce((a, e) => a + viaSopirOf(e, bookings), 0);
+            /* Status kelompok: semua dicairkan → Dicairkan + jam terakhir;
+               ada ditahan → Ditahan; sisanya Layak Cair (pola Riwayat Jasa). */
+            const allCair = g.items.every((e) => e.status === 'dicairkan');
+            const anyTahan = g.items.some((e) => e.status === 'ditahan');
+            const badge = allCair ? ['b-done', 'Dicairkan'] : anyTahan ? ['b-pending', 'Ditahan'] : ['b-paid', 'Layak Cair'];
+            const cairAt = allCair ? loc(g.items.map((e) => e.paidOutAt).filter(Boolean).sort().pop()) : '';
+            return (
+              <Fragment key={g.sid || first.id}>
+                <tr onClick={() => setOpenLedger(openLedger === g.sid ? null : g.sid)} className="cursor-pointer hover:bg-sky-50/60 transition">
+                  <td className="text-[12.5px] font-semibold">{r ? `${r.from} → ${r.to}` : '-'}{berangkat ? <span className="block text-[11px] text-slate-400 font-semibold">Berangkat {berangkat}</span> : null}{tiba ? <span className="block text-[11px] text-slate-400 font-semibold">Tiba {tiba}</span> : null}</td>
+                  <td className="text-[12.5px] font-semibold">{d?.name || '-'}<br /><span className="text-slate-400">{bank || ''}</span>{bank ? null : <span className="badge bg-red-100 text-red-600 ml-1">Rekening kosong</span>}</td>
+                  <td className="font-extrabold text-green-700">+{fmtRp(tiket)}</td>
+                  <td className="font-extrabold text-green-700">{vs > 0 ? `+${fmtRp(vs)}` : <span className="text-slate-300">–</span>}</td>
+                  <td className="font-extrabold">{fmtRp(tiket + vs)}</td>
+                  <td><span className={`badge ${badge[0]}`}>{badge[1]}</span>{cairAt ? <span className="block text-[11px] font-bold text-slate-600 mt-0.5">{cairAt}</span> : null}{!allCair && !anyTahan ? <span className="block text-[10px] font-semibold text-sky-600 mt-0.5">Otomatis</span> : null}</td>
+                </tr>
+                {openLedger === g.sid ? (
+                  <tr>
+                    <td colSpan={6} className="bg-slate-50">
+                      <div className="anim bg-white border-2 border-slate-100 rounded-2xl p-4 m-2">
+                        <div className="font-extrabold text-[14px] flex items-center gap-2"><Icon name="ticket" className="w-4 h-4 text-sky-600" />Rincian Tiket — {r ? `${r.from} → ${r.to}` : '-'} · {berangkat || '-'}</div>
+                        {/* Rincian per tiket keberangkatan ini — komponen
+                            bersama dompet pengemudi; kolom berangkat disembunyikan
+                            karena sudah ada di baris induk. */}
+                        <DriverLedgerTable entries={g.items} showBerangkat={false} />
+                      </div>
+                    </td>
+                  </tr>
+                ) : null}
+              </Fragment>
+            );
+          })}
+        </tbody></table></div>
+        {depGroups.length === 0 ? <Empty icon="hand-coins" msg="Belum ada pencairan tiket — baris muncul saat tiket lunas dan bus tiba." /> : null}
+      </div>
       <div className="hidden"><Icon name="wallet" className="w-4 h-4" /></div>
     </div>
   );

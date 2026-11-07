@@ -73,8 +73,10 @@ export default function Settlement() {
   const bookings = DB.load('bookings', []);
 
   /* Laporan TIKET pengemudi: langsung tercatat terkirim begitu tiba (kliring 0). */
+  /* Termasuk yang belum cair (ditahan) — admin melihat penuh: ditahan,
+     layak, dicairkan; void tetap tersaring. */
   const driverRows = ledger
-    .filter((e) => (e.status === 'layak' || e.status === 'dicairkan') && (!agFilter || e.agencyId === agFilter))
+    .filter((e) => (e.status === 'ditahan' || e.status === 'layak' || e.status === 'dicairkan') && (!agFilter || e.agencyId === agFilter))
     .sort((a, b) => (b.paidOutAt || b.releasedAt || b.createdAt || '').localeCompare(a.paidOutAt || a.releasedAt || a.createdAt || ''));
 
   /* Tabel induk: satu baris per keberangkatan (rute + waktu berangkat) —
@@ -222,9 +224,9 @@ export default function Settlement() {
           <h3 className="font-extrabold text-[16px] flex items-center gap-2"><Icon name="hand-coins" className="w-5 h-5 text-sky-600" />Riwayat Pencairan Pengemudi (Tiket)</h3>
           <FilterBar agFilter={agFilter} setAgFilter={setAgFilter} agencies={agencies} />
         </div>
-        <p className="text-[12px] text-slate-500 font-medium mt-1">Pencairan berjalan <b>otomatis</b>: begitu bus tiba, dana tiket langsung tercatat terkirim ke rekening pengemudi. Tidak ada tombol — laporan ini bukti siapa sudah berhak berapa. Komisi via sopir (50% jasa untuk tiket jualan langsung) tampil di kolomnya sendiri.</p>
-        <div className="table-wrap mt-3"><table className="data w-full min-w-[860px]"><thead><tr>
-          <th>Nama Travel</th><th>Rute</th><th>Pengemudi / Bank</th><th>Total Nominal Tiket</th><th>Total Komisi Via Sopir</th><th>Total Bersih</th>
+        <p className="text-[12px] text-slate-500 font-medium mt-1">Pencairan berjalan <b>otomatis</b>: begitu bus tiba, dana tiket langsung tercatat terkirim ke rekening pengemudi. Tidak ada tombol — laporan ini bukti siapa sudah berhak berapa. Komisi via sopir (50% jasa untuk tiket jualan langsung) tampil di kolomnya sendiri. Baris <b>Ditahan</b> = tiket sudah lunas tapi bus belum tiba.</p>
+        <div className="table-wrap mt-3"><table className="data w-full min-w-[980px]"><thead><tr>
+          <th>Nama Travel</th><th>Rute</th><th>Pengemudi / Bank</th><th>Total Nominal Tiket</th><th>Total Komisi Via Sopir</th><th>Total Bersih</th><th>Tgl Cair / Status</th>
         </tr></thead><tbody>
           {depGroups.map((g) => {
             const s = schedById(g.sid);
@@ -239,6 +241,13 @@ export default function Settlement() {
             /* Komisi via sopir dijumlah per tiket — helper domain; baris
                lama dihitung ulang dari bookingnya. */
             const vs = g.items.reduce((a, e) => a + viaSopirOf(e, bookings), 0);
+            /* Status kelompok: semua dicairkan → Dicairkan + jam terakhir;
+               ada ditahan → Ditahan; sisanya Layak Cair (pola halaman
+               Keuangan agen). */
+            const allCair = g.items.every((e) => e.status === 'dicairkan');
+            const anyTahan = g.items.some((e) => e.status === 'ditahan');
+            const badge = allCair ? ['b-done', 'Dicairkan'] : anyTahan ? ['b-pending', 'Ditahan'] : ['b-paid', 'Layak Cair'];
+            const cairAt = allCair ? loc(g.items.map((e) => e.paidOutAt).filter(Boolean).sort().pop()) : '';
             return (
               <Fragment key={g.sid || first.id}>
                 {/* Baris dapat diklik → kartu rincian tiket "terselip"
@@ -250,10 +259,11 @@ export default function Settlement() {
                   <td className="font-extrabold text-green-700">+{fmtRp(tiket)}</td>
                   <td className="font-extrabold text-green-700">{vs > 0 ? `+${fmtRp(vs)}` : <span className="text-slate-300">–</span>}</td>
                   <td className="font-extrabold">{fmtRp(tiket + vs)}</td>
+                  <td><span className={`badge ${badge[0]}`}>{badge[1]}</span>{cairAt ? <span className="block text-[11px] font-bold text-slate-600 mt-0.5">{cairAt}</span> : null}{!allCair && !anyTahan ? <span className="block text-[10px] font-semibold text-sky-600 mt-0.5">Otomatis</span> : null}</td>
                 </tr>
                 {openLedger === g.sid ? (
                   <tr>
-                    <td colSpan={6} className="bg-slate-50">
+                    <td colSpan={7} className="bg-slate-50">
                       <div className="anim bg-white border-2 border-slate-100 rounded-2xl p-4 m-2">
                         <div className="font-extrabold text-[14px] flex items-center gap-2"><Icon name="ticket" className="w-4 h-4 text-sky-600" />Rincian Tiket — {r ? `${r.from} → ${r.to}` : '-'} · {berangkat || '-'}</div>
                         {/* Rincian per tiket keberangkatan ini — desain dompet
